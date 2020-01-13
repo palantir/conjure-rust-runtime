@@ -1,0 +1,49 @@
+[package]
+name = "conjure-runtime"
+version = "0.21.0"
+authors = ["Steven Fackler <sfackler@palantir.com>"]
+edition = "2018"
+license = "Apache-2.0"
+description = "An HTTP client compatible with Conjure-generated services"
+repository = "https://github.com/palantir/conjure-rust-runtime"
+readme = "../README.md"
+
+[dependencies]
+arc-swap = "0.4"
+async-compression = { version = "0.2", default-features = false, features = ["zlib", "gzip", "stream"] }
+async-trait = "0.1"
+base64 = "0.11"
+bytes = "0.5"
+conjure-error = "0.6"
+conjure-http = "0.6"
+conjure-object = "0.6"
+conjure-serde = "0.6"
+futures = "0.3"
+http = "0.2"
+http-body = "0.3"
+http-zipkin = "0.3"
+hyper = "0.13"
+hyper-openssl = "0.8"
+once_cell = "1.0"
+openssl = "0.10"
+parking_lot = "0.10"
+pin-project = "0.4"
+rand = "0.7"
+regex = "1.0"
+serde = "1.0"
+witchcraft-log = "0.2"
+witchcraft-metrics = "0.1"
+tokio = { version = "0.2", features = ["io-util", "rt-threaded", "time"] }
+url = "2.0"
+zipkin = "0.4"
+
+conjure-runtime-config = { version = "0.21.0", path = "../conjure-runtime-config" }
+
+[dev-dependencies]
+tokio = { version = "0.2", features = ["full"] }
+flate2 = "1.0"
+tokio-openssl = "0.4"
+serde_yaml = "0.8"
+
+# for doc examples
+conjure-codegen = { version = "0.6", features = ["example-types"] }

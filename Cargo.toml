@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "conjure-runtime",
+    "conjure-runtime-config",
+    "conjure-verification",
+    "conjure-verification-api",
+]

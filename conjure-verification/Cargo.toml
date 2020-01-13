@@ -1,0 +1,32 @@
+[package]
+name = "conjure-verification"
+version = "0.1.0"
+authors = ["Steven Fackler <sfackler@palantir.com>"]
+edition = "2018"
+publish = false
+
+[lib]
+harness = false
+
+[build-dependencies]
+conjure-serde = "0.6"
+serde_yaml = "0.8"
+heck = "0.3"
+syn = "1.0"
+quote = "1.0"
+proc-macro2 = "1.0"
+
+conjure-verification-api = { path = "../conjure-verification-api" }
+
+[dependencies]
+conjure-verification-api = { path = "../conjure-verification-api" }
+
+[dev-dependencies]
+conjure-object = "0.6"
+conjure-error = "0.6"
+conjure-http = "0.6"
+conjure-serde = "0.6"
+tokio = { version = "0.2", features = ["full"] }
+witchcraft-metrics = "0.1"
+
+conjure-runtime = { path = "../conjure-runtime" }

@@ -1,0 +1,19 @@
+[package]
+name = "conjure-verification-api"
+version = "0.1.0"
+authors = ["Steven Fackler <sfackler@palantir.com>"]
+edition = "2018"
+publish = false
+links = "conjure-verification" # a hack to pass info upstream to conjure-verification's build script
+
+[build-dependencies]
+attohttpc = "0.9"
+conjure-codegen = "0.6"
+flate2 = "1.0"
+serde_json = "1.0"
+tar = "0.4"
+
+[dependencies]
+conjure-error = "0.6"
+conjure-http = "0.6"
+conjure-object = "0.6"
