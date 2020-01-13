@@ -18,7 +18,7 @@
 //!
 //! # Configuration
 //!
-//! While a `conjure-runtime` client's configuration can be built up programmatically, the more common approach is for
+//! While a `conjure_runtime` client's configuration can be built up programmatically, the more common approach is for
 //! the configuration to be deserialized from a service's runtime-reloadable configuration file. The `ServicesConfig`
 //! supports configuration for multiple downstream services, as well as allowing for both global and per-service
 //! configuration overrides:
@@ -44,7 +44,7 @@
 //!
 //! # Usage
 //!
-//! First construct a raw `conjure-runtime::Client`:
+//! First construct a raw `conjure_runtime::Client`:
 //!
 //! ```
 //! use conjure_runtime::{UserAgent, Agent, HostMetricsRegistry, Client};
@@ -125,14 +125,14 @@
 //!
 //! # Behavior
 //!
-//! `conjure-runtime` wraps the `hyper` HTTP library with opinionated behavior designed to more effectively communicate
+//! `conjure_runtime` wraps the `hyper` HTTP library with opinionated behavior designed to more effectively communicate
 //! between services in a distributed system. It is broadly designed to align with the [`conjure-java-runtime`] Java
 //! library, though it does differ in various ways.
 //!
 //! ## Error Propagation
 //!
 //! Servers should use the standard Conjure error format to propagate application-specific errors to callers. Non-QoS
-//! (see below) errors received from the server are treated as fatal. By default, `conjure-runtime` will return a
+//! (see below) errors received from the server are treated as fatal. By default, `conjure_runtime` will return a
 //! `conjure_error::Error` that will generate a generic 500 Internal Server Error response. Its cause will be a
 //! `RemoteError` object that contains the serialized Conjure error information sent by the server. The
 //! `Client::set_propagate_service_errors` method can be used to change that behavior to instead transparently propagate
@@ -144,14 +144,14 @@
 //! The client propagates trace information via the [`zipkin`] crate using the traditional `X-B3-*` HTTP headers. It
 //! also creates local spans covering various stages of request processing:
 //!
-//! * `conjure-runtime: get /widget-service/{widgetId}` - The name of this span is built from the request's method and
+//! * `conjure_runtime: get /widget-service/{widgetId}` - The name of this span is built from the request's method and
 //!     path pattern.
 //!     * `conjure-runtime: attempt 1`
-//!         * `conjure-runtime: wait-for-headers` - This span is sent to the server, and lasts until the server sends
+//!         * `conjure_runtime: wait-for-headers` - This span is sent to the server, and lasts until the server sends
 //!             the headers of the response.
 //!         * `conjure-runtime: wait-for-body` - This span is tracked along with the response body, and lasts until the
 //!             `ResponseBody` object is dropped. It is "detached" from the zipkin tracer so new spans created outside
-//!             of `conjure-runtime` will not be parented to it, and can outlive the parent `conjure-runtime` spans. It
+//!             of `conjure-runtime` will not be parented to it, and can outlive the parent `conjure_runtime` spans. It
 //!             will not be created if an IO error occurs before headers are received.
 //!     * `conjure-runtime: backoff-with-jitter` - If the request encounters an IO error before receiving headers, this
 //!         span covers the time spent waiting before the request is retried.
@@ -162,14 +162,14 @@
 //!
 //! The client treats certain HTTP errors specially. Servers can advertise an overloaded state via the 429 Too Many
 //! Requests or 503 Service Unavailable status codes. Unlike other 4xx and 5xx status codes, these responses do *not*
-//! cause the request to fail. Instead, `conjure-runtime` will throttle itself and retry the request. Requests are
+//! cause the request to fail. Instead, `conjure_runtime` will throttle itself and retry the request. Requests are
 //! retried a fixed number of times, with an exponentially growing backoff in between attempts. If a 429 response
 //! contains a `Retry-After` header, its backoff will be used rather than the default. IO errors also trigger a retry.
 //!
 //! A 503 response or IO error will also cause that host to be temporarily "blacklisted" so it will not be used by other
 //! requests unless there is no other option.
 //!
-//! Only some requests can be retried. By default, `conjure-runtime` will only retry requests with HTTP methods
+//! Only some requests can be retried. By default, `conjure_runtime` will only retry requests with HTTP methods
 //! identified as idempotent - `GET`, `PUT`, `DELETE`, `HEAD`, `TRACE`, and `OPTIONS`. Non-idempotent requests cannot be
 //! safely retried to avoid the risk of unexpected behavior if the request ends up being applied twice. The
 //! `Client::set_assume_idempotent` method can be used to override this behavior and have the client assume all requests
@@ -178,12 +178,12 @@
 //!
 //! ## Metrics
 //!
-//! Clients record metrics to both a standard `MetricsRegistry` and a `conjure-runtime`-specific `HostMetricsRegistry`.
+//! Clients record metrics to both a standard `MetricsRegistry` and a `conjure_runtime`-specific `HostMetricsRegistry`.
 //!
 //! ### Standard Metrics
 //!
 //! * `client.request (service: <service_name>)` - A `Timer` recording request durations, tagged by service. Note that
-//!     the requests timed by this metric are the individual raw HTTP request attempts, *not* `conjure-runtime`-level
+//!     the requests timed by this metric are the individual raw HTTP request attempts, *not* `conjure_runtime`-level
 //!     requests with retries/backoffs/etc. It only records the time until response headers are received, not until the
 //!     entire response body is read.
 //! * `client.request.error (service: <service_name>, reason: IOException)` - A `Meter` tracking the rate of IO errors,
@@ -193,7 +193,7 @@
 //! ### Host Metrics
 //!
 //! The `HostMetricsRegistry` contains metrics for every host of every service being actively used by a
-//! `conjure-runtime` client.
+//! `conjure_runtime` client.
 //!
 //! [Conjure]: https://github.com/palantir/conjure
 //! [`conjure-java-runtime`]: https://github.com/palantir/conjure-java-runtime
@@ -228,7 +228,7 @@ mod user_agent;
 
 /// Client configuration.
 ///
-/// This is just a reexport of the `conjure-runtime-config` crate for convenience.
+/// This is just a reexport of the `conjure_runtime_config` crate for convenience.
 pub mod config {
     #[doc(inline)]
     pub use conjure_runtime_config::*;
