@@ -198,6 +198,7 @@
 //! [Conjure]: https://github.com/palantir/conjure
 //! [`conjure-java-runtime`]: https://github.com/palantir/conjure-java-runtime
 //! [`zipkin`]: https://docs.rs/zipkin
+#![doc(html_root_url = "https://docs.rs/conjure-runtime/0.1")]
 #![warn(missing_docs, clippy::all)]
 
 pub use crate::body::*;
