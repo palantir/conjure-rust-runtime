@@ -367,6 +367,7 @@ impl SecurityConfigBuilder {
 
 /// Proxy configuration used to connect to a service.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ProxyConfig {
     /// A direct connection (i.e. no proxy).
     Direct,
@@ -374,8 +375,6 @@ pub enum ProxyConfig {
     Http(HttpProxyConfig),
     /// A mesh proxy.
     Mesh(MeshProxyConfig),
-    #[doc(hidden)]
-    __ForExtensibility,
 }
 
 impl Default for ProxyConfig {
