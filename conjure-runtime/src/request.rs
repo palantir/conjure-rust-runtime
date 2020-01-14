@@ -47,7 +47,7 @@ impl<'a> RequestBuilder<'a> {
     /// * `Accept: */*`
     /// * `User-Agent: <provided at Client construction>`
     ///
-    /// The following headers are fully controlled by Chatter, which will overwrite any existing value.
+    /// The following headers are fully controlled by `conjure_runtime`, which will overwrite any existing value.
     ///
     /// * `Connection`
     /// * `Content-Length`

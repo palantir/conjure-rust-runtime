@@ -144,14 +144,14 @@
 //! The client propagates trace information via the [`zipkin`] crate using the traditional `X-B3-*` HTTP headers. It
 //! also creates local spans covering various stages of request processing:
 //!
-//! * `conjure_runtime: get /widget-service/{widgetId}` - The name of this span is built from the request's method and
+//! * `conjure-runtime: get /widget-service/{widgetId}` - The name of this span is built from the request's method and
 //!     path pattern.
 //!     * `conjure-runtime: attempt 1`
-//!         * `conjure_runtime: wait-for-headers` - This span is sent to the server, and lasts until the server sends
+//!         * `conjure-runtime: wait-for-headers` - This span is sent to the server, and lasts until the server sends
 //!             the headers of the response.
 //!         * `conjure-runtime: wait-for-body` - This span is tracked along with the response body, and lasts until the
 //!             `ResponseBody` object is dropped. It is "detached" from the zipkin tracer so new spans created outside
-//!             of `conjure-runtime` will not be parented to it, and can outlive the parent `conjure_runtime` spans. It
+//!             of `conjure-runtime` will not be parented to it, and can outlive the parent `conjure-runtime` spans. It
 //!             will not be created if an IO error occurs before headers are received.
 //!     * `conjure-runtime: backoff-with-jitter` - If the request encounters an IO error before receiving headers, this
 //!         span covers the time spent waiting before the request is retried.
