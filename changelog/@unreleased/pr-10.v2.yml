@@ -1,0 +1,5 @@
+type: fix
+fix:
+  description: Fixed trace propagation in the blocking client.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/10

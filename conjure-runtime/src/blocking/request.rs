@@ -18,6 +18,11 @@ use conjure_object::BearerToken;
 use futures::channel::oneshot;
 use futures::executor;
 use hyper::{HeaderMap, Method};
+use pin_project::pin_project;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use zipkin::TraceContext;
 
 /// A builder for a blocking HTTP request.
 pub struct RequestBuilder<'a> {
@@ -113,10 +118,12 @@ impl<'a> RequestBuilder<'a> {
         let (sender, receiver) = oneshot::channel();
         let client = self.client.0.clone();
         let request = self.request;
-        runtime().map_err(Error::internal_safe)?.spawn(async move {
-            let r = client.send(request).await;
-            let _ = sender.send(r);
-        });
+        runtime()
+            .map_err(Error::internal_safe)?
+            .spawn(ContextFuture::new(async move {
+                let r = client.send(request).await;
+                let _ = sender.send(r);
+            }));
 
         if let Some(streamer) = self.streamer {
             streamer.stream();
@@ -127,5 +134,37 @@ impl<'a> RequestBuilder<'a> {
             Ok(Err(e)) => Err(e.with_backtrace()),
             Err(e) => Err(Error::internal_safe(e)),
         }
+    }
+}
+
+#[pin_project]
+struct ContextFuture<F> {
+    #[pin]
+    future: F,
+    context: Option<TraceContext>,
+}
+
+impl<F> ContextFuture<F>
+where
+    F: Future,
+{
+    fn new(future: F) -> ContextFuture<F> {
+        ContextFuture {
+            future,
+            context: zipkin::current(),
+        }
+    }
+}
+
+impl<F> Future for ContextFuture<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
+        let this = self.project();
+        let _guard = this.context.map(zipkin::set_current);
+        this.future.poll(cx)
     }
 }

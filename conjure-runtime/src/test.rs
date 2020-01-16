@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{RemoteError, TimeoutError};
-use crate::{Agent, Body, BodyWriter, Client, HostMetricsRegistry, UserAgent};
+use crate::{blocking, Agent, Body, BodyWriter, Client, HostMetricsRegistry, UserAgent};
 use async_trait::async_trait;
 use bytes::Bytes;
 use conjure_error::NotFound;
 use conjure_error::{Error, ErrorKind};
-use conjure_runtime_config::ServicesConfig;
+use conjure_runtime_config::{ServiceConfig, ServicesConfig};
 use flate2::write::{GzEncoder, ZlibEncoder};
 use flate2::Compression;
 use futures::task::Context;
@@ -34,11 +34,14 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
+use std::thread;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::runtime::Runtime;
 use tokio::time;
 use witchcraft_metrics::MetricRegistry;
+use zipkin::{SpanId, TraceContext, TraceId};
 
 const STOCK_CONFIG: &str = r#"
 services:
@@ -87,6 +90,30 @@ async fn test<F, G>(
     );
 }
 
+fn blocking_test<F>(
+    config: &str,
+    requests: u32,
+    handler: impl FnMut(Request<hyper::Body>) -> F + 'static + Send,
+    check: impl FnOnce(blocking::Client),
+) where
+    F: Future<Output = Result<Response<hyper::Body>, &'static str>> + 'static + Send,
+{
+    let mut runtime = Runtime::new().unwrap();
+    let listener = runtime.block_on(TcpListener::bind("127.0.0.1:0")).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let server = thread::spawn(move || runtime.block_on(server(listener, requests, handler)));
+
+    let config = parse_config(config, port);
+    let agent = UserAgent::new(Agent::new("test", "1.0"));
+    let node_health = Arc::new(HostMetricsRegistry::new());
+    let metrics = Arc::new(MetricRegistry::new());
+    let client = blocking::Client::new("service", agent, &node_health, &metrics, &config).unwrap();
+
+    check(client);
+    server.join().unwrap();
+}
+
 async fn server<F>(
     mut listener: TcpListener,
     requests: u32,
@@ -110,18 +137,21 @@ async fn client<F>(config: &str, port: u16, check: impl FnOnce(Client) -> F)
 where
     F: Future<Output = ()>,
 {
-    let config = config
-        .replace("{{port}}", &port.to_string())
-        .replace("{{ca_file}}", &cert_file().display().to_string());
-    let config = serde_yaml::from_str::<ServicesConfig>(&config).unwrap();
-    let config = config.service("service").unwrap();
-
+    let config = parse_config(config, port);
     let agent = UserAgent::new(Agent::new("test", "1.0"));
     let node_health = Arc::new(HostMetricsRegistry::new());
     let metrics = Arc::new(MetricRegistry::new());
     let client = Client::new("service", agent, &node_health, &metrics, &config).unwrap();
 
     check(client).await
+}
+
+fn parse_config(config: &str, port: u16) -> ServiceConfig {
+    let config = config
+        .replace("{{port}}", &port.to_string())
+        .replace("{{ca_file}}", &cert_file().display().to_string());
+    let config = serde_yaml::from_str::<ServicesConfig>(&config).unwrap();
+    config.service("service").unwrap().clone()
 }
 
 struct TestService<'a, F>(&'a mut F);
@@ -738,6 +768,60 @@ async fn deflate_body() {
         },
     )
     .await;
+}
+
+#[tokio::test]
+async fn zipkin_propagation() {
+    let trace_id = TraceId::from([0, 1, 2, 3, 4, 5, 6, 7]);
+    test(
+        STOCK_CONFIG,
+        1,
+        |req| {
+            async move {
+                assert_eq!(
+                    req.headers().get("X-B3-TraceId").unwrap(),
+                    "0001020304050607"
+                );
+                Ok(Response::new(hyper::Body::empty()))
+            }
+        },
+        |client| {
+            let context = TraceContext::builder()
+                .trace_id(trace_id)
+                .span_id(SpanId::from(*b"abcdefgh"))
+                .build();
+            zipkin::join_trace(context).detach().bind(async move {
+                client.get("/").send().await.unwrap();
+            })
+        },
+    )
+    .await;
+}
+
+#[test]
+fn blocking_zipkin_propagation() {
+    let trace_id = TraceId::from([0, 1, 2, 3, 4, 5, 6, 7]);
+    blocking_test(
+        STOCK_CONFIG,
+        1,
+        |req| {
+            async move {
+                assert_eq!(
+                    req.headers().get("X-B3-TraceId").unwrap(),
+                    "0001020304050607"
+                );
+                Ok(Response::new(hyper::Body::empty()))
+            }
+        },
+        |client| {
+            let context = TraceContext::builder()
+                .trace_id(trace_id)
+                .span_id(SpanId::from(*b"abcdefgh"))
+                .build();
+            let _guard = zipkin::set_current(context);
+            client.get("/").send().unwrap();
+        },
+    );
 }
 
 struct InfiniteBody;
