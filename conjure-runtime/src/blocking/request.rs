@@ -17,11 +17,11 @@ use conjure_error::Error;
 use conjure_object::BearerToken;
 use futures::channel::oneshot;
 use futures::executor;
-use futures::task::{Context, Poll};
 use hyper::{HeaderMap, Method};
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
+use std::task::{Context, Poll};
 use zipkin::TraceContext;
 
 /// A builder for a blocking HTTP request.
