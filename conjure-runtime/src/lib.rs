@@ -153,8 +153,8 @@
 //!             `ResponseBody` object is dropped. It is "detached" from the zipkin tracer so new spans created outside
 //!             of `conjure-runtime` will not be parented to it, and can outlive the parent `conjure-runtime` spans. It
 //!             will not be created if an IO error occurs before headers are received.
-//!     * `conjure-runtime: backoff-with-jitter` - If the request encounters an IO error before receiving headers, this
-//!         span covers the time spent waiting before the request is retried.
+//!     * `conjure-runtime: backoff-with-jitter` - If the request is retried, this span tracks the time spent waiting
+//!         between attempts.
 //!     * `conjure-runtime: attempt 2`
 //!         * ...
 //!
