@@ -1,0 +1,6 @@
+type: fix
+fix:
+  description: Requests are now always considered to have succeeded if the server
+    returns an successful response, even if the streaming body write failed.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/13
