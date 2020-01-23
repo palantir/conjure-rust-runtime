@@ -187,17 +187,23 @@ impl<'a, 'b> State<'a, 'b> {
             ))
             .await;
 
-        match (body_result, response_result) {
-            (Ok(()), Ok(response)) => {
-                let body_span = zipkin::next_span()
-                    .with_name("conjure-runtime: wait-for-body")
-                    .detach();
-                Response::new(response, self.deadline, body_span)
+        let response = match (body_result, response_result) {
+            (Ok(()), Ok(response)) => response,
+            (Ok(()), Err(e)) => return Err(Error::internal_safe(e)),
+            (Err(e), Ok(response)) => {
+                info!(
+                    "body write reported an error on a successful request",
+                    error: e
+                );
+                response
             }
-            (Ok(()), Err(e)) => Err(Error::internal_safe(e)),
-            (Err(e), Ok(_)) => Err(e),
-            (Err(body), Err(hyper)) => Err(self.deconflict_errors(body, hyper)),
-        }
+            (Err(body), Err(hyper)) => return Err(self.deconflict_errors(body, hyper)),
+        };
+
+        let body_span = zipkin::next_span()
+            .with_name("conjure-runtime: wait-for-body")
+            .detach();
+        Response::new(response, self.deadline, body_span)
     }
 
     fn new_headers(

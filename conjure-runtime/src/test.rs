@@ -627,13 +627,7 @@ async fn body_write_ends_after_error() {
         |_| async { Ok(Response::new(hyper::Body::empty())) },
         |client| {
             async move {
-                client
-                    .post("/")
-                    .body(InfiniteBody)
-                    .send()
-                    .await
-                    .err()
-                    .unwrap();
+                client.post("/").body(InfiniteBody).send().await.unwrap();
             }
         },
     )
