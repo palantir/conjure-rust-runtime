@@ -11,8 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::connect::metrics::MetricsConnector;
+use crate::connect::proxy::{ProxyConfig, ProxyConnector};
 use crate::node_selector::NodeSelector;
-use crate::proxy::{ProxyConfig, ProxyConnector};
 use crate::{
     send, Agent, HostMetricsRegistry, HyperBody, Request, RequestBuilder, Response, UserAgent,
 };
@@ -32,8 +33,10 @@ use witchcraft_metrics::{Meter, MetricId, MetricRegistry, Timer};
 // This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
 const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
 
+type ConjureConnector = MetricsConnector<HttpsConnector<ProxyConnector<HttpConnector>>>;
+
 pub(crate) struct ClientState {
-    pub(crate) client: hyper::Client<HttpsConnector<ProxyConnector<HttpConnector>>, HyperBody>,
+    pub(crate) client: hyper::Client<ConjureConnector, HyperBody>,
     pub(crate) node_selector: NodeSelector,
     pub(crate) max_num_retries: u32,
     pub(crate) backoff_slot_size: Duration,
@@ -44,6 +47,7 @@ pub(crate) struct ClientState {
 impl ClientState {
     fn from_config(
         service: &str,
+        metrics: &Arc<MetricRegistry>,
         host_metrics: &HostMetricsRegistry,
         service_config: &ServiceConfig,
     ) -> Result<ClientState, Error> {
@@ -67,6 +71,8 @@ impl ClientState {
         let connector =
             HttpsConnector::with_connector(connector, ssl).map_err(Error::internal_safe)?;
 
+        let connector = MetricsConnector::new(connector, metrics, service);
+
         let client = hyper::Client::builder().build(connector);
 
         let node_selector = NodeSelector::new(service, host_metrics, service_config);
@@ -86,6 +92,7 @@ pub(crate) struct SharedClient {
     pub(crate) service: String,
     pub(crate) user_agent: HeaderValue,
     pub(crate) state: ArcSwap<ClientState>,
+    pub(crate) metrics: Arc<MetricRegistry>,
     pub(crate) host_metrics: Arc<HostMetricsRegistry>,
     pub(crate) response_timer: Arc<Timer>,
     pub(crate) error_meter: Arc<Meter>,
@@ -116,7 +123,7 @@ impl Client {
     ) -> Result<Client, Error> {
         user_agent.push_agent(Agent::new("conjure-runtime", env!("CARGO_PKG_VERSION")));
 
-        let state = ClientState::from_config(service, host_metrics, config)?;
+        let state = ClientState::from_config(service, metrics, host_metrics, config)?;
 
         let response_timer = metrics
             .timer(MetricId::new("client.response").with_tag("service-name", service.to_string()));
@@ -131,6 +138,7 @@ impl Client {
                 service: service.to_string(),
                 user_agent: HeaderValue::from_str(&user_agent.to_string()).unwrap(),
                 state: ArcSwap::new(Arc::new(state)),
+                metrics: metrics.clone(),
                 host_metrics: host_metrics.clone(),
                 response_timer,
                 error_meter,
@@ -240,7 +248,12 @@ impl RefreshHandle {
             None => return Ok(()),
         };
 
-        let state = ClientState::from_config(&client.service, &client.host_metrics, config)?;
+        let state = ClientState::from_config(
+            &client.service,
+            &client.metrics,
+            &client.host_metrics,
+            config,
+        )?;
         client.state.store(Arc::new(state));
         info!("reloaded client", safe: { service: client.service });
 
