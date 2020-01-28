@@ -627,7 +627,9 @@ async fn body_write_ends_after_error() {
         |_| async { Ok(Response::new(hyper::Body::empty())) },
         |client| {
             async move {
-                client.post("/").body(InfiniteBody).send().await.unwrap();
+                // This could succeed or fail depending on if we get an EPIPE or the response. The important thing is
+                // that we don't deadlock.
+                let _ = client.post("/").body(InfiniteBody).send().await;
             }
         },
     )
