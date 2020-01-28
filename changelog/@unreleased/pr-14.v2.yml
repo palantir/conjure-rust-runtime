@@ -1,0 +1,5 @@
+type: improvement
+improvement:
+  description: Added a `tls.handshake` metric tracking TLS handshakes.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/14
