@@ -31,7 +31,7 @@ pub struct MetricsConnector<T> {
     shared: Arc<Shared>,
 }
 
-impl<T, S> MetricsConnector<T> {
+impl<T> MetricsConnector<T> {
     pub fn new(connector: T, metrics: &Arc<MetricRegistry>, service: &str) -> MetricsConnector<T> {
         MetricsConnector {
             connector,
