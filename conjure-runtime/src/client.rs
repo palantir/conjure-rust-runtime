@@ -32,6 +32,8 @@ use witchcraft_metrics::{Meter, MetricId, MetricRegistry, Timer};
 
 // This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
 const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
+// Most servers time out idle connections after 60 seconds, so we'll set the client timeout a bit below that.
+const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 
 type ConjureConnector = MetricsConnector<HttpsConnector<ProxyConnector<HttpConnector>>>;
 
@@ -73,7 +75,9 @@ impl ClientState {
 
         let connector = MetricsConnector::new(connector, metrics, service);
 
-        let client = hyper::Client::builder().build(connector);
+        let client = hyper::Client::builder()
+            .keep_alive_timeout(HTTP_KEEPALIVE)
+            .build(connector);
 
         let node_selector = NodeSelector::new(service, host_metrics, service_config);
 
