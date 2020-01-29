@@ -190,7 +190,8 @@
 //!     tagged by service. Like the `client.request` metric, this tracks the raw HTTP requests. The `reason` tag has a
 //!     value of `IOException` to align with [`conjure-java-runtime`]'s metric.
 //! * `tls.handshake (context: <service_name>, protocol: <protocol_version>, cipher: <cipher_name>)` - A `Meter`
-//!     tracking the rate of TLS handshakes, tagged by the service, TLS protocol version, and cipher name.
+//!     tracking the rate of TLS handshakes, tagged by the service, TLS protocol version (e.g. `TLSv1.3`), and cipher
+//!     name (e.g. `TLS_CHACHA20_POLY1305_SHA256`).
 //!
 //! ### Host Metrics
 //!
