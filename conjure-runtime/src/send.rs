@@ -11,8 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::connect::proxy::ProxyConfig;
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
-use crate::proxy::ProxyConfig;
 use crate::{
     node_selector, Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody,
     Response,

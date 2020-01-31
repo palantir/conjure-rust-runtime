@@ -189,6 +189,9 @@
 //! * `client.request.error (service: <service_name>, reason: IOException)` - A `Meter` tracking the rate of IO errors,
 //!     tagged by service. Like the `client.request` metric, this tracks the raw HTTP requests. The `reason` tag has a
 //!     value of `IOException` to align with [`conjure-java-runtime`]'s metric.
+//! * `tls.handshake (context: <service_name>, protocol: <protocol_version>, cipher: <cipher_name>)` - A `Meter`
+//!     tracking the rate of TLS handshakes, tagged by the service, TLS protocol version (e.g. `TLSv1.3`), and cipher
+//!     name (e.g. `TLS_CHACHA20_POLY1305_SHA256`).
 //!
 //! ### Host Metrics
 //!
@@ -203,7 +206,7 @@
 
 pub use crate::body::*;
 pub use crate::client::*;
-pub use crate::metrics::*;
+pub use crate::host_metrics::*;
 pub use crate::payload::*;
 pub use crate::request::*;
 pub use crate::response::*;
@@ -215,11 +218,11 @@ pub mod blocking;
 mod body;
 mod client;
 mod conjure;
+mod connect;
 pub mod errors;
-mod metrics;
+mod host_metrics;
 mod node_selector;
 mod payload;
-mod proxy;
 mod request;
 mod response;
 mod send;
