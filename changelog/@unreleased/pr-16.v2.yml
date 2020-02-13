@@ -1,0 +1,5 @@
+type: break
+break:
+  description: Upgraded conjure to 0.7.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/16
