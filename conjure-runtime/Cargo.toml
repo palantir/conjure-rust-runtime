@@ -14,10 +14,10 @@ async-compression = { version = "0.2", default-features = false, features = ["zl
 async-trait = "0.1"
 base64 = "0.11"
 bytes = "0.5"
-conjure-error = "0.6"
-conjure-http = "0.6"
-conjure-object = "0.6"
-conjure-serde = "0.6"
+conjure-error = "0.7"
+conjure-http = "0.7"
+conjure-object = "0.7"
+conjure-serde = "0.7"
 futures = "0.3"
 http = "0.2"
 http-body = "0.3"
@@ -31,7 +31,7 @@ pin-project = "0.4"
 rand = "0.7"
 regex = "1.0"
 serde = "1.0"
-witchcraft-log = "0.2"
+witchcraft-log = "0.3"
 witchcraft-metrics = "0.1"
 tokio = { version = "0.2", features = ["io-util", "rt-threaded", "time"] }
 url = "2.0"
@@ -46,4 +46,4 @@ tokio-openssl = "0.4"
 serde_yaml = "0.8"
 
 # for doc examples
-conjure-codegen = { version = "0.6", features = ["example-types"] }
+conjure-codegen = { version = "0.7", features = ["example-types"] }
