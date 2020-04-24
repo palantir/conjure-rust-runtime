@@ -1,0 +1,5 @@
+type: fix
+fix:
+  description: Fixed the response body reader to not panic when reading after EOF.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/19
