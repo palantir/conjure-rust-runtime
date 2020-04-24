@@ -127,7 +127,7 @@ async fn server<F>(
         let socket = listener.accept().await.unwrap().0;
         let socket = tokio_openssl::accept(&acceptor, socket).await.unwrap();
         let _ = Http::new()
-            .keep_alive(false)
+            .http1_keep_alive(false)
             .serve_connection(socket, TestService(&mut handler))
             .await;
     }
@@ -188,24 +188,20 @@ services:
       host-and-port: "localhost:{{port}}"
     "#,
         1,
-        |req| {
-            async move {
-                let host = req.headers().get(HOST).unwrap();
-                assert_eq!(host, "www.google.com:1234");
-                assert_eq!(req.uri(), &"/foo/bar?fizz=buzz");
+        |req| async move {
+            let host = req.headers().get(HOST).unwrap();
+            assert_eq!(host, "www.google.com:1234");
+            assert_eq!(req.uri(), &"/foo/bar?fizz=buzz");
 
-                Ok(Response::new(hyper::Body::empty()))
-            }
+            Ok(Response::new(hyper::Body::empty()))
         },
-        |client| {
-            async move {
-                client
-                    .get("/foo/bar")
-                    .param("fizz", "buzz")
-                    .send()
-                    .await
-                    .unwrap();
-            }
+        |client| async move {
+            client
+                .get("/foo/bar")
+                .param("fizz", "buzz")
+                .send()
+                .await
+                .unwrap();
         },
     )
     .await;
@@ -231,11 +227,9 @@ async fn retry_after_503() {
                 }
             }
         },
-        |client| {
-            async move {
-                let response = client.get("/").send().await.unwrap();
-                assert_eq!(response.status(), StatusCode::OK);
-            }
+        |client| async move {
+            let response = client.get("/").send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
         },
     )
     .await;
@@ -247,26 +241,22 @@ async fn no_retry_after_404() {
     test(
         STOCK_CONFIG,
         1,
-        |_| {
-            async move {
-                Ok(Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(hyper::Body::empty())
-                    .unwrap())
-            }
+        |_| async move {
+            Ok(Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(hyper::Body::empty())
+                .unwrap())
         },
-        |client| {
-            async move {
-                let error = client.get("/").send().await.err().unwrap();
-                assert_eq!(
-                    error
-                        .cause()
-                        .downcast_ref::<RemoteError>()
-                        .unwrap()
-                        .status(),
-                    &StatusCode::NOT_FOUND,
-                );
-            }
+        |client| async move {
+            let error = client.get("/").send().await.err().unwrap();
+            assert_eq!(
+                error
+                    .cause()
+                    .downcast_ref::<RemoteError>()
+                    .unwrap()
+                    .status(),
+                &StatusCode::NOT_FOUND,
+            );
         },
     )
     .await;
@@ -293,13 +283,11 @@ async fn retry_after_overrides() {
                 }
             }
         },
-        |client| {
-            async move {
-                let time = Instant::now();
-                let response = client.get("/").send().await.unwrap();
-                assert_eq!(response.status(), StatusCode::OK);
-                assert!(time.elapsed() >= Duration::from_secs(1));
-            }
+        |client| async move {
+            let time = Instant::now();
+            let response = client.get("/").send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(time.elapsed() >= Duration::from_secs(1));
         },
     )
     .await;
@@ -338,30 +326,24 @@ async fn connect_error_doesnt_reset_body() {
         // accept and immediately close the socket without completing the TLS handshake
         listener.accept().await.unwrap();
 
-        server(listener, 1, |req| {
-            async move {
-                let body = req
-                    .into_body()
-                    .try_fold(vec![], |mut buf, chunk| {
-                        async move {
-                            buf.extend_from_slice(&chunk);
-                            Ok(buf)
-                        }
-                    })
-                    .await
-                    .unwrap();
-                assert_eq!(&*body, b"hello world");
-                Ok(Response::new(hyper::Body::empty()))
-            }
+        server(listener, 1, |req| async move {
+            let body = req
+                .into_body()
+                .try_fold(vec![], |mut buf, chunk| async move {
+                    buf.extend_from_slice(&chunk);
+                    Ok(buf)
+                })
+                .await
+                .unwrap();
+            assert_eq!(&*body, b"hello world");
+            Ok(Response::new(hyper::Body::empty()))
         })
         .await;
     };
 
-    let client = client(STOCK_CONFIG, port, |client| {
-        async move {
-            let response = client.put("/").body(TestBody(false)).send().await.unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-        }
+    let client = client(STOCK_CONFIG, port, |client| async move {
+        let response = client.put("/").body(TestBody(false)).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     });
 
     join!(server, client);
@@ -372,22 +354,18 @@ async fn propagate_429() {
     test(
         STOCK_CONFIG,
         1,
-        |_| {
-            async {
-                Ok(Response::builder()
-                    .status(StatusCode::TOO_MANY_REQUESTS)
-                    .body(hyper::Body::empty())
-                    .unwrap())
-            }
+        |_| async {
+            Ok(Response::builder()
+                .status(StatusCode::TOO_MANY_REQUESTS)
+                .body(hyper::Body::empty())
+                .unwrap())
         },
-        |mut client| {
-            async move {
-                client.set_propagate_qos_errors(true);
-                let error = client.get("/").send().await.err().unwrap();
-                match error.kind() {
-                    ErrorKind::Throttle(e) => assert_eq!(e.duration(), None),
-                    _ => panic!("wrong error kind"),
-                }
+        |mut client| async move {
+            client.set_propagate_qos_errors(true);
+            let error = client.get("/").send().await.err().unwrap();
+            match error.kind() {
+                ErrorKind::Throttle(e) => assert_eq!(e.duration(), None),
+                _ => panic!("wrong error kind"),
             }
         },
     )
@@ -399,25 +377,19 @@ async fn propagate_429_with_retry_after() {
     test(
         STOCK_CONFIG,
         1,
-        |_| {
-            async {
-                Ok(Response::builder()
-                    .status(StatusCode::TOO_MANY_REQUESTS)
-                    .header(RETRY_AFTER, "100")
-                    .body(hyper::Body::empty())
-                    .unwrap())
-            }
+        |_| async {
+            Ok(Response::builder()
+                .status(StatusCode::TOO_MANY_REQUESTS)
+                .header(RETRY_AFTER, "100")
+                .body(hyper::Body::empty())
+                .unwrap())
         },
-        |mut client| {
-            async move {
-                client.set_propagate_qos_errors(true);
-                let error = client.get("/").send().await.err().unwrap();
-                match error.kind() {
-                    ErrorKind::Throttle(e) => {
-                        assert_eq!(e.duration(), Some(Duration::from_secs(100)))
-                    }
-                    _ => panic!("wrong error kind"),
-                }
+        |mut client| async move {
+            client.set_propagate_qos_errors(true);
+            let error = client.get("/").send().await.err().unwrap();
+            match error.kind() {
+                ErrorKind::Throttle(e) => assert_eq!(e.duration(), Some(Duration::from_secs(100))),
+                _ => panic!("wrong error kind"),
             }
         },
     )
@@ -429,22 +401,18 @@ async fn propagate_503() {
     test(
         STOCK_CONFIG,
         1,
-        |_| {
-            async {
-                Ok(Response::builder()
-                    .status(StatusCode::SERVICE_UNAVAILABLE)
-                    .body(hyper::Body::empty())
-                    .unwrap())
-            }
+        |_| async {
+            Ok(Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .body(hyper::Body::empty())
+                .unwrap())
         },
-        |mut client| {
-            async move {
-                client.set_propagate_qos_errors(true);
-                let error = client.get("/").send().await.err().unwrap();
-                match error.kind() {
-                    ErrorKind::Unavailable(_) => {}
-                    _ => panic!("wrong error kind"),
-                }
+        |mut client| async move {
+            client.set_propagate_qos_errors(true);
+            let error = client.get("/").send().await.err().unwrap();
+            match error.kind() {
+                ErrorKind::Unavailable(_) => {}
+                _ => panic!("wrong error kind"),
             }
         },
     )
@@ -468,12 +436,10 @@ async fn dont_propagate_protocol_errors() {
                 }
             }
         },
-        |mut client| {
-            async move {
-                client.set_propagate_qos_errors(true);
-                let response = client.get("/").send().await.unwrap();
-                assert_eq!(response.status(), StatusCode::OK);
-            }
+        |mut client| async move {
+            client.set_propagate_qos_errors(true);
+            let response = client.get("/").send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
         },
     )
     .await;
@@ -503,11 +469,9 @@ services:
                 }
             }
         },
-        |client| {
-            async move {
-                let response = client.get("/").send().await.unwrap();
-                assert_eq!(response.status(), StatusCode::OK);
-            }
+        |client| async move {
+            let response = client.get("/").send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
         },
     )
     .await;
@@ -525,19 +489,15 @@ services:
     request-timeout: 1s
     "#,
         1,
-        |_| {
-            async {
-                time::delay_for(Duration::from_secs(2)).await;
-                Ok(Response::new(hyper::Body::empty()))
-            }
+        |_| async {
+            time::delay_for(Duration::from_secs(2)).await;
+            Ok(Response::new(hyper::Body::empty()))
         },
-        |client| {
-            async move {
-                let start = Instant::now();
-                let error = client.get("/").send().await.err().unwrap();
-                assert!(start.elapsed() < Duration::from_secs(2));
-                assert!(error.cause().is::<TimeoutError>());
-            }
+        |client| async move {
+            let start = Instant::now();
+            let error = client.get("/").send().await.err().unwrap();
+            assert!(start.elapsed() < Duration::from_secs(2));
+            assert!(error.cause().is::<TimeoutError>());
         },
     )
     .await;
@@ -555,25 +515,21 @@ services:
     request-timeout: 1s
     "#,
         1,
-        |req| {
-            async {
-                req.into_body().for_each(|_| async {}).await;
-                Ok(Response::new(hyper::Body::empty()))
-            }
+        |req| async {
+            req.into_body().for_each(|_| async {}).await;
+            Ok(Response::new(hyper::Body::empty()))
         },
-        |client| {
-            async move {
-                let start = Instant::now();
-                let error = client
-                    .post("/")
-                    .body(InfiniteBody)
-                    .send()
-                    .await
-                    .err()
-                    .unwrap();
-                assert!(start.elapsed() < Duration::from_secs(2));
-                assert!(error.cause().is::<TimeoutError>());
-            }
+        |client| async move {
+            let start = Instant::now();
+            let error = client
+                .post("/")
+                .body(InfiniteBody)
+                .send()
+                .await
+                .err()
+                .unwrap();
+            assert!(start.elapsed() < Duration::from_secs(2));
+            assert!(error.cause().is::<TimeoutError>());
         },
     )
     .await;
@@ -591,29 +547,25 @@ services:
     request-timeout: 1s
     "#,
         1,
-        |_| {
-            async {
-                let (mut sender, body) = hyper::Body::channel();
-                tokio::spawn(async move {
-                    time::delay_for(Duration::from_secs(2)).await;
-                    let _ = sender.send_data(Bytes::from("hi")).await;
-                });
-                Ok(Response::new(body))
-            }
+        |_| async {
+            let (mut sender, body) = hyper::Body::channel();
+            tokio::spawn(async move {
+                time::delay_for(Duration::from_secs(2)).await;
+                let _ = sender.send_data(Bytes::from("hi")).await;
+            });
+            Ok(Response::new(body))
         },
-        |client| {
-            async move {
-                let start = Instant::now();
-                let response = client.get("/").send().await.unwrap();
-                let error = response
-                    .into_body()
-                    .read_to_end(&mut vec![])
-                    .await
-                    .err()
-                    .unwrap();
-                assert!(start.elapsed() < Duration::from_secs(2));
-                assert!(error.get_ref().unwrap().is::<TimeoutError>());
-            }
+        |client| async move {
+            let start = Instant::now();
+            let response = client.get("/").send().await.unwrap();
+            let error = response
+                .into_body()
+                .read_to_end(&mut vec![])
+                .await
+                .err()
+                .unwrap();
+            assert!(start.elapsed() < Duration::from_secs(2));
+            assert!(error.get_ref().unwrap().is::<TimeoutError>());
         },
     )
     .await;
@@ -662,17 +614,13 @@ async fn streaming_write_error_reporting() {
     test(
         STOCK_CONFIG,
         1,
-        |req| {
-            async move {
-                req.into_body().for_each(|_| async {}).await;
-                Ok(Response::new(hyper::Body::empty()))
-            }
+        |req| async move {
+            req.into_body().for_each(|_| async {}).await;
+            Ok(Response::new(hyper::Body::empty()))
         },
-        |client| {
-            async move {
-                let error = client.post("/").body(TestBody).send().await.err().unwrap();
-                assert_eq!(error.cause().to_string(), "foobar");
-            }
+        |client| async move {
+            let error = client.post("/").body(TestBody).send().await.err().unwrap();
+            assert_eq!(error.cause().to_string(), "foobar");
         },
     )
     .await;
@@ -683,25 +631,21 @@ async fn service_error_propagation() {
     test(
         STOCK_CONFIG,
         1,
-        |_| {
-            async {
-                let body = conjure_error::encode(&NotFound::new());
-                let body = conjure_serde::json::to_vec(&body).unwrap();
-                Ok(Response::builder()
-                    .status(404)
-                    .header("Content-Type", "application/json")
-                    .body(hyper::Body::from(body))
-                    .unwrap())
-            }
+        |_| async {
+            let body = conjure_error::encode(&NotFound::new());
+            let body = conjure_serde::json::to_vec(&body).unwrap();
+            Ok(Response::builder()
+                .status(404)
+                .header("Content-Type", "application/json")
+                .body(hyper::Body::from(body))
+                .unwrap())
         },
-        |mut client| {
-            async move {
-                client.set_propagate_service_errors(true);
-                let error = client.get("/").send().await.err().unwrap();
-                match error.kind() {
-                    ErrorKind::Service(e) => assert_eq!(e.error_name(), "Default:NotFound"),
-                    _ => panic!("invalid error kind"),
-                }
+        |mut client| async move {
+            client.set_propagate_service_errors(true);
+            let error = client.get("/").send().await.err().unwrap();
+            match error.kind() {
+                ErrorKind::Service(e) => assert_eq!(e.error_name(), "Default:NotFound"),
+                _ => panic!("invalid error kind"),
             }
         },
     )
@@ -713,25 +657,21 @@ async fn gzip_body() {
     test(
         STOCK_CONFIG,
         1,
-        |req| {
-            async move {
-                assert_eq!(req.headers().get(ACCEPT_ENCODING).unwrap(), "gzip, deflate");
-                let mut body = GzEncoder::new(vec![], Compression::default());
-                body.write_all(b"hello world").unwrap();
-                let body = body.finish().unwrap();
-                Ok(Response::builder()
-                    .header(CONTENT_ENCODING, "gzip")
-                    .body(hyper::Body::from(body))
-                    .unwrap())
-            }
+        |req| async move {
+            assert_eq!(req.headers().get(ACCEPT_ENCODING).unwrap(), "gzip, deflate");
+            let mut body = GzEncoder::new(vec![], Compression::default());
+            body.write_all(b"hello world").unwrap();
+            let body = body.finish().unwrap();
+            Ok(Response::builder()
+                .header(CONTENT_ENCODING, "gzip")
+                .body(hyper::Body::from(body))
+                .unwrap())
         },
-        |client| {
-            async move {
-                let response = client.get("/").send().await.unwrap();
-                let mut body = vec![];
-                response.into_body().read_to_end(&mut body).await.unwrap();
-                assert_eq!(body, b"hello world");
-            }
+        |client| async move {
+            let response = client.get("/").send().await.unwrap();
+            let mut body = vec![];
+            response.into_body().read_to_end(&mut body).await.unwrap();
+            assert_eq!(body, b"hello world");
         },
     )
     .await;
@@ -742,25 +682,21 @@ async fn deflate_body() {
     test(
         STOCK_CONFIG,
         1,
-        |req| {
-            async move {
-                assert_eq!(req.headers().get(ACCEPT_ENCODING).unwrap(), "gzip, deflate");
-                let mut body = ZlibEncoder::new(vec![], Compression::default());
-                body.write_all(b"hello world").unwrap();
-                let body = body.finish().unwrap();
-                Ok(Response::builder()
-                    .header(CONTENT_ENCODING, "deflate")
-                    .body(hyper::Body::from(body))
-                    .unwrap())
-            }
+        |req| async move {
+            assert_eq!(req.headers().get(ACCEPT_ENCODING).unwrap(), "gzip, deflate");
+            let mut body = ZlibEncoder::new(vec![], Compression::default());
+            body.write_all(b"hello world").unwrap();
+            let body = body.finish().unwrap();
+            Ok(Response::builder()
+                .header(CONTENT_ENCODING, "deflate")
+                .body(hyper::Body::from(body))
+                .unwrap())
         },
-        |client| {
-            async move {
-                let response = client.get("/").send().await.unwrap();
-                let mut body = vec![];
-                response.into_body().read_to_end(&mut body).await.unwrap();
-                assert_eq!(body, b"hello world");
-            }
+        |client| async move {
+            let response = client.get("/").send().await.unwrap();
+            let mut body = vec![];
+            response.into_body().read_to_end(&mut body).await.unwrap();
+            assert_eq!(body, b"hello world");
         },
     )
     .await;
@@ -772,14 +708,12 @@ async fn zipkin_propagation() {
     test(
         STOCK_CONFIG,
         1,
-        |req| {
-            async move {
-                assert_eq!(
-                    req.headers().get("X-B3-TraceId").unwrap(),
-                    "0001020304050607"
-                );
-                Ok(Response::new(hyper::Body::empty()))
-            }
+        |req| async move {
+            assert_eq!(
+                req.headers().get("X-B3-TraceId").unwrap(),
+                "0001020304050607"
+            );
+            Ok(Response::new(hyper::Body::empty()))
         },
         |client| {
             let context = TraceContext::builder()
@@ -800,14 +734,12 @@ fn blocking_zipkin_propagation() {
     blocking_test(
         STOCK_CONFIG,
         1,
-        |req| {
-            async move {
-                assert_eq!(
-                    req.headers().get("X-B3-TraceId").unwrap(),
-                    "0001020304050607"
-                );
-                Ok(Response::new(hyper::Body::empty()))
-            }
+        |req| async move {
+            assert_eq!(
+                req.headers().get("X-B3-TraceId").unwrap(),
+                "0001020304050607"
+            );
+            Ok(Response::new(hyper::Body::empty()))
         },
         |client| {
             let context = TraceContext::builder()
@@ -818,6 +750,30 @@ fn blocking_zipkin_propagation() {
             client.get("/").send().unwrap();
         },
     );
+}
+
+#[tokio::test]
+async fn read_past_eof() {
+    test(
+        STOCK_CONFIG,
+        1,
+        |_| async move {
+            let (mut tx, rx) = hyper::Body::channel();
+            tokio::spawn(async move {
+                tx.send_data(Bytes::from("hello")).await.unwrap();
+                tx.send_data(Bytes::from(" world")).await.unwrap();
+            });
+            Ok(Response::new(rx))
+        },
+        |client| async move {
+            let mut body = client.get("/").send().await.unwrap().into_body();
+            let mut buf = vec![];
+            body.read_to_end(&mut buf).await.unwrap();
+            assert_eq!(buf, b"hello world");
+            assert_eq!(body.read(&mut [0]).await.unwrap(), 0);
+        },
+    )
+    .await
 }
 
 struct InfiniteBody;
