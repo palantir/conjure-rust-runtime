@@ -13,7 +13,6 @@
 // limitations under the License.
 use serde::de::{Deserializer, Error, Unexpected};
 use serde::Deserialize;
-use serde_humantime;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
