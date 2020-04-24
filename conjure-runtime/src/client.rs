@@ -76,7 +76,7 @@ impl ClientState {
         let connector = MetricsConnector::new(connector, metrics, service);
 
         let client = hyper::Client::builder()
-            .keep_alive_timeout(HTTP_KEEPALIVE)
+            .pool_idle_timeout(HTTP_KEEPALIVE)
             .build(connector);
 
         let node_selector = NodeSelector::new(service, host_metrics, service_config);

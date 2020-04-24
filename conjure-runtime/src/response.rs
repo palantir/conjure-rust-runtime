@@ -15,6 +15,7 @@ use crate::errors::{RemoteError, TimeoutError};
 use async_compression::stream::{GzipDecoder, ZlibDecoder};
 use bytes::{Buf, Bytes};
 use conjure_error::Error;
+use futures::stream::Fuse;
 use futures::task::Context;
 use futures::{ready, FutureExt, Stream, StreamExt, TryStreamExt};
 use hyper::http::header::CONTENT_ENCODING;
@@ -102,7 +103,7 @@ impl Response {
 
 /// An asynchronous streaming response body.
 pub struct ResponseBody {
-    stream: Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Sync + Send>>,
+    stream: Fuse<Box<dyn Stream<Item = io::Result<Bytes>> + Sync + Send + Unpin>>,
     cur: Bytes,
 }
 
@@ -120,12 +121,12 @@ impl ResponseBody {
             _span: span,
         };
 
-        let stream: Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Sync + Send>> =
+        let stream: Box<dyn Stream<Item = io::Result<Bytes>> + Sync + Send + Unpin> =
             match headers.get(&CONTENT_ENCODING) {
-                Some(v) if v == "gzip" => Box::pin(GzipDecoder::new(body)),
-                Some(v) if v == "deflate" => Box::pin(ZlibDecoder::new(body)),
-                Some(v) if v == "identity" => Box::pin(body),
-                None => Box::pin(body),
+                Some(v) if v == "gzip" => Box::new(GzipDecoder::new(body)),
+                Some(v) if v == "deflate" => Box::new(ZlibDecoder::new(body)),
+                Some(v) if v == "identity" => Box::new(body),
+                None => Box::new(body),
                 Some(v) => {
                     return Err(Error::internal_safe("unsupported Content-Encoding")
                         .with_safe_param("encoding", format!("{:?}", v)));
@@ -133,7 +134,7 @@ impl ResponseBody {
             };
 
         Ok(ResponseBody {
-            stream,
+            stream: stream.fuse(),
             cur: Bytes::new(),
         })
     }
