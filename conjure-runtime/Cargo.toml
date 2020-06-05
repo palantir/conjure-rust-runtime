@@ -10,7 +10,7 @@ readme = "../README.md"
 
 [dependencies]
 arc-swap = "0.4"
-async-compression = { version = "0.2", default-features = false, features = ["zlib", "gzip", "stream"] }
+async-compression = { version = "0.3", default-features = false, features = ["zlib", "gzip", "stream"] }
 async-trait = "0.1"
 base64 = "0.12"
 bytes = "0.5"
