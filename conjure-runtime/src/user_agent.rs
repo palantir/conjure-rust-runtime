@@ -73,7 +73,7 @@ impl UserAgent {
 
     /// Returns the identifier of this node, if provided.
     pub fn node_id(&self) -> Option<&str> {
-        self.node_id.as_ref().map(|s| &**s)
+        self.node_id.as_deref()
     }
 
     /// Returns the primary agent.
