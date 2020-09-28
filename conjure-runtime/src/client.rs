@@ -11,9 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::connect::metrics::MetricsConnector;
 use crate::node_selector::NodeSelector;
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService};
+use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::{
     send, Agent, HostMetricsRegistry, HyperBody, Request, RequestBuilder, Response, UserAgent,
 };
@@ -36,7 +36,7 @@ const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
 // Most servers time out idle connections after 60 seconds, so we'll set the client timeout a bit below that.
 const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 
-type ConjureConnector = MetricsConnector<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
+type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
 
 pub(crate) struct ClientState {
     pub(crate) client: hyper::Client<ConjureConnector, HyperBody>,
@@ -74,7 +74,7 @@ impl ClientState {
         let connector =
             HttpsConnector::with_connector(connector, ssl).map_err(Error::internal_safe)?;
 
-        let connector = MetricsConnector::new(connector, metrics, service);
+        let connector = TlsMetricsLayer::new(metrics, service).layer(connector);
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(HTTP_KEEPALIVE)

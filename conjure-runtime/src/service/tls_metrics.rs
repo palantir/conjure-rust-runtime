@@ -11,13 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use futures::task::{Context, Poll};
+use futures::future::BoxFuture;
 use http::Uri;
-use hyper::service::Service;
 use hyper_openssl::MaybeHttpsStream;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
+use tower::layer::Layer;
+use tower::Service;
 use witchcraft_metrics::{MetricId, MetricRegistry};
 
 struct Shared {
@@ -25,16 +25,14 @@ struct Shared {
     service: String,
 }
 
-#[derive(Clone)]
-pub struct MetricsConnector<T> {
-    connector: T,
+/// A connector layer which records a metric tracking TLS handshakes tagged by protocol and cipher.
+pub struct TlsMetricsLayer {
     shared: Arc<Shared>,
 }
 
-impl<T> MetricsConnector<T> {
-    pub fn new(connector: T, metrics: &Arc<MetricRegistry>, service: &str) -> MetricsConnector<T> {
-        MetricsConnector {
-            connector,
+impl TlsMetricsLayer {
+    pub fn new(metrics: &Arc<MetricRegistry>, service: &str) -> TlsMetricsLayer {
+        TlsMetricsLayer {
             shared: Arc::new(Shared {
                 metrics: metrics.clone(),
                 service: service.to_string(),
@@ -43,23 +41,39 @@ impl<T> MetricsConnector<T> {
     }
 }
 
-impl<T, S> Service<Uri> for MetricsConnector<T>
+impl<S> Layer<S> for TlsMetricsLayer {
+    type Service = TlsMetricsService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        TlsMetricsService {
+            inner,
+            shared: self.shared.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TlsMetricsService<S> {
+    inner: S,
+    shared: Arc<Shared>,
+}
+
+impl<S, T> Service<Uri> for TlsMetricsService<S>
 where
-    T: Service<Uri, Response = MaybeHttpsStream<S>>,
-    T::Future: 'static + Send,
+    S: Service<Uri, Response = MaybeHttpsStream<T>>,
+    S::Future: 'static + Send,
 {
-    type Response = MaybeHttpsStream<S>;
-    type Error = T::Error;
-    #[allow(clippy::type_complexity)]
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Response = MaybeHttpsStream<T>;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.connector.poll_ready(cx)
+        self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, req: Uri) -> Self::Future {
         let shared = self.shared.clone();
-        let future = self.connector.call(req);
+        let future = self.inner.call(req);
         Box::pin(async move {
             let stream = future.await?;
 
