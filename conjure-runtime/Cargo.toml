@@ -34,6 +34,7 @@ serde = "1.0"
 witchcraft-log = "0.3"
 witchcraft-metrics = "0.1"
 tokio = { version = "0.2", features = ["io-util", "rt-threaded", "time"] }
+tower = "0.3"
 url = "2.0"
 zipkin = "0.4"
 
@@ -43,6 +44,7 @@ conjure-runtime-config = { version = "0.2.1", path = "../conjure-runtime-config"
 tokio = { version = "0.2", features = ["full"] }
 flate2 = "1.0"
 tokio-openssl = "0.4"
+tokio-test = "0.2"
 serde_yaml = "0.8"
 
 # for doc examples

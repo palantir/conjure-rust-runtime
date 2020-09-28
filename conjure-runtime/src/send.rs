@@ -11,8 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::connect::proxy::ProxyConfig;
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
+use crate::service::proxy::ProxyLayer;
 use crate::{
     node_selector, Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody,
     Response,
@@ -29,6 +29,8 @@ use std::error::Error as _;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio::time;
+use tower::layer::Layer;
+use tower::ServiceExt;
 use url::Url;
 use witchcraft_log::info;
 use zipkin::TraceContext;
@@ -180,11 +182,10 @@ impl<'a, 'b> State<'a, 'b> {
         let (body, writer) = HyperBody::new(body);
         let request = self.new_request(headers, url, body);
 
+        let service = ProxyLayer::new(&self.client_state.proxy).layer(&self.client_state.client);
+
         let (body_result, response_result) = headers_span
-            .bind(future::join(
-                writer.write(),
-                self.client_state.client.request(request),
-            ))
+            .bind(future::join(writer.write(), service.oneshot(request)))
             .await;
 
         let response = match (body_result, response_result) {
@@ -232,33 +233,11 @@ impl<'a, 'b> State<'a, 'b> {
 
     fn new_request(
         &self,
-        mut headers: HeaderMap,
+        headers: HeaderMap,
         url: &Url,
         hyper_body: HyperBody,
     ) -> hyper::Request<HyperBody> {
-        let mut url = self.build_url(url);
-
-        match &self.client_state.proxy {
-            ProxyConfig::Http(config) => {
-                if url.scheme() == "http" {
-                    if let Some(credentials) = &config.credentials {
-                        headers.insert(PROXY_AUTHORIZATION, credentials.clone());
-                    }
-                }
-            }
-            ProxyConfig::Mesh(config) => {
-                let host = url.host_str().unwrap();
-                let host = match url.port() {
-                    Some(port) => format!("{}:{}", host, port),
-                    None => host.to_string(),
-                };
-                let host = HeaderValue::from_str(&host).unwrap();
-                headers.insert(HOST, host);
-                url.set_host(Some(config.host_and_port.host())).unwrap();
-                url.set_port(Some(config.host_and_port.port())).unwrap();
-            }
-            ProxyConfig::Direct => {}
-        }
+        let url = self.build_url(url);
 
         let mut request = hyper::Request::new(hyper_body);
         *request.method_mut() = self.request.method.clone();

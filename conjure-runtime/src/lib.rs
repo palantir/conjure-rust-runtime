@@ -216,6 +216,7 @@ use once_cell::sync::Lazy;
 
 pub mod blocking;
 mod body;
+mod service;
 mod client;
 mod conjure;
 mod connect;
