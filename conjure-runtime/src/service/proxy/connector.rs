@@ -378,11 +378,13 @@ mod test {
             ProxyConnectorLayer::new(&config).layer(tower::service_fn(|uri: Uri| async move {
                 assert_eq!(uri, "http://127.0.0.1:1234");
                 let mut builder = tokio_test::io::Builder::new();
-                builder.write(b"CONNECT foobar.com:443 HTTP/1.1\r\nhost: foobar.com:443\r\nproxy-authorization: Basic YWRtaW46aHVudGVyMg==\r\n\r\n");
+                builder.write(
+                    b"CONNECT foobar.com:443 HTTP/1.1\r\n\
+                    host: foobar.com:443\r\n\
+                    proxy-authorization: Basic YWRtaW46aHVudGVyMg==\r\n\r\n",
+                );
                 builder.read(b"HTTP/1.1 200 OK\r\n\r\n");
-                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(
-                    builder.build()
-                ))
+                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(builder.build()))
             }));
 
         let conn = service
@@ -405,7 +407,10 @@ mod test {
             ProxyConnectorLayer::new(&config).layer(tower::service_fn(|uri: Uri| async move {
                 assert_eq!(uri, "http://127.0.0.1:1234");
                 let mut builder = tokio_test::io::Builder::new();
-                builder.write(b"CONNECT foobar.com:443 HTTP/1.1\r\nhost: foobar.com:443\r\n\r\n");
+                builder.write(
+                    b"CONNECT foobar.com:443 HTTP/1.1\r\n\
+                    host: foobar.com:443\r\n\r\n",
+                );
                 builder.read(b"HTTP/1.1 401 Unauthorized\r\n\r\n");
                 Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(builder.build()))
             }));
