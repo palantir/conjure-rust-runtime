@@ -21,7 +21,6 @@ use arc_swap::ArcSwap;
 use conjure_error::Error;
 use conjure_runtime_config::ServiceConfig;
 use hyper::client::HttpConnector;
-use hyper::header::HeaderValue;
 use hyper::Method;
 use hyper_openssl::HttpsConnector;
 use openssl::ssl::{SslConnector, SslMethod};
@@ -95,7 +94,7 @@ impl ClientState {
 
 pub(crate) struct SharedClient {
     pub(crate) service: String,
-    pub(crate) user_agent: HeaderValue,
+    pub(crate) user_agent: UserAgent,
     pub(crate) state: ArcSwap<ClientState>,
     pub(crate) metrics: Arc<MetricRegistry>,
     pub(crate) host_metrics: Arc<HostMetricsRegistry>,
@@ -141,7 +140,7 @@ impl Client {
         Ok(Client {
             shared: Arc::new(SharedClient {
                 service: service.to_string(),
-                user_agent: HeaderValue::from_str(&user_agent.to_string()).unwrap(),
+                user_agent,
                 state: ArcSwap::new(Arc::new(state)),
                 metrics: metrics.clone(),
                 host_metrics: host_metrics.clone(),

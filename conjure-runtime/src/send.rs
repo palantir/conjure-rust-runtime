@@ -14,6 +14,7 @@
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
 use crate::service::proxy::ProxyLayer;
 use crate::service::trace_propagation::TracePropagationLayer;
+use crate::service::user_agent::UserAgentLayer;
 use crate::{
     node_selector, Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody,
     Response,
@@ -184,6 +185,7 @@ impl<'a, 'b> State<'a, 'b> {
         let service = ServiceBuilder::new()
             .layer(ProxyLayer::new(&self.client_state.proxy))
             .layer(TracePropagationLayer)
+            .layer(UserAgentLayer::new(&self.client.shared.user_agent))
             .service(&self.client_state.client);
 
         let (body_result, response_result) = headers_span

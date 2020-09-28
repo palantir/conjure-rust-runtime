@@ -14,3 +14,4 @@
 pub mod proxy;
 pub mod tls_metrics;
 pub mod trace_propagation;
+pub mod user_agent;
