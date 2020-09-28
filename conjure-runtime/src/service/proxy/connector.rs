@@ -17,7 +17,7 @@ use futures::future::{self, BoxFuture};
 use futures::FutureExt;
 use http::header::{HOST, PROXY_AUTHORIZATION};
 use http::uri::Scheme;
-use http::{HeaderValue, Method, Request, Response, Uri, Version};
+use http::{HeaderValue, Method, Request, StatusCode, Uri, Version};
 use hyper::client::conn;
 use hyper::client::connect::{Connected, Connection};
 use hyper::Body;
@@ -32,7 +32,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tower::layer::Layer;
 use tower::Service;
 
-/// A layer which handles socket-level setup for HTTP proxies.
+/// A connector layer which handles socket-level setup for HTTP proxies.
 ///
 /// For http requests, we just connect to the proxy server and tell hyper that the connection is proxied so it can
 /// adjust the HTTP request. For https requests, we create a tunnel through the proxy server to the target server via a
@@ -153,7 +153,10 @@ where
     .await?;
 
     if !response.status().is_success() {
-        return Err(ProxyTunnelError(response.map(|_| ())).into());
+        return Err(ProxyTunnelError {
+            status: response.status(),
+        }
+        .into());
     }
 
     Ok(conn.into_parts().io)
@@ -237,11 +240,13 @@ where
 }
 
 #[derive(Debug)]
-pub struct ProxyTunnelError(Response<()>);
+struct ProxyTunnelError {
+    status: StatusCode,
+}
 
 impl fmt::Display for ProxyTunnelError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "got status {} from HTTPS proxy", self.0.status())
+        write!(fmt, "got status {} from HTTPS proxy", self.status)
     }
 }
 
@@ -251,7 +256,6 @@ impl error::Error for ProxyTunnelError {}
 mod test {
     use super::*;
     use crate::config::{self, BasicCredentials, HostAndPort};
-    use hyper::StatusCode;
     use tower::ServiceExt;
 
     struct MockConnection(tokio_test::io::Mock);
@@ -414,6 +418,6 @@ mod test {
             .downcast::<ProxyTunnelError>()
             .unwrap();
 
-        assert_eq!(err.0.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
     }
 }
