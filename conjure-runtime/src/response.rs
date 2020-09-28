@@ -12,19 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{RemoteError, TimeoutError};
-use async_compression::stream::{GzipDecoder, ZlibDecoder};
+use crate::service::gzip::DecodedBody;
 use bytes::{Buf, Bytes};
 use conjure_error::Error;
 use futures::stream::Fuse;
-use futures::task::Context;
-use futures::{ready, FutureExt, Stream, StreamExt, TryStreamExt};
-use hyper::http::header::CONTENT_ENCODING;
+use futures::{ready, Future, Stream, StreamExt, TryStreamExt};
 use hyper::{HeaderMap, StatusCode};
+use pin_project::pin_project;
 use std::io;
 use std::mem;
 use std::mem::MaybeUninit;
 use std::pin::Pin;
-use std::task::Poll;
+use std::task::{Context, Poll};
 use std::time::Instant;
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt};
 use tokio::time::{self, Delay};
@@ -40,12 +39,12 @@ pub struct Response {
 
 impl Response {
     pub(crate) fn new(
-        response: hyper::Response<hyper::Body>,
+        response: hyper::Response<DecodedBody>,
         deadline: Instant,
         span: OpenSpan<Detached>,
     ) -> Result<Response, Error> {
         let (parts, body) = response.into_parts();
-        let body = ResponseBody::new(&parts.headers, body, deadline, span)?;
+        let body = ResponseBody::new(body, deadline, span)?;
 
         Ok(Response {
             status: parts.status,
@@ -103,39 +102,27 @@ impl Response {
 
 /// An asynchronous streaming response body.
 pub struct ResponseBody {
-    stream: Fuse<Box<dyn Stream<Item = io::Result<Bytes>> + Sync + Send + Unpin>>,
+    stream: Fuse<TimeoutStream<DecodedBody>>,
     cur: Bytes,
+    _span: OpenSpan<Detached>,
 }
 
 impl ResponseBody {
     #[allow(clippy::borrow_interior_mutable_const)]
     fn new(
-        headers: &HeaderMap,
-        body: hyper::Body,
+        body: DecodedBody,
         deadline: Instant,
         span: OpenSpan<Detached>,
     ) -> Result<ResponseBody, Error> {
-        let body = IdentityBody {
-            body,
-            deadline: time::delay_until(tokio::time::Instant::from_std(deadline)),
-            _span: span,
+        let stream = TimeoutStream {
+            stream: body,
+            deadline: time::delay_until(time::Instant::from(deadline)),
         };
-
-        let stream: Box<dyn Stream<Item = io::Result<Bytes>> + Sync + Send + Unpin> =
-            match headers.get(&CONTENT_ENCODING) {
-                Some(v) if v == "gzip" => Box::new(GzipDecoder::new(body)),
-                Some(v) if v == "deflate" => Box::new(ZlibDecoder::new(body)),
-                Some(v) if v == "identity" => Box::new(body),
-                None => Box::new(body),
-                Some(v) => {
-                    return Err(Error::internal_safe("unsupported Content-Encoding")
-                        .with_safe_param("encoding", format!("{:?}", v)));
-                }
-            };
 
         Ok(ResponseBody {
             stream: stream.fuse(),
             cur: Bytes::new(),
+            _span: span,
         })
     }
 
@@ -187,34 +174,30 @@ impl AsyncBufRead for ResponseBody {
     }
 }
 
-struct IdentityBody {
-    body: hyper::Body,
+#[pin_project]
+struct TimeoutStream<T> {
+    #[pin]
+    stream: T,
+    #[pin]
     deadline: Delay,
-    _span: OpenSpan<Detached>,
 }
 
-impl Stream for IdentityBody {
-    type Item = io::Result<Bytes>;
+impl<T, U> Stream for TimeoutStream<T>
+where
+    T: Stream<Item = io::Result<U>>,
+{
+    type Item = io::Result<U>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Poll::Ready(()) = self.deadline.poll_unpin(cx) {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+
+        if this.deadline.poll(cx).is_ready() {
             return Poll::Ready(Some(Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 TimeoutError(()),
             ))));
         }
 
-        match self.body.poll_next_unpin(cx) {
-            Poll::Ready(Some(Ok(chunk))) => Poll::Ready(Some(Ok(chunk))),
-            Poll::Ready(Some(Err(e))) => {
-                Poll::Ready(Some(Err(io::Error::new(io::ErrorKind::Other, e))))
-            }
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.body.size_hint()
+        this.stream.poll_next(cx)
     }
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
+use crate::service::gzip::GzipLayer;
 use crate::service::proxy::ProxyLayer;
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
@@ -186,6 +187,7 @@ impl<'a, 'b> State<'a, 'b> {
             .layer(ProxyLayer::new(&self.client_state.proxy))
             .layer(TracePropagationLayer)
             .layer(UserAgentLayer::new(&self.client.shared.user_agent))
+            .layer(GzipLayer)
             .service(&self.client_state.client);
 
         let (body_result, response_result) = headers_span
