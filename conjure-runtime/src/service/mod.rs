@@ -13,3 +13,4 @@
 // limitations under the License.
 pub mod proxy;
 pub mod tls_metrics;
+pub mod trace_propagation;

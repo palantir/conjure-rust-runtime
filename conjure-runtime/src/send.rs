@@ -13,6 +13,7 @@
 // limitations under the License.
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
 use crate::service::proxy::ProxyLayer;
+use crate::service::trace_propagation::TracePropagationLayer;
 use crate::{
     node_selector, Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody,
     Response,
@@ -29,11 +30,9 @@ use std::error::Error as _;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio::time;
-use tower::layer::Layer;
-use tower::ServiceExt;
+use tower::{ServiceBuilder, ServiceExt};
 use url::Url;
 use witchcraft_log::info;
-use zipkin::TraceContext;
 
 pub(crate) async fn send(client: &Client, request: Request<'_>) -> Result<Response, Error> {
     let client_state = client.shared.state.load_full();
@@ -178,11 +177,14 @@ impl<'a, 'b> State<'a, 'b> {
             .with_name("conjure-runtime: wait-for-headers")
             .detach();
 
-        let headers = self.new_headers(headers_span.context(), &body);
+        let headers = self.new_headers(&body);
         let (body, writer) = HyperBody::new(body);
         let request = self.new_request(headers, url, body);
 
-        let service = ProxyLayer::new(&self.client_state.proxy).layer(&self.client_state.client);
+        let service = ServiceBuilder::new()
+            .layer(ProxyLayer::new(&self.client_state.proxy))
+            .layer(TracePropagationLayer)
+            .service(&self.client_state.client);
 
         let (body_result, response_result) = headers_span
             .bind(future::join(writer.write(), service.oneshot(request)))
@@ -209,7 +211,6 @@ impl<'a, 'b> State<'a, 'b> {
 
     fn new_headers(
         &self,
-        context: TraceContext,
         body: &Option<Pin<&mut ResetTrackingBody<dyn Body + Sync + Send + 'b>>>,
     ) -> HeaderMap {
         let mut headers = self.request.headers.clone();
@@ -218,7 +219,6 @@ impl<'a, 'b> State<'a, 'b> {
         headers.remove(PROXY_AUTHORIZATION);
         headers.remove(CONTENT_LENGTH);
         headers.remove(CONTENT_TYPE);
-        http_zipkin::set_trace_context(context, &mut headers);
 
         if let Some(body) = body {
             if let Some(length) = body.content_length() {
