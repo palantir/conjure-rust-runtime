@@ -26,7 +26,7 @@ use url::Url;
 /// This is paired with the `ProxyConnectorLayer` which handles the socket-level proxy configuration.
 ///
 /// For http requests over an HTTP proxy, we inject the `Proxy-Authorization` header if necessary. For https requests
-/// authorization is handled in the `CONNECT` request made by the `ProxyCOnnectorLayer`.
+/// authorization is handled in the `CONNECT` request made by the `ProxyConnectorLayer`.
 ///
 /// For requests over a mesh proxy, we replace the host and port of the request URI with that of the proxy server and
 /// put the target host/port in the `Host` header.
