@@ -18,7 +18,7 @@ use bytes::Bytes;
 use conjure_error::NotFound;
 use conjure_error::{Error, ErrorKind};
 use conjure_runtime_config::{ServiceConfig, ServicesConfig};
-use flate2::write::{GzEncoder, ZlibEncoder};
+use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures::task::Context;
 use futures::{join, StreamExt, TryStreamExt};
@@ -658,37 +658,12 @@ async fn gzip_body() {
         STOCK_CONFIG,
         1,
         |req| async move {
-            assert_eq!(req.headers().get(ACCEPT_ENCODING).unwrap(), "gzip, deflate");
+            assert_eq!(req.headers().get(ACCEPT_ENCODING).unwrap(), "gzip");
             let mut body = GzEncoder::new(vec![], Compression::default());
             body.write_all(b"hello world").unwrap();
             let body = body.finish().unwrap();
             Ok(Response::builder()
                 .header(CONTENT_ENCODING, "gzip")
-                .body(hyper::Body::from(body))
-                .unwrap())
-        },
-        |client| async move {
-            let response = client.get("/").send().await.unwrap();
-            let mut body = vec![];
-            response.into_body().read_to_end(&mut body).await.unwrap();
-            assert_eq!(body, b"hello world");
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn deflate_body() {
-    test(
-        STOCK_CONFIG,
-        1,
-        |req| async move {
-            assert_eq!(req.headers().get(ACCEPT_ENCODING).unwrap(), "gzip, deflate");
-            let mut body = ZlibEncoder::new(vec![], Compression::default());
-            body.write_all(b"hello world").unwrap();
-            let body = body.finish().unwrap();
-            Ok(Response::builder()
-                .header(CONTENT_ENCODING, "deflate")
                 .body(hyper::Body::from(body))
                 .unwrap())
         },

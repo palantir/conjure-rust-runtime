@@ -325,7 +325,7 @@ impl SecurityConfig {
     ///
     /// Defaults to `None`.
     pub fn ca_file(&self) -> Option<&Path> {
-        self.ca_file.as_ref().map(|p| &**p)
+        self.ca_file.as_deref()
     }
 
     fn from_raw(raw: &raw::SecurityConfig) -> SecurityConfig {

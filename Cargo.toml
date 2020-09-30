@@ -5,3 +5,6 @@ members = [
     "conjure-verification",
     "conjure-verification-api",
 ]
+
+[patch.crates-io]
+hyper = { git = "https://github.com/hyperium/hyper" }

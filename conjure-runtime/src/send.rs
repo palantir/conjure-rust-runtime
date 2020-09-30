@@ -11,8 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::connect::proxy::ProxyConfig;
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
+use crate::service::gzip::GzipLayer;
+use crate::service::proxy::ProxyLayer;
+use crate::service::trace_propagation::TracePropagationLayer;
+use crate::service::user_agent::UserAgentLayer;
 use crate::{
     node_selector, Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody,
     Response,
@@ -29,9 +32,9 @@ use std::error::Error as _;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio::time;
+use tower::{ServiceBuilder, ServiceExt};
 use url::Url;
 use witchcraft_log::info;
-use zipkin::TraceContext;
 
 pub(crate) async fn send(client: &Client, request: Request<'_>) -> Result<Response, Error> {
     let client_state = client.shared.state.load_full();
@@ -176,15 +179,19 @@ impl<'a, 'b> State<'a, 'b> {
             .with_name("conjure-runtime: wait-for-headers")
             .detach();
 
-        let headers = self.new_headers(headers_span.context(), &body);
+        let headers = self.new_headers(&body);
         let (body, writer) = HyperBody::new(body);
         let request = self.new_request(headers, url, body);
 
+        let service = ServiceBuilder::new()
+            .layer(ProxyLayer::new(&self.client_state.proxy))
+            .layer(TracePropagationLayer)
+            .layer(UserAgentLayer::new(&self.client.shared.user_agent))
+            .layer(GzipLayer)
+            .service(&self.client_state.client);
+
         let (body_result, response_result) = headers_span
-            .bind(future::join(
-                writer.write(),
-                self.client_state.client.request(request),
-            ))
+            .bind(future::join(writer.write(), service.oneshot(request)))
             .await;
 
         let response = match (body_result, response_result) {
@@ -208,7 +215,6 @@ impl<'a, 'b> State<'a, 'b> {
 
     fn new_headers(
         &self,
-        context: TraceContext,
         body: &Option<Pin<&mut ResetTrackingBody<dyn Body + Sync + Send + 'b>>>,
     ) -> HeaderMap {
         let mut headers = self.request.headers.clone();
@@ -217,7 +223,6 @@ impl<'a, 'b> State<'a, 'b> {
         headers.remove(PROXY_AUTHORIZATION);
         headers.remove(CONTENT_LENGTH);
         headers.remove(CONTENT_TYPE);
-        http_zipkin::set_trace_context(context, &mut headers);
 
         if let Some(body) = body {
             if let Some(length) = body.content_length() {
@@ -232,33 +237,11 @@ impl<'a, 'b> State<'a, 'b> {
 
     fn new_request(
         &self,
-        mut headers: HeaderMap,
+        headers: HeaderMap,
         url: &Url,
         hyper_body: HyperBody,
     ) -> hyper::Request<HyperBody> {
-        let mut url = self.build_url(url);
-
-        match &self.client_state.proxy {
-            ProxyConfig::Http(config) => {
-                if url.scheme() == "http" {
-                    if let Some(credentials) = &config.credentials {
-                        headers.insert(PROXY_AUTHORIZATION, credentials.clone());
-                    }
-                }
-            }
-            ProxyConfig::Mesh(config) => {
-                let host = url.host_str().unwrap();
-                let host = match url.port() {
-                    Some(port) => format!("{}:{}", host, port),
-                    None => host.to_string(),
-                };
-                let host = HeaderValue::from_str(&host).unwrap();
-                headers.insert(HOST, host);
-                url.set_host(Some(config.host_and_port.host())).unwrap();
-                url.set_port(Some(config.host_and_port.port())).unwrap();
-            }
-            ProxyConfig::Direct => {}
-        }
+        let url = self.build_url(url);
 
         let mut request = hyper::Request::new(hyper_body);
         *request.method_mut() = self.request.method.clone();

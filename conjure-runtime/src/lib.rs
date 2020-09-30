@@ -218,7 +218,6 @@ pub mod blocking;
 mod body;
 mod client;
 mod conjure;
-mod connect;
 pub mod errors;
 mod host_metrics;
 mod node_selector;
@@ -226,6 +225,7 @@ mod payload;
 mod request;
 mod response;
 mod send;
+mod service;
 #[cfg(test)]
 mod test;
 mod user_agent;

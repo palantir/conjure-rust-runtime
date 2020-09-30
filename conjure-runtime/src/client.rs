@@ -11,9 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::connect::metrics::MetricsConnector;
-use crate::connect::proxy::{ProxyConfig, ProxyConnector};
 use crate::node_selector::NodeSelector;
+use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService};
+use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::{
     send, Agent, HostMetricsRegistry, HyperBody, Request, RequestBuilder, Response, UserAgent,
 };
@@ -21,12 +21,12 @@ use arc_swap::ArcSwap;
 use conjure_error::Error;
 use conjure_runtime_config::ServiceConfig;
 use hyper::client::HttpConnector;
-use hyper::header::HeaderValue;
 use hyper::Method;
 use hyper_openssl::HttpsConnector;
 use openssl::ssl::{SslConnector, SslMethod};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
+use tower::layer::Layer;
 use witchcraft_log::info;
 use witchcraft_metrics::{Meter, MetricId, MetricRegistry, Timer};
 
@@ -35,7 +35,7 @@ const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
 // Most servers time out idle connections after 60 seconds, so we'll set the client timeout a bit below that.
 const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 
-type ConjureConnector = MetricsConnector<HttpsConnector<ProxyConnector<HttpConnector>>>;
+type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
 
 pub(crate) struct ClientState {
     pub(crate) client: hyper::Client<ConjureConnector, HyperBody>,
@@ -60,7 +60,7 @@ impl ClientState {
         connector.set_connect_timeout(Some(service_config.connect_timeout()));
 
         let proxy = ProxyConfig::from_config(service_config.proxy())?;
-        let connector = ProxyConnector::new(connector, &proxy);
+        let connector = ProxyConnectorLayer::new(&proxy).layer(connector);
 
         let mut ssl = SslConnector::builder(SslMethod::tls()).map_err(Error::internal_safe)?;
         ssl.set_alpn_protos(b"\x02h2\x08http/1.1")
@@ -73,7 +73,7 @@ impl ClientState {
         let connector =
             HttpsConnector::with_connector(connector, ssl).map_err(Error::internal_safe)?;
 
-        let connector = MetricsConnector::new(connector, metrics, service);
+        let connector = TlsMetricsLayer::new(metrics, service).layer(connector);
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(HTTP_KEEPALIVE)
@@ -94,7 +94,7 @@ impl ClientState {
 
 pub(crate) struct SharedClient {
     pub(crate) service: String,
-    pub(crate) user_agent: HeaderValue,
+    pub(crate) user_agent: UserAgent,
     pub(crate) state: ArcSwap<ClientState>,
     pub(crate) metrics: Arc<MetricRegistry>,
     pub(crate) host_metrics: Arc<HostMetricsRegistry>,
@@ -140,7 +140,7 @@ impl Client {
         Ok(Client {
             shared: Arc::new(SharedClient {
                 service: service.to_string(),
-                user_agent: HeaderValue::from_str(&user_agent.to_string()).unwrap(),
+                user_agent,
                 state: ArcSwap::new(Arc::new(state)),
                 metrics: metrics.clone(),
                 host_metrics: host_metrics.clone(),

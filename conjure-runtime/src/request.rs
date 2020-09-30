@@ -15,15 +15,13 @@ use crate::{Body, Client, ResetTrackingBody, Response};
 use conjure_error::Error;
 use conjure_object::BearerToken;
 use hyper::header::{HeaderValue, ACCEPT};
-use hyper::http::header::{ACCEPT_ENCODING, AUTHORIZATION, USER_AGENT};
+use hyper::http::header::AUTHORIZATION;
 use hyper::{HeaderMap, Method};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::pin::Pin;
 
 static DEFAULT_ACCEPT: Lazy<HeaderValue> = Lazy::new(|| HeaderValue::from_static("*/*"));
-static DEFAULT_ACCEPT_ENCODING: Lazy<HeaderValue> =
-    Lazy::new(|| HeaderValue::from_static("gzip, deflate"));
 
 /// A builder for an asynchronous HTTP request.
 pub struct RequestBuilder<'a> {
@@ -125,8 +123,6 @@ impl<'a> Request<'a> {
     pub(crate) fn new(client: &Client, method: Method, pattern: &'a str) -> Request<'a> {
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, DEFAULT_ACCEPT.clone());
-        headers.insert(ACCEPT_ENCODING, DEFAULT_ACCEPT_ENCODING.clone());
-        headers.insert(USER_AGENT, client.shared.user_agent.clone());
 
         Request {
             pattern,
