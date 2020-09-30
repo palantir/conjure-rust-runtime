@@ -7,4 +7,4 @@ members = [
 ]
 
 [patch.crates-io]
-hyper = { git = "https://github.com/sfackler/hyper", branch = "connected-accessors" }
+hyper = { git = "https://github.com/hyperium/hyper" }
