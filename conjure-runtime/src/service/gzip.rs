@@ -213,6 +213,7 @@ struct GzipBody<T> {
     stream: GzipDecoder<ShimStream<T>>,
 }
 
+// NB: We can't override is_end_stream since we may get an error out of the gzip decoder at eof.
 impl<T, E> Body for GzipBody<T>
 where
     T: Body<Data = Bytes, Error = E>,
@@ -240,8 +241,6 @@ where
             .poll_trailers(cx)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
-
-    // we can't override is_end_stream since we may get an error out of the gzip decoder at eof
 }
 
 #[cfg(test)]
