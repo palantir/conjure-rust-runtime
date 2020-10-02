@@ -22,11 +22,11 @@ use conjure_error::Error;
 use conjure_runtime_config::ServiceConfig;
 use hyper::client::HttpConnector;
 use hyper::Method;
-use hyper_openssl::HttpsConnector;
+use hyper_openssl::{HttpsConnector, HttpsLayer};
 use openssl::ssl::{SslConnector, SslMethod};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tower::layer::Layer;
+use tower::ServiceBuilder;
 use witchcraft_log::info;
 use witchcraft_metrics::{Meter, MetricId, MetricRegistry, Timer};
 
@@ -59,9 +59,6 @@ impl ClientState {
         connector.set_keepalive(Some(TCP_KEEPALIVE));
         connector.set_connect_timeout(Some(service_config.connect_timeout()));
 
-        let proxy = ProxyConfig::from_config(service_config.proxy())?;
-        let connector = ProxyConnectorLayer::new(&proxy).layer(connector);
-
         let mut ssl = SslConnector::builder(SslMethod::tls()).map_err(Error::internal_safe)?;
         ssl.set_alpn_protos(b"\x02h2\x08http/1.1")
             .map_err(Error::internal_safe)?;
@@ -70,10 +67,13 @@ impl ClientState {
             ssl.set_ca_file(ca_file).map_err(Error::internal_safe)?;
         }
 
-        let connector =
-            HttpsConnector::with_connector(connector, ssl).map_err(Error::internal_safe)?;
+        let proxy = ProxyConfig::from_config(service_config.proxy())?;
 
-        let connector = TlsMetricsLayer::new(metrics, service).layer(connector);
+        let connector = ServiceBuilder::new()
+            .layer(TlsMetricsLayer::new(metrics, service))
+            .layer(HttpsLayer::with_connector(ssl).map_err(Error::internal_safe)?)
+            .layer(ProxyConnectorLayer::new(&proxy))
+            .service(connector);
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(HTTP_KEEPALIVE)
