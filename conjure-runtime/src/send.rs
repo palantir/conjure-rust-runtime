@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
-use crate::service::gzip::GzipLayer;
-use crate::service::proxy::ProxyLayer;
-use crate::service::trace_propagation::TracePropagationLayer;
-use crate::service::user_agent::UserAgentLayer;
 use crate::{
     node_selector, Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody,
     Response,
@@ -32,7 +28,8 @@ use std::error::Error as _;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio::time;
-use tower::{ServiceBuilder, ServiceExt};
+use tower::layer::Layer;
+use tower::ServiceExt;
 use url::Url;
 use witchcraft_log::info;
 
@@ -183,12 +180,10 @@ impl<'a, 'b> State<'a, 'b> {
         let (body, writer) = HyperBody::new(body);
         let request = self.new_request(headers, url, body);
 
-        let service = ServiceBuilder::new()
-            .layer(ProxyLayer::new(&self.client_state.proxy))
-            .layer(TracePropagationLayer)
-            .layer(UserAgentLayer::new(&self.client.shared.user_agent))
-            .layer(GzipLayer)
-            .service(&self.client_state.client);
+        let service = self
+            .client_state
+            .layer
+            .layer(self.client_state.client.clone());
 
         let (body_result, response_result) = headers_span
             .bind(future::join(writer.write(), service.oneshot(request)))

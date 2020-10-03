@@ -79,7 +79,7 @@ pub struct HostMetrics {
 }
 
 impl HostMetrics {
-    fn new(service: &str, host: &str, port: u16) -> HostMetrics {
+    pub(crate) fn new(service: &str, host: &str, port: u16) -> HostMetrics {
         HostMetrics {
             service_name: service.to_string(),
             hostname: host.to_string(),

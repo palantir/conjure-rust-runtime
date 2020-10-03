@@ -11,11 +11,25 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-pub mod boxed;
-pub mod gzip;
-pub mod map_error;
-pub mod node;
-pub mod proxy;
-pub mod tls_metrics;
-pub mod trace_propagation;
-pub mod user_agent;
+use crate::HostMetrics;
+use std::sync::Arc;
+use url::Url;
+
+pub mod metrics;
+pub mod selector;
+pub mod uri;
+
+pub struct Node {
+    pub url: Url,
+    pub host_metrics: Arc<HostMetrics>,
+}
+
+impl Node {
+    #[cfg(test)]
+    fn test(url: &str) -> Node {
+        Node {
+            url: url.parse().unwrap(),
+            host_metrics: Arc::new(HostMetrics::new("", "", 0)),
+        }
+    }
+}
