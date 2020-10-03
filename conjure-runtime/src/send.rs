@@ -13,8 +13,7 @@
 // limitations under the License.
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
 use crate::{
-    node_selector, Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody,
-    Response,
+    Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody, Response,
 };
 use conjure_error::Error;
 use futures::future;
@@ -40,7 +39,6 @@ pub(crate) async fn send(client: &Client, request: Request<'_>) -> Result<Respon
         client,
         client_state: &client_state,
         deadline: Instant::now() + client_state.request_timeout,
-        nodes: client_state.node_selector.iter(),
         attempt: 0,
     };
 
@@ -61,7 +59,6 @@ struct State<'a, 'b> {
     client: &'a Client,
     client_state: &'a ClientState,
     deadline: Instant,
-    nodes: node_selector::Iter<'a>,
     attempt: u32,
 }
 
@@ -127,8 +124,6 @@ impl<'a, 'b> State<'a, 'b> {
                         })
                     }
                 } else {
-                    self.nodes.prev_failed();
-
                     Err(response
                         .into_error(self.client.propagate_service_errors())
                         .await)

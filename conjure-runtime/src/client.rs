@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::node_selector::NodeSelector;
 use crate::service::boxed::BoxLayer;
 use crate::service::gzip::DecodedBody;
 use crate::service::gzip::GzipLayer;
@@ -52,7 +51,6 @@ pub(crate) struct ClientState {
         http::Response<DecodedBody>,
         Error,
     >,
-    pub(crate) node_selector: NodeSelector,
     pub(crate) max_num_retries: u32,
     pub(crate) backoff_slot_size: Duration,
     pub(crate) request_timeout: Duration,
@@ -108,12 +106,9 @@ impl ClientState {
             .into_inner();
         let layer = BoxLayer::new(layer);
 
-        let node_selector = NodeSelector::new(service, host_metrics, service_config);
-
         Ok(ClientState {
             client,
             layer,
-            node_selector,
             max_num_retries: service_config.max_num_retries(),
             backoff_slot_size: service_config.backoff_slot_size(),
             request_timeout: service_config.request_timeout(),
