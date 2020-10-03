@@ -11,6 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+pub use crate::service::node::metrics::NodeMetricsLayer;
+pub use crate::service::node::selector::NodeSelectorLayer;
+pub use crate::service::node::uri::NodeUriLayer;
 use crate::HostMetrics;
 use std::sync::Arc;
 use url::Url;
@@ -20,8 +23,8 @@ pub mod selector;
 pub mod uri;
 
 pub struct Node {
-    pub url: Url,
-    pub host_metrics: Arc<HostMetrics>,
+    url: Url,
+    host_metrics: Arc<HostMetrics>,
 }
 
 impl Node {

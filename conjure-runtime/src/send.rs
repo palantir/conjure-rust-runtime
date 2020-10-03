@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use tokio::time;
 use tower::layer::Layer;
 use tower::ServiceExt;
-use url::Url;
+use url::form_urlencoded;
 use witchcraft_log::info;
 
 pub(crate) async fn send(client: &Client, request: Request<'_>) -> Result<Response, Error> {
@@ -88,19 +88,10 @@ impl<'a, 'b> State<'a, 'b> {
         &mut self,
         body: Option<Pin<&mut ResetTrackingBody<dyn Body + Sync + Send + 'b>>>,
     ) -> Result<AttemptOutcome, Error> {
-        let node = match self.nodes.next() {
-            Some(node) => node,
-            None => {
-                return Err(Error::internal_safe("unable to select a node for request")
-                    .with_safe_param("service", &self.client.shared.service));
-            }
-        };
-
         let start = Instant::now();
-        let resp = match self.send_raw(body, &node.url).await {
+        let resp = match self.send_raw(body).await {
             Ok(response) => {
                 let elapsed = start.elapsed();
-                node.host_metrics.update(response.status(), elapsed);
                 self.client.shared.response_timer.update(elapsed);
 
                 if response.status().is_success() {
@@ -127,8 +118,6 @@ impl<'a, 'b> State<'a, 'b> {
                         })
                     }
                 } else if response.status() == StatusCode::SERVICE_UNAVAILABLE {
-                    self.nodes.prev_failed();
-
                     if self.client.propagate_qos_errors() {
                         Err(Error::unavailable_safe("propagating 503"))
                     } else {
@@ -146,9 +135,7 @@ impl<'a, 'b> State<'a, 'b> {
                 }
             }
             Err(error) => {
-                node.host_metrics.update_io_error();
                 self.client.shared.error_meter.mark(1);
-                self.nodes.prev_failed();
 
                 Ok(AttemptOutcome::Retry {
                     error,
@@ -157,20 +144,12 @@ impl<'a, 'b> State<'a, 'b> {
             }
         };
 
-        match resp {
-            Ok(AttemptOutcome::Ok(response)) => Ok(AttemptOutcome::Ok(response)),
-            Ok(AttemptOutcome::Retry { error, retry_after }) => Ok(AttemptOutcome::Retry {
-                error: error.with_safe_param("url", node.url.as_str()),
-                retry_after,
-            }),
-            Err(error) => Err(error.with_safe_param("url", node.url.as_str())),
-        }
+        resp
     }
 
     async fn send_raw(
         &mut self,
         body: Option<Pin<&mut ResetTrackingBody<dyn Body + Sync + Send + 'b>>>,
-        url: &Url,
     ) -> Result<Response, Error> {
         let headers_span = zipkin::next_span()
             .with_name("conjure-runtime: wait-for-headers")
@@ -178,7 +157,7 @@ impl<'a, 'b> State<'a, 'b> {
 
         let headers = self.new_headers(&body);
         let (body, writer) = HyperBody::new(body);
-        let request = self.new_request(headers, url, body);
+        let request = self.new_request(headers, body);
 
         let service = self
             .client_state
@@ -230,29 +209,24 @@ impl<'a, 'b> State<'a, 'b> {
         headers
     }
 
-    fn new_request(
-        &self,
-        headers: HeaderMap,
-        url: &Url,
-        hyper_body: HyperBody,
-    ) -> hyper::Request<HyperBody> {
-        let url = self.build_url(url);
+    fn new_request(&self, headers: HeaderMap, hyper_body: HyperBody) -> hyper::Request<HyperBody> {
+        let url = self.build_url();
 
         let mut request = hyper::Request::new(hyper_body);
         *request.method_mut() = self.request.method.clone();
-        *request.uri_mut() = url.as_str().parse().unwrap();
+        *request.uri_mut() = url.parse().unwrap();
         *request.headers_mut() = headers;
         request
     }
 
-    fn build_url(&self, url: &Url) -> Url {
-        let mut url = url.clone();
+    fn build_url(&self) -> String {
         let mut params = self.request.params.clone();
 
         assert!(
             self.request.pattern.starts_with('/'),
             "pattern must start with `/`"
         );
+        let mut uri = String::new();
         // make sure to skip the leading `/` to avoid an empty path segment
         for segment in self.request.pattern[1..].split('/') {
             match self.parse_param(segment) {
@@ -261,23 +235,33 @@ impl<'a, 'b> State<'a, 'b> {
                         panic!("path segment parameter {} had multiple values", name);
                     }
                     Some(value) => {
-                        url.path_segments_mut().unwrap().push(&value[0]);
+                        uri.push('/');
+                        uri.extend(form_urlencoded::byte_serialize(&value[0].as_bytes()));
                     }
                     None => panic!("path segment parameter {} had no values", name),
                 },
                 None => {
-                    url.path_segments_mut().unwrap().push(segment);
+                    uri.push('/');
+                    uri.push_str(segment);
                 }
             }
         }
 
-        for (k, vs) in &params {
+        for (i, (k, vs)) in params.iter().enumerate() {
+            if i == 0 {
+                uri.push('?');
+            } else {
+                uri.push('&');
+            }
+
             for v in vs {
-                url.query_pairs_mut().append_pair(k, v);
+                uri.extend(form_urlencoded::byte_serialize(k.as_bytes()));
+                uri.push('=');
+                uri.extend(form_urlencoded::byte_serialize(v.as_bytes()));
             }
         }
 
-        url
+        uri
     }
 
     fn parse_param<'c>(&self, segment: &'c str) -> Option<&'c str> {

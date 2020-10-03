@@ -16,6 +16,7 @@ use crate::service::boxed::BoxLayer;
 use crate::service::gzip::DecodedBody;
 use crate::service::gzip::GzipLayer;
 use crate::service::map_error::MapErrorLayer;
+use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService, ProxyLayer};
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::service::trace_propagation::TracePropagationLayer;
@@ -92,6 +93,13 @@ impl ClientState {
             .build(connector);
 
         let layer = ServiceBuilder::new()
+            .layer(NodeSelectorLayer::new(
+                service,
+                host_metrics,
+                service_config,
+            ))
+            .layer(NodeUriLayer)
+            .layer(NodeMetricsLayer)
             .layer(ProxyLayer::new(&proxy))
             .layer(TracePropagationLayer)
             .layer(UserAgentLayer::new(&user_agent))

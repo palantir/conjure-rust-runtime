@@ -80,15 +80,12 @@ mod test {
 
         let req = Request::builder()
             .uri("/fizz/buzz?hello=true")
-            .extension(Arc::new(Node::test("https://foobar.fizz:1234/foo/bar/")))
+            .extension(Arc::new(Node::test("https://foobar.fizz:1234/")))
             .body(())
             .unwrap();
         let out = service.oneshot(req).await.unwrap();
 
-        assert_eq!(
-            out.uri(),
-            "https://foobar.fizz:1234/foo/bar/fizz/buzz?hello=true"
-        );
+        assert_eq!(out.uri(), "https://foobar.fizz:1234/fizz/buzz?hello=true");
     }
 
     #[tokio::test]
