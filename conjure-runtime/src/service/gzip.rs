@@ -47,14 +47,14 @@ pub struct GzipService<S> {
     inner: S,
 }
 
-impl<S, B1, B2, E> Service<Request<B1>> for GzipService<S>
+impl<S, B1, B2, E1, E2> Service<Request<B1>> for GzipService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>, Error = E>,
-    B2: Body<Data = Bytes, Error = E> + 'static + Sync + Send,
-    E: Into<Box<dyn Error + Sync + Send>>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = E1>,
+    B2: Body<Data = Bytes, Error = E2> + 'static + Sync + Send,
+    E2: Into<Box<dyn Error + Sync + Send>>,
 {
     type Response = Response<DecodedBody>;
-    type Error = E;
+    type Error = E1;
     type Future = GzipFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -78,13 +78,13 @@ pub struct GzipFuture<F> {
     future: F,
 }
 
-impl<F, E, B> Future for GzipFuture<F>
+impl<F, E1, E2, B> Future for GzipFuture<F>
 where
-    F: Future<Output = Result<Response<B>, E>>,
-    B: Body<Data = Bytes, Error = E> + 'static + Sync + Send,
-    E: Into<Box<dyn Error + Sync + Send>>,
+    F: Future<Output = Result<Response<B>, E1>>,
+    B: Body<Data = Bytes, Error = E2> + 'static + Sync + Send,
+    E2: Into<Box<dyn Error + Sync + Send>>,
 {
-    type Output = Result<Response<DecodedBody>, E>;
+    type Output = Result<Response<DecodedBody>, E1>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let response = ready!(self.project().future.poll(cx))?;

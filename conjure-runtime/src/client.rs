@@ -15,6 +15,7 @@ use crate::node_selector::NodeSelector;
 use crate::service::boxed::BoxLayer;
 use crate::service::gzip::DecodedBody;
 use crate::service::gzip::GzipLayer;
+use crate::service::map_error::MapErrorLayer;
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService, ProxyLayer};
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::service::trace_propagation::TracePropagationLayer;
@@ -48,7 +49,7 @@ pub(crate) struct ClientState {
         hyper::Client<ConjureConnector, HyperBody>,
         http::Request<HyperBody>,
         http::Response<DecodedBody>,
-        hyper::Error,
+        Error,
     >,
     pub(crate) node_selector: NodeSelector,
     pub(crate) max_num_retries: u32,
@@ -95,6 +96,7 @@ impl ClientState {
             .layer(TracePropagationLayer)
             .layer(UserAgentLayer::new(&user_agent))
             .layer(GzipLayer)
+            .layer(MapErrorLayer)
             .into_inner();
         let layer = BoxLayer::new(layer);
 

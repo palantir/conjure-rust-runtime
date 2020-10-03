@@ -191,7 +191,7 @@ impl<'a, 'b> State<'a, 'b> {
 
         let response = match (body_result, response_result) {
             (Ok(()), Ok(response)) => response,
-            (Ok(()), Err(e)) => return Err(Error::internal_safe(e)),
+            (Ok(()), Err(e)) => return Err(e),
             (Err(e), Ok(response)) => {
                 info!(
                     "body write reported an error on a successful request",
@@ -290,11 +290,16 @@ impl<'a, 'b> State<'a, 'b> {
 
     // An error in the body write will cause an error on the hyper side, and vice versa.
     // To pick the right one, we see if the hyper error was due the body write aborting or not.
-    fn deconflict_errors(&self, body_error: Error, hyper_error: hyper::Error) -> Error {
-        if hyper_error.source().map_or(false, |e| e.is::<BodyError>()) {
+    fn deconflict_errors(&self, body_error: Error, hyper_error: Error) -> Error {
+        if hyper_error
+            .cause()
+            .downcast_ref::<hyper::Error>()
+            .and_then(hyper::Error::source)
+            .map_or(false, |e| e.is::<BodyError>())
+        {
             body_error
         } else {
-            Error::internal_safe(hyper_error)
+            hyper_error
         }
     }
 
