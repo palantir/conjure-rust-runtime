@@ -17,6 +17,7 @@ use crate::service::gzip::GzipLayer;
 use crate::service::map_error::MapErrorLayer;
 use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService, ProxyLayer};
+use crate::service::span::SpanLayer;
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
@@ -91,6 +92,7 @@ impl ClientState {
             .build(connector);
 
         let layer = ServiceBuilder::new()
+            .layer(SpanLayer::new("conjure-runtime: wait-for-headers"))
             .layer(NodeSelectorLayer::new(
                 service,
                 host_metrics,

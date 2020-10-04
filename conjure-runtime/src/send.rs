@@ -146,10 +146,6 @@ impl<'a, 'b> State<'a, 'b> {
         &mut self,
         body: Option<Pin<&mut ResetTrackingBody<dyn Body + Sync + Send + 'b>>>,
     ) -> Result<Response, Error> {
-        let headers_span = zipkin::next_span()
-            .with_name("conjure-runtime: wait-for-headers")
-            .detach();
-
         let headers = self.new_headers(&body);
         let (body, writer) = HyperBody::new(body);
         let request = self.new_request(headers, body);
@@ -159,9 +155,8 @@ impl<'a, 'b> State<'a, 'b> {
             .layer
             .layer(self.client_state.client.clone());
 
-        let (body_result, response_result) = headers_span
-            .bind(future::join(writer.write(), service.oneshot(request)))
-            .await;
+        let (body_result, response_result) =
+            future::join(writer.write(), service.oneshot(request)).await;
 
         let response = match (body_result, response_result) {
             (Ok(()), Ok(response)) => response,
