@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::service::boxed::BoxLayer;
-use crate::service::gzip::DecodedBody;
 use crate::service::gzip::GzipLayer;
 use crate::service::map_error::MapErrorLayer;
 use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService, ProxyLayer};
+use crate::service::response::ResponseLayer;
 use crate::service::span::SpanLayer;
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::service::trace_propagation::TracePropagationLayer;
@@ -49,7 +49,7 @@ pub(crate) struct ClientState {
     pub(crate) layer: BoxLayer<
         hyper::Client<ConjureConnector, HyperBody>,
         http::Request<HyperBody>,
-        http::Response<DecodedBody>,
+        Response,
         Error,
     >,
     pub(crate) max_num_retries: u32,
@@ -92,6 +92,7 @@ impl ClientState {
             .build(connector);
 
         let layer = ServiceBuilder::new()
+            .layer(ResponseLayer::new(service_config.request_timeout()))
             .layer(SpanLayer::new("conjure-runtime: wait-for-headers"))
             .layer(NodeSelectorLayer::new(
                 service,

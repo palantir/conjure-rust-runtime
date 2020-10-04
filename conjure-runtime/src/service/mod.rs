@@ -16,6 +16,7 @@ pub mod gzip;
 pub mod map_error;
 pub mod node;
 pub mod proxy;
+pub mod response;
 pub mod span;
 pub mod tls_metrics;
 pub mod trace_propagation;

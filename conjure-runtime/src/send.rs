@@ -38,7 +38,6 @@ pub(crate) async fn send(client: &Client, request: Request<'_>) -> Result<Respon
         request,
         client,
         client_state: &client_state,
-        deadline: Instant::now() + client_state.request_timeout,
         attempt: 0,
     };
 
@@ -58,7 +57,6 @@ struct State<'a, 'b> {
     request: Request<'b>,
     client: &'a Client,
     client_state: &'a ClientState,
-    deadline: Instant,
     attempt: u32,
 }
 
@@ -158,23 +156,18 @@ impl<'a, 'b> State<'a, 'b> {
         let (body_result, response_result) =
             future::join(writer.write(), service.oneshot(request)).await;
 
-        let response = match (body_result, response_result) {
-            (Ok(()), Ok(response)) => response,
-            (Ok(()), Err(e)) => return Err(e),
+        match (body_result, response_result) {
+            (Ok(()), Ok(response)) => Ok(response),
+            (Ok(()), Err(e)) => Err(e),
             (Err(e), Ok(response)) => {
                 info!(
                     "body write reported an error on a successful request",
                     error: e
                 );
-                response
+                Ok(response)
             }
-            (Err(body), Err(hyper)) => return Err(self.deconflict_errors(body, hyper)),
-        };
-
-        let body_span = zipkin::next_span()
-            .with_name("conjure-runtime: wait-for-body")
-            .detach();
-        Response::new(response, self.deadline, body_span)
+            (Err(body), Err(hyper)) => Err(self.deconflict_errors(body, hyper)),
+        }
     }
 
     fn new_headers(
