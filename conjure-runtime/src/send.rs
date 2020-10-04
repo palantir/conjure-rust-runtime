@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
+use crate::service::boxed::BoxService;
 use crate::{
     Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody, Response,
 };
@@ -28,16 +29,20 @@ use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio::time;
 use tower::layer::Layer;
-use tower::ServiceExt;
+use tower::Service;
 use url::form_urlencoded;
 use witchcraft_log::info;
 
 pub(crate) async fn send(client: &Client, request: Request<'_>) -> Result<Response, Error> {
     let client_state = client.shared.state.load_full();
+
+    let service = client_state.layer.layer(client_state.client.clone());
+
     let mut state = State {
         request,
         client,
         client_state: &client_state,
+        service,
         attempt: 0,
     };
 
@@ -57,6 +62,7 @@ struct State<'a, 'b> {
     request: Request<'b>,
     client: &'a Client,
     client_state: &'a ClientState,
+    service: BoxService<http::Request<HyperBody>, Response, Error>,
     attempt: u32,
 }
 
@@ -148,13 +154,8 @@ impl<'a, 'b> State<'a, 'b> {
         let (body, writer) = HyperBody::new(body);
         let request = self.new_request(headers, body);
 
-        let service = self
-            .client_state
-            .layer
-            .layer(self.client_state.client.clone());
-
         let (body_result, response_result) =
-            future::join(writer.write(), service.oneshot(request)).await;
+            future::join(writer.write(), self.service.call(request)).await;
 
         match (body_result, response_result) {
             (Ok(()), Ok(response)) => Ok(response),
