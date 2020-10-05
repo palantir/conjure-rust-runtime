@@ -220,7 +220,6 @@ mod client;
 mod conjure;
 pub mod errors;
 mod host_metrics;
-mod node_selector;
 mod payload;
 mod request;
 mod response;

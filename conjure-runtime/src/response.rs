@@ -42,15 +42,15 @@ impl Response {
         response: hyper::Response<DecodedBody>,
         deadline: Instant,
         span: OpenSpan<Detached>,
-    ) -> Result<Response, Error> {
+    ) -> Response {
         let (parts, body) = response.into_parts();
-        let body = ResponseBody::new(body, deadline, span)?;
+        let body = ResponseBody::new(body, deadline, span);
 
-        Ok(Response {
+        Response {
             status: parts.status,
             headers: parts.headers,
             body,
-        })
+        }
     }
 
     pub(crate) async fn into_error(self, propagate_service_errors: bool) -> Error {
@@ -109,21 +109,17 @@ pub struct ResponseBody {
 
 impl ResponseBody {
     #[allow(clippy::borrow_interior_mutable_const)]
-    fn new(
-        body: DecodedBody,
-        deadline: Instant,
-        span: OpenSpan<Detached>,
-    ) -> Result<ResponseBody, Error> {
+    fn new(body: DecodedBody, deadline: Instant, span: OpenSpan<Detached>) -> ResponseBody {
         let stream = TimeoutStream {
             stream: body,
             deadline: time::delay_until(time::Instant::from(deadline)),
         };
 
-        Ok(ResponseBody {
+        ResponseBody {
             stream: stream.fuse(),
             cur: Bytes::new(),
             _span: span,
-        })
+        }
     }
 
     /// Reads the next chunk of bytes from the response.

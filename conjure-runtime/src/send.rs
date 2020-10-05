@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
-use crate::service::gzip::GzipLayer;
-use crate::service::proxy::ProxyLayer;
-use crate::service::trace_propagation::TracePropagationLayer;
-use crate::service::user_agent::UserAgentLayer;
+use crate::service::boxed::BoxService;
 use crate::{
-    node_selector, Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody,
-    Response,
+    Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody, Response,
 };
 use conjure_error::Error;
 use futures::future;
@@ -32,18 +28,21 @@ use std::error::Error as _;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio::time;
-use tower::{ServiceBuilder, ServiceExt};
-use url::Url;
+use tower::layer::Layer;
+use tower::Service;
+use url::form_urlencoded;
 use witchcraft_log::info;
 
 pub(crate) async fn send(client: &Client, request: Request<'_>) -> Result<Response, Error> {
     let client_state = client.shared.state.load_full();
+
+    let service = client_state.layer.layer(client_state.client.clone());
+
     let mut state = State {
         request,
         client,
         client_state: &client_state,
-        deadline: Instant::now() + client_state.request_timeout,
-        nodes: client_state.node_selector.iter(),
+        service,
         attempt: 0,
     };
 
@@ -63,8 +62,7 @@ struct State<'a, 'b> {
     request: Request<'b>,
     client: &'a Client,
     client_state: &'a ClientState,
-    deadline: Instant,
-    nodes: node_selector::Iter<'a>,
+    service: BoxService<http::Request<HyperBody>, Response, Error>,
     attempt: u32,
 }
 
@@ -91,19 +89,10 @@ impl<'a, 'b> State<'a, 'b> {
         &mut self,
         body: Option<Pin<&mut ResetTrackingBody<dyn Body + Sync + Send + 'b>>>,
     ) -> Result<AttemptOutcome, Error> {
-        let node = match self.nodes.next() {
-            Some(node) => node,
-            None => {
-                return Err(Error::internal_safe("unable to select a node for request")
-                    .with_safe_param("service", &self.client.shared.service));
-            }
-        };
-
         let start = Instant::now();
-        let resp = match self.send_raw(body, &node.url).await {
+        let resp = match self.send_raw(body).await {
             Ok(response) => {
                 let elapsed = start.elapsed();
-                node.host_metrics.update(response.status(), elapsed);
                 self.client.shared.response_timer.update(elapsed);
 
                 if response.status().is_success() {
@@ -130,8 +119,6 @@ impl<'a, 'b> State<'a, 'b> {
                         })
                     }
                 } else if response.status() == StatusCode::SERVICE_UNAVAILABLE {
-                    self.nodes.prev_failed();
-
                     if self.client.propagate_qos_errors() {
                         Err(Error::unavailable_safe("propagating 503"))
                     } else {
@@ -141,17 +128,13 @@ impl<'a, 'b> State<'a, 'b> {
                         })
                     }
                 } else {
-                    self.nodes.prev_failed();
-
                     Err(response
                         .into_error(self.client.propagate_service_errors())
                         .await)
                 }
             }
             Err(error) => {
-                node.host_metrics.update_io_error();
                 self.client.shared.error_meter.mark(1);
-                self.nodes.prev_failed();
 
                 Ok(AttemptOutcome::Retry {
                     error,
@@ -160,57 +143,32 @@ impl<'a, 'b> State<'a, 'b> {
             }
         };
 
-        match resp {
-            Ok(AttemptOutcome::Ok(response)) => Ok(AttemptOutcome::Ok(response)),
-            Ok(AttemptOutcome::Retry { error, retry_after }) => Ok(AttemptOutcome::Retry {
-                error: error.with_safe_param("url", node.url.as_str()),
-                retry_after,
-            }),
-            Err(error) => Err(error.with_safe_param("url", node.url.as_str())),
-        }
+        resp
     }
 
     async fn send_raw(
         &mut self,
         body: Option<Pin<&mut ResetTrackingBody<dyn Body + Sync + Send + 'b>>>,
-        url: &Url,
     ) -> Result<Response, Error> {
-        let headers_span = zipkin::next_span()
-            .with_name("conjure-runtime: wait-for-headers")
-            .detach();
-
         let headers = self.new_headers(&body);
         let (body, writer) = HyperBody::new(body);
-        let request = self.new_request(headers, url, body);
+        let request = self.new_request(headers, body);
 
-        let service = ServiceBuilder::new()
-            .layer(ProxyLayer::new(&self.client_state.proxy))
-            .layer(TracePropagationLayer)
-            .layer(UserAgentLayer::new(&self.client.shared.user_agent))
-            .layer(GzipLayer)
-            .service(&self.client_state.client);
+        let (body_result, response_result) =
+            future::join(writer.write(), self.service.call(request)).await;
 
-        let (body_result, response_result) = headers_span
-            .bind(future::join(writer.write(), service.oneshot(request)))
-            .await;
-
-        let response = match (body_result, response_result) {
-            (Ok(()), Ok(response)) => response,
-            (Ok(()), Err(e)) => return Err(Error::internal_safe(e)),
+        match (body_result, response_result) {
+            (Ok(()), Ok(response)) => Ok(response),
+            (Ok(()), Err(e)) => Err(e),
             (Err(e), Ok(response)) => {
                 info!(
                     "body write reported an error on a successful request",
                     error: e
                 );
-                response
+                Ok(response)
             }
-            (Err(body), Err(hyper)) => return Err(self.deconflict_errors(body, hyper)),
-        };
-
-        let body_span = zipkin::next_span()
-            .with_name("conjure-runtime: wait-for-body")
-            .detach();
-        Response::new(response, self.deadline, body_span)
+            (Err(body), Err(hyper)) => Err(self.deconflict_errors(body, hyper)),
+        }
     }
 
     fn new_headers(
@@ -235,29 +193,24 @@ impl<'a, 'b> State<'a, 'b> {
         headers
     }
 
-    fn new_request(
-        &self,
-        headers: HeaderMap,
-        url: &Url,
-        hyper_body: HyperBody,
-    ) -> hyper::Request<HyperBody> {
-        let url = self.build_url(url);
+    fn new_request(&self, headers: HeaderMap, hyper_body: HyperBody) -> hyper::Request<HyperBody> {
+        let url = self.build_url();
 
         let mut request = hyper::Request::new(hyper_body);
         *request.method_mut() = self.request.method.clone();
-        *request.uri_mut() = url.as_str().parse().unwrap();
+        *request.uri_mut() = url.parse().unwrap();
         *request.headers_mut() = headers;
         request
     }
 
-    fn build_url(&self, url: &Url) -> Url {
-        let mut url = url.clone();
+    fn build_url(&self) -> String {
         let mut params = self.request.params.clone();
 
         assert!(
             self.request.pattern.starts_with('/'),
             "pattern must start with `/`"
         );
+        let mut uri = String::new();
         // make sure to skip the leading `/` to avoid an empty path segment
         for segment in self.request.pattern[1..].split('/') {
             match self.parse_param(segment) {
@@ -266,23 +219,33 @@ impl<'a, 'b> State<'a, 'b> {
                         panic!("path segment parameter {} had multiple values", name);
                     }
                     Some(value) => {
-                        url.path_segments_mut().unwrap().push(&value[0]);
+                        uri.push('/');
+                        uri.extend(form_urlencoded::byte_serialize(&value[0].as_bytes()));
                     }
                     None => panic!("path segment parameter {} had no values", name),
                 },
                 None => {
-                    url.path_segments_mut().unwrap().push(segment);
+                    uri.push('/');
+                    uri.push_str(segment);
                 }
             }
         }
 
-        for (k, vs) in &params {
+        for (i, (k, vs)) in params.iter().enumerate() {
+            if i == 0 {
+                uri.push('?');
+            } else {
+                uri.push('&');
+            }
+
             for v in vs {
-                url.query_pairs_mut().append_pair(k, v);
+                uri.extend(form_urlencoded::byte_serialize(k.as_bytes()));
+                uri.push('=');
+                uri.extend(form_urlencoded::byte_serialize(v.as_bytes()));
             }
         }
 
-        url
+        uri
     }
 
     fn parse_param<'c>(&self, segment: &'c str) -> Option<&'c str> {
@@ -295,11 +258,16 @@ impl<'a, 'b> State<'a, 'b> {
 
     // An error in the body write will cause an error on the hyper side, and vice versa.
     // To pick the right one, we see if the hyper error was due the body write aborting or not.
-    fn deconflict_errors(&self, body_error: Error, hyper_error: hyper::Error) -> Error {
-        if hyper_error.source().map_or(false, |e| e.is::<BodyError>()) {
+    fn deconflict_errors(&self, body_error: Error, hyper_error: Error) -> Error {
+        if hyper_error
+            .cause()
+            .downcast_ref::<hyper::Error>()
+            .and_then(hyper::Error::source)
+            .map_or(false, |e| e.is::<BodyError>())
+        {
             body_error
         } else {
-            Error::internal_safe(hyper_error)
+            hyper_error
         }
     }
 

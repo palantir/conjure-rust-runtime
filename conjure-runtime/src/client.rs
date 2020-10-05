@@ -11,9 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::node_selector::NodeSelector;
-use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService};
+use crate::service::boxed::BoxLayer;
+use crate::service::gzip::GzipLayer;
+use crate::service::map_error::MapErrorLayer;
+use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
+use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService, ProxyLayer};
+use crate::service::response::ResponseLayer;
+use crate::service::span::SpanLayer;
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
+use crate::service::trace_propagation::TracePropagationLayer;
+use crate::service::user_agent::UserAgentLayer;
 use crate::{
     send, Agent, HostMetricsRegistry, HyperBody, Request, RequestBuilder, Response, UserAgent,
 };
@@ -22,11 +29,11 @@ use conjure_error::Error;
 use conjure_runtime_config::ServiceConfig;
 use hyper::client::HttpConnector;
 use hyper::Method;
-use hyper_openssl::HttpsConnector;
+use hyper_openssl::{HttpsConnector, HttpsLayer};
 use openssl::ssl::{SslConnector, SslMethod};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tower::layer::Layer;
+use tower::ServiceBuilder;
 use witchcraft_log::info;
 use witchcraft_metrics::{Meter, MetricId, MetricRegistry, Timer};
 
@@ -39,16 +46,21 @@ type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<H
 
 pub(crate) struct ClientState {
     pub(crate) client: hyper::Client<ConjureConnector, HyperBody>,
-    pub(crate) node_selector: NodeSelector,
+    pub(crate) layer: BoxLayer<
+        hyper::Client<ConjureConnector, HyperBody>,
+        http::Request<HyperBody>,
+        Response,
+        Error,
+    >,
     pub(crate) max_num_retries: u32,
     pub(crate) backoff_slot_size: Duration,
     pub(crate) request_timeout: Duration,
-    pub(crate) proxy: ProxyConfig,
 }
 
 impl ClientState {
     fn from_config(
         service: &str,
+        user_agent: &UserAgent,
         metrics: &Arc<MetricRegistry>,
         host_metrics: &HostMetricsRegistry,
         service_config: &ServiceConfig,
@@ -59,9 +71,6 @@ impl ClientState {
         connector.set_keepalive(Some(TCP_KEEPALIVE));
         connector.set_connect_timeout(Some(service_config.connect_timeout()));
 
-        let proxy = ProxyConfig::from_config(service_config.proxy())?;
-        let connector = ProxyConnectorLayer::new(&proxy).layer(connector);
-
         let mut ssl = SslConnector::builder(SslMethod::tls()).map_err(Error::internal_safe)?;
         ssl.set_alpn_protos(b"\x02h2\x08http/1.1")
             .map_err(Error::internal_safe)?;
@@ -70,24 +79,42 @@ impl ClientState {
             ssl.set_ca_file(ca_file).map_err(Error::internal_safe)?;
         }
 
-        let connector =
-            HttpsConnector::with_connector(connector, ssl).map_err(Error::internal_safe)?;
+        let proxy = ProxyConfig::from_config(service_config.proxy())?;
 
-        let connector = TlsMetricsLayer::new(metrics, service).layer(connector);
+        let connector = ServiceBuilder::new()
+            .layer(TlsMetricsLayer::new(metrics, service))
+            .layer(HttpsLayer::with_connector(ssl).map_err(Error::internal_safe)?)
+            .layer(ProxyConnectorLayer::new(&proxy))
+            .service(connector);
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(HTTP_KEEPALIVE)
             .build(connector);
 
-        let node_selector = NodeSelector::new(service, host_metrics, service_config);
+        let layer = ServiceBuilder::new()
+            .layer(ResponseLayer::new(service_config.request_timeout()))
+            .layer(SpanLayer::new("conjure-runtime: wait-for-headers"))
+            .layer(NodeSelectorLayer::new(
+                service,
+                host_metrics,
+                service_config,
+            ))
+            .layer(NodeUriLayer)
+            .layer(NodeMetricsLayer)
+            .layer(ProxyLayer::new(&proxy))
+            .layer(TracePropagationLayer)
+            .layer(UserAgentLayer::new(&user_agent))
+            .layer(GzipLayer)
+            .layer(MapErrorLayer)
+            .into_inner();
+        let layer = BoxLayer::new(layer);
 
         Ok(ClientState {
             client,
-            node_selector,
+            layer,
             max_num_retries: service_config.max_num_retries(),
             backoff_slot_size: service_config.backoff_slot_size(),
             request_timeout: service_config.request_timeout(),
-            proxy,
         })
     }
 }
@@ -127,7 +154,7 @@ impl Client {
     ) -> Result<Client, Error> {
         user_agent.push_agent(Agent::new("conjure-runtime", env!("CARGO_PKG_VERSION")));
 
-        let state = ClientState::from_config(service, metrics, host_metrics, config)?;
+        let state = ClientState::from_config(service, &user_agent, metrics, host_metrics, config)?;
 
         let response_timer = metrics
             .timer(MetricId::new("client.response").with_tag("service-name", service.to_string()));
@@ -254,6 +281,7 @@ impl RefreshHandle {
 
         let state = ClientState::from_config(
             &client.service,
+            &client.user_agent,
             &client.metrics,
             &client.host_metrics,
             config,
