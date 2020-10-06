@@ -11,10 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::errors::{RemoteError, TimeoutError};
+use crate::errors::TimeoutError;
 use crate::service::gzip::DecodedBody;
 use bytes::{Buf, Bytes};
-use conjure_error::Error;
 use futures::stream::Fuse;
 use futures::{ready, Future, Stream, StreamExt, TryStreamExt};
 use hyper::{HeaderMap, StatusCode};
@@ -25,9 +24,8 @@ use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncBufRead, AsyncRead};
 use tokio::time::{self, Delay};
-use witchcraft_log::info;
 use zipkin::{Detached, OpenSpan};
 
 /// An asynchronous HTTP response.
@@ -51,37 +49,6 @@ impl Response {
             headers: parts.headers,
             body,
         }
-    }
-
-    pub(crate) async fn into_error(self, propagate_service_errors: bool) -> Error {
-        let status = self.status();
-
-        let mut buf = vec![];
-        // limit how much we read in case something weird's going on
-        if let Err(e) = self.into_body().take(10 * 1024).read_to_end(&mut buf).await {
-            info!(
-                "error reading response body",
-                error: Error::internal_safe(e),
-            );
-        }
-
-        let error = RemoteError {
-            status,
-            error: conjure_serde::json::client_from_slice(&buf).ok(),
-        };
-        let log_body = error.error.is_none();
-        let mut error = match &error.error {
-            Some(e) if propagate_service_errors => {
-                let e = e.clone();
-                Error::service_safe(error, e)
-            }
-            _ => Error::internal_safe(error),
-        };
-        if log_body {
-            error = error.with_unsafe_param("body", String::from_utf8_lossy(&buf));
-        }
-
-        error
     }
 
     /// Returns the response's status.

@@ -13,7 +13,9 @@
 // limitations under the License.
 pub mod boxed;
 pub mod gzip;
+pub mod http_error;
 pub mod map_error;
+pub mod metrics;
 pub mod node;
 pub mod proxy;
 pub mod response;

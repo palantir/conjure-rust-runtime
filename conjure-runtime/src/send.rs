@@ -13,20 +13,20 @@
 // limitations under the License.
 use crate::errors::{ThrottledError, TimeoutError, UnavailableError};
 use crate::service::boxed::BoxService;
+use crate::service::http_error::PropagationConfig;
 use crate::{
     Body, BodyError, Client, ClientState, HyperBody, Request, ResetTrackingBody, Response,
 };
-use conjure_error::Error;
+use conjure_error::{Error, ErrorKind};
 use futures::future;
 use hyper::header::{
     HeaderValue, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST, PROXY_AUTHORIZATION,
 };
-use hyper::http::header::RETRY_AFTER;
-use hyper::{HeaderMap, StatusCode};
+use hyper::HeaderMap;
 use rand::Rng;
 use std::error::Error as _;
 use std::pin::Pin;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::time;
 use tower::layer::Layer;
 use tower::Service;
@@ -89,61 +89,32 @@ impl<'a, 'b> State<'a, 'b> {
         &mut self,
         body: Option<Pin<&mut ResetTrackingBody<dyn Body + Sync + Send + 'b>>>,
     ) -> Result<AttemptOutcome, Error> {
-        let start = Instant::now();
-        let resp = match self.send_raw(body).await {
-            Ok(response) => {
-                let elapsed = start.elapsed();
-                self.client.shared.response_timer.update(elapsed);
+        match self.send_raw(body).await {
+            Ok(response) => Ok(AttemptOutcome::Ok(response)),
+            Err(error) => {
+                // we don't want to retry after propagated QoS errors
+                match error.kind() {
+                    ErrorKind::Service(_) => {}
+                    _ => return Err(error),
+                }
 
-                if response.status().is_success() {
-                    Ok(AttemptOutcome::Ok(response))
-                } else if response.status() == StatusCode::TOO_MANY_REQUESTS {
-                    let retry_after = response
-                        .headers()
-                        .get(RETRY_AFTER)
-                        .and_then(|h| h.to_str().ok())
-                        .and_then(|s| s.parse().ok())
-                        .map(Duration::from_secs);
-
-                    if self.client.propagate_qos_errors() {
-                        match retry_after {
-                            Some(backoff) => {
-                                Err(Error::throttle_for_safe("propagating 429", backoff))
-                            }
-                            None => Err(Error::throttle_safe("propagating 429")),
-                        }
-                    } else {
-                        Ok(AttemptOutcome::Retry {
-                            error: Error::internal_safe(ThrottledError(())),
-                            retry_after,
-                        })
-                    }
-                } else if response.status() == StatusCode::SERVICE_UNAVAILABLE {
-                    if self.client.propagate_qos_errors() {
-                        Err(Error::unavailable_safe("propagating 503"))
-                    } else {
-                        Ok(AttemptOutcome::Retry {
-                            error: Error::internal_safe(UnavailableError(())),
-                            retry_after: None,
-                        })
-                    }
+                if let Some(throttled) = error.cause().downcast_ref::<ThrottledError>() {
+                    Ok(AttemptOutcome::Retry {
+                        retry_after: throttled.retry_after,
+                        error,
+                    })
+                } else if error.cause().is::<UnavailableError>()
+                    || error.cause().is::<hyper::Error>()
+                {
+                    Ok(AttemptOutcome::Retry {
+                        error,
+                        retry_after: None,
+                    })
                 } else {
-                    Err(response
-                        .into_error(self.client.propagate_service_errors())
-                        .await)
+                    Err(error)
                 }
             }
-            Err(error) => {
-                self.client.shared.error_meter.mark(1);
-
-                Ok(AttemptOutcome::Retry {
-                    error,
-                    retry_after: None,
-                })
-            }
-        };
-
-        resp
+        }
     }
 
     async fn send_raw(
@@ -200,6 +171,10 @@ impl<'a, 'b> State<'a, 'b> {
         *request.method_mut() = self.request.method.clone();
         *request.uri_mut() = url.parse().unwrap();
         *request.headers_mut() = headers;
+        request.extensions_mut().insert(PropagationConfig {
+            propagate_qos_errors: self.client.propagate_qos_errors(),
+            propagate_service_errors: self.client.propagate_service_errors(),
+        });
         request
     }
 

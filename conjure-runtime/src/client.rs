@@ -13,7 +13,9 @@
 // limitations under the License.
 use crate::service::boxed::BoxLayer;
 use crate::service::gzip::GzipLayer;
+use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
+use crate::service::metrics::MetricsLayer;
 use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService, ProxyLayer};
 use crate::service::response::ResponseLayer;
@@ -35,7 +37,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tower::ServiceBuilder;
 use witchcraft_log::info;
-use witchcraft_metrics::{Meter, MetricId, MetricRegistry, Timer};
+use witchcraft_metrics::MetricRegistry;
 
 // This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
 const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
@@ -93,7 +95,9 @@ impl ClientState {
 
         let layer = ServiceBuilder::new()
             .layer(ResponseLayer::new(service_config.request_timeout()))
+            .layer(HttpErrorLayer)
             .layer(SpanLayer::new("conjure-runtime: wait-for-headers"))
+            .layer(MetricsLayer::new(metrics, service))
             .layer(NodeSelectorLayer::new(
                 service,
                 host_metrics,
@@ -125,8 +129,6 @@ pub(crate) struct SharedClient {
     pub(crate) state: ArcSwap<ClientState>,
     pub(crate) metrics: Arc<MetricRegistry>,
     pub(crate) host_metrics: Arc<HostMetricsRegistry>,
-    pub(crate) response_timer: Arc<Timer>,
-    pub(crate) error_meter: Arc<Meter>,
 }
 
 /// An asynchronous HTTP client to a remote service.
@@ -156,14 +158,6 @@ impl Client {
 
         let state = ClientState::from_config(service, &user_agent, metrics, host_metrics, config)?;
 
-        let response_timer = metrics
-            .timer(MetricId::new("client.response").with_tag("service-name", service.to_string()));
-        let error_meter = metrics.meter(
-            MetricId::new("client.response.error")
-                .with_tag("service-name", service.to_string())
-                .with_tag("reason", "IOException"),
-        );
-
         Ok(Client {
             shared: Arc::new(SharedClient {
                 service: service.to_string(),
@@ -171,8 +165,6 @@ impl Client {
                 state: ArcSwap::new(Arc::new(state)),
                 metrics: metrics.clone(),
                 host_metrics: host_metrics.clone(),
-                response_timer,
-                error_meter,
             }),
             assume_idempotent: false,
             propagate_qos_errors: false,
