@@ -46,6 +46,7 @@ flate2 = "1.0"
 tokio-openssl = "0.4"
 tokio-test = "0.2"
 serde_yaml = "0.8"
+tower-util = "0.3"
 
 # for doc examples
 conjure-codegen = { version = "0.7", features = ["example-types"] }
