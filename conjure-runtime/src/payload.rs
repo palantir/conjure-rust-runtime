@@ -123,10 +123,7 @@ impl http_body::Body for HyperBody {
     }
 
     fn is_end_stream(&self) -> bool {
-        match self {
-            HyperBody::Empty => true,
-            _ => false,
-        }
+        matches!(self, HyperBody::Empty)
     }
 }
 

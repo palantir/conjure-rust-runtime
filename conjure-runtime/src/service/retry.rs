@@ -113,7 +113,8 @@ where
     }
 }
 
-type RetryBody<'a, B> = Option<Pin<&'a mut ResetTrackingBody<B>>>;
+type RetryBody<'a> = Option<Pin<Box<ResetTrackingBody<dyn Body + 'a + Sync + Send>>>>;
+type RetryBodyRef<'a, 'b> = Option<Pin<&'a mut ResetTrackingBody<dyn Body + 'b + Sync + Send>>>;
 
 pub struct RetryService<S>
 where
@@ -125,13 +126,12 @@ where
     backoff_slot_size: Duration,
 }
 
-impl<'a, S, B> Service<Request<RetryBody<'a, B>>> for RetryService<S>
+impl<'a, S> Service<Request<RetryBody<'a>>> for RetryService<S>
 where
     S: MakeService,
     <S as MakeService>::Service: Service<Request<HyperBody>, Error = Error> + 'a + Send,
     <<S as MakeService>::Service as Service<Request<HyperBody>>>::Response: Send,
     <<S as MakeService>::Service as Service<Request<HyperBody>>>::Future: Send,
-    B: ?Sized + Body + 'a + Send,
 {
     type Response = <<S as MakeService>::Service as Service<Request<HyperBody>>>::Response;
     type Error = Error;
@@ -144,7 +144,7 @@ where
             .poll_ready(cx)
     }
 
-    fn call(&mut self, req: Request<RetryBody<'a, B>>) -> Self::Future {
+    fn call(&mut self, req: Request<RetryBody<'a>>) -> Self::Future {
         let inner = self.inner.take().expect("call invoked before poll_ready");
         let max_num_retries = self.max_num_retries;
         let backoff_slot_size = self.backoff_slot_size;
@@ -177,10 +177,7 @@ impl<S> State<S>
 where
     S: Service<Request<HyperBody>, Error = Error>,
 {
-    async fn call<B>(mut self, mut req: Request<RetryBody<'_, B>>) -> Result<S::Response, Error>
-    where
-        B: ?Sized + Body + Send,
-    {
+    async fn call(mut self, mut req: Request<RetryBody<'_>>) -> Result<S::Response, Error> {
         loop {
             let span = zipkin::next_span()
                 .with_name(&format!("conjure-runtime: attempt {}", self.attempt))
@@ -202,13 +199,10 @@ where
     }
 
     // Request.extensions isn't clone, so we need to handle this manually
-    fn clone_request<'a, B>(
+    fn clone_request<'a, 'b>(
         &self,
-        req: &'a mut Request<RetryBody<'_, B>>,
-    ) -> Request<RetryBody<'a, B>>
-    where
-        B: ?Sized,
-    {
+        req: &'a mut Request<RetryBody<'b>>,
+    ) -> Request<RetryBodyRef<'a, 'b>> {
         let mut new_req = Request::new(());
 
         *new_req.method_mut() = req.method().clone();
@@ -223,13 +217,10 @@ where
         Request::from_parts(parts, req.body_mut().as_mut().map(|r| r.as_mut()))
     }
 
-    async fn send_attempt<B>(
+    async fn send_attempt(
         &mut self,
-        req: Request<RetryBody<'_, B>>,
-    ) -> Result<AttemptOutcome<S::Response>, Error>
-    where
-        B: ?Sized + Body + Send,
-    {
+        req: Request<RetryBodyRef<'_, '_>>,
+    ) -> Result<AttemptOutcome<S::Response>, Error> {
         match self.send_raw(req).await {
             Ok(response) => Ok(AttemptOutcome::Ok(response)),
             Err(error) => {
@@ -259,10 +250,7 @@ where
     }
 
     // As noted above, this should be a separate layer!
-    async fn send_raw<B>(&mut self, req: Request<RetryBody<'_, B>>) -> Result<S::Response, Error>
-    where
-        B: ?Sized + Body + Send,
-    {
+    async fn send_raw(&mut self, req: Request<RetryBodyRef<'_, '_>>) -> Result<S::Response, Error> {
         future::poll_fn(|cx| self.inner.poll_ready(cx)).await?;
 
         let (mut parts, body) = req.into_parts();
@@ -309,15 +297,12 @@ where
         }
     }
 
-    async fn prepare_for_retry<B>(
+    async fn prepare_for_retry(
         &mut self,
-        body: RetryBody<'_, B>,
+        body: RetryBodyRef<'_, '_>,
         error: Error,
         retry_after: Option<Duration>,
-    ) -> Result<(), Error>
-    where
-        B: ?Sized + Body + Send,
-    {
+    ) -> Result<(), Error> {
         self.attempt += 1;
         if self.attempt >= self.max_num_retries {
             info!("exceeded retry limits");
@@ -412,7 +397,7 @@ mod test {
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(None::<Pin<&mut ResetTrackingBody<BytesBody>>>)
+            .body(None)
             .unwrap();
         service.oneshot(request).await.unwrap();
     }
@@ -438,11 +423,12 @@ mod test {
             },
         ));
 
-        let mut body =
-            ResetTrackingBody::new(BytesBody::new(body, HeaderValue::from_static("text/plain")));
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(Some(Pin::new(&mut body)))
+            .body(Some(Box::pin(ResetTrackingBody::new(BytesBody::new(
+                body,
+                HeaderValue::from_static("text/plain"),
+            ))) as _))
             .unwrap();
         service.oneshot(request).await.unwrap();
     }
@@ -489,10 +475,9 @@ mod test {
             },
         ));
 
-        let mut body = ResetTrackingBody::new(StreamedBody);
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(Some(Pin::new(&mut body)))
+            .body(Some(Box::pin(ResetTrackingBody::new(StreamedBody)) as _))
             .unwrap();
         service.oneshot(request).await.unwrap();
     }
@@ -531,10 +516,11 @@ mod test {
             },
         ));
 
-        let mut body = ResetTrackingBody::new(StreamedInfiniteBody);
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(Some(Pin::new(&mut body)))
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(StreamedInfiniteBody)) as _
+            ))
             .unwrap();
         let err = service.oneshot(request).await.err().unwrap();
 
@@ -576,10 +562,11 @@ mod test {
             },
         ));
 
-        let mut body = ResetTrackingBody::new(StreamedErrorBody);
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(Some(Pin::new(&mut body)))
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(StreamedErrorBody)) as _
+            ))
             .unwrap();
         let err = service.oneshot(request).await.err().unwrap();
 
@@ -650,13 +637,13 @@ mod test {
             },
         ));
 
-        let mut body = ResetTrackingBody::new(RetryingBody::new(1));
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(Some(Pin::new(&mut body)))
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
+            ))
             .unwrap();
         service.oneshot(request).await.unwrap();
-        assert_eq!(body.get_ref().retries, 0);
     }
 
     #[tokio::test]
@@ -678,13 +665,13 @@ mod test {
             },
         ));
 
-        let mut body = ResetTrackingBody::new(RetryingBody::new(1));
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(Some(Pin::new(&mut body)))
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
+            ))
             .unwrap();
         service.oneshot(request).await.unwrap();
-        assert_eq!(body.get_ref().retries, 0);
     }
 
     #[tokio::test]
@@ -706,10 +693,11 @@ mod test {
             },
         ));
 
-        let mut body = ResetTrackingBody::new(RetryingBody::new(0));
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(Some(Pin::new(&mut body)))
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
+            ))
             .unwrap();
         service.oneshot(request).await.err().unwrap();
     }
@@ -733,10 +721,11 @@ mod test {
             },
         ));
 
-        let mut body = ResetTrackingBody::new(RetryingBody::new(0));
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(Some(Pin::new(&mut body)))
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
+            ))
             .unwrap();
         service.oneshot(request).await.err().unwrap();
     }
@@ -757,7 +746,7 @@ mod test {
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: false })
-            .body(None::<Pin<&mut ResetTrackingBody<BytesBody>>>)
+            .body(None)
             .unwrap();
         let err = service.oneshot(request).await.err().unwrap();
         assert!(err.cause().is::<UnavailableError>());
@@ -784,10 +773,11 @@ mod test {
             },
         ));
 
-        let mut body = ResetTrackingBody::new(RetryingBody::new(0));
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(Some(Pin::new(&mut body)))
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
+            ))
             .unwrap();
         service.oneshot(request).await.unwrap();
     }
@@ -810,12 +800,12 @@ mod test {
             },
         ));
 
-        let mut body = ResetTrackingBody::new(RetryingBody::new(1));
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
-            .body(Some(Pin::new(&mut body)))
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
+            ))
             .unwrap();
         service.oneshot(request).await.err().unwrap();
-        assert_eq!(body.get_ref().retries, 0);
     }
 }

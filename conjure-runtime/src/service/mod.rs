@@ -18,6 +18,7 @@ pub mod map_error;
 pub mod metrics;
 pub mod node;
 pub mod proxy;
+pub mod request;
 pub mod response;
 pub mod retry;
 pub mod span;

@@ -148,11 +148,6 @@ where
             body,
         }
     }
-
-    #[cfg(test)]
-    pub fn get_ref(&self) -> &T {
-        &self.body
-    }
 }
 
 impl<T> ResetTrackingBody<T>
