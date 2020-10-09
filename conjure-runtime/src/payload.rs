@@ -167,7 +167,7 @@ where
     }
 }
 
-/// The asynchronous writer passed to `Body::write_body`.
+/// The asynchronous writer passed to `Body::write`.
 pub struct BodyWriter {
     sender: mpsc::Sender<BodyPart>,
     buf: BytesMut,
