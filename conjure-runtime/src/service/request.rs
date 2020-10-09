@@ -13,6 +13,7 @@
 // limitations under the License.
 use crate::body::ResetTrackingBody;
 use crate::request::Request;
+use crate::service::http_error::PropagationConfig;
 use crate::service::retry::RetryConfig;
 use crate::Body;
 use http::Uri;
@@ -89,6 +90,10 @@ where
         new_req.extensions_mut().insert(RetryConfig {
             idempotent: req.idempotent,
         });
+        new_req.extensions_mut().insert(PropagationConfig {
+            propagate_qos_errors: req.propagate_qos_errors,
+            propagate_service_errors: req.propagate_service_errors,
+        });
 
         span.bind(self.inner.call(new_req))
     }
@@ -159,6 +164,8 @@ mod test {
             headers: HeaderMap::new(),
             body: None,
             idempotent: false,
+            propagate_qos_errors: false,
+            propagate_service_errors: false,
         }
     }
 

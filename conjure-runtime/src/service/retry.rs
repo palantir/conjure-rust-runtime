@@ -23,6 +23,7 @@ use http::{HeaderValue, Request};
 use rand::Rng;
 use std::error;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::time;
@@ -35,39 +36,10 @@ pub struct RetryConfig {
     pub idempotent: bool,
 }
 
-pub trait MakeService {
-    type Service;
-
-    fn make_service(&mut self) -> Self::Service;
-}
-
-pub struct LayerServiceMaker<L, S> {
-    layer: L,
-    service: S,
-}
-
-impl<L, S> LayerServiceMaker<L, S> {
-    pub fn new(layer: L, service: S) -> LayerServiceMaker<L, S> {
-        LayerServiceMaker { layer, service }
-    }
-}
-
-impl<L, S> MakeService for LayerServiceMaker<L, S>
-where
-    S: Clone,
-    L: Layer<S>,
-{
-    type Service = L::Service;
-
-    fn make_service(&mut self) -> Self::Service {
-        self.layer.layer(self.service.clone())
-    }
-}
-
 /// A layer which retries failed requests in certain cases.
 ///
-/// Unlike most layers, it does not wrap a `Service`, but instead a `MakeService`. A new inner service is created for
-/// each request, which handles all of the attempts for that single request.
+/// The `RetryLayer` wraps another layer which is used to create a new service for each request that handles all of that
+/// request's attempts. The service passed to the layer must be cloneable as well.
 ///
 /// A request is retried if it fails with a service error with a cause of `ThrottledError`, `UnavailableError`, or
 /// `hyper::Error`. Only idempotent requests can be retried, as specified by the `RetryConfig` struct in the request's
@@ -83,29 +55,33 @@ where
 /// Due to https://github.com/rust-lang/rust/issues/71462, this layer also converts the Conjure `Body` into an
 /// `http_body::Body` and sets the `Content-Length` and `Content-Type` headers based off the `Body` implementation, but
 /// this should be factored out to a separate layer when the compiler bug has been fixed.
-pub struct RetryLayer {
+pub struct RetryLayer<L> {
+    layer: Arc<L>,
     max_num_retries: u32,
     backoff_slot_size: Duration,
 }
 
-impl RetryLayer {
-    pub fn new(max_num_retries: u32, backoff_slot_size: Duration) -> RetryLayer {
+impl<L> RetryLayer<L> {
+    pub fn new(layer: Arc<L>, max_num_retries: u32, backoff_slot_size: Duration) -> RetryLayer<L> {
         RetryLayer {
+            layer,
             max_num_retries,
             backoff_slot_size,
         }
     }
 }
 
-impl<S> Layer<S> for RetryLayer
+impl<L, S> Layer<S> for RetryLayer<L>
 where
-    S: MakeService,
+    L: Layer<S>,
+    S: Clone,
 {
-    type Service = RetryService<S>;
+    type Service = RetryService<L, S>;
 
-    fn layer(&self, source: S) -> Self::Service {
+    fn layer(&self, base: S) -> Self::Service {
         RetryService {
-            source,
+            layer: self.layer.clone(),
+            base,
             inner: None,
             max_num_retries: self.max_num_retries,
             backoff_slot_size: self.backoff_slot_size,
@@ -116,31 +92,34 @@ where
 type RetryBody<'a> = Option<Pin<Box<ResetTrackingBody<dyn Body + 'a + Sync + Send>>>>;
 type RetryBodyRef<'a, 'b> = Option<Pin<&'a mut ResetTrackingBody<dyn Body + 'b + Sync + Send>>>;
 
-pub struct RetryService<S>
+pub struct RetryService<L, S>
 where
-    S: MakeService,
+    L: Layer<S>,
 {
-    source: S,
-    inner: Option<S::Service>,
+    layer: Arc<L>,
+    base: S,
+    inner: Option<L::Service>,
     max_num_retries: u32,
     backoff_slot_size: Duration,
 }
 
-impl<'a, S> Service<Request<RetryBody<'a>>> for RetryService<S>
+impl<'a, L, S> Service<Request<RetryBody<'a>>> for RetryService<L, S>
 where
-    S: MakeService,
-    <S as MakeService>::Service: Service<Request<HyperBody>, Error = Error> + 'a + Send,
-    <<S as MakeService>::Service as Service<Request<HyperBody>>>::Response: Send,
-    <<S as MakeService>::Service as Service<Request<HyperBody>>>::Future: Send,
+    L: Layer<S>,
+    S: Clone,
+    <L as Layer<S>>::Service: Service<Request<HyperBody>, Error = Error> + 'a + Send,
+    <<L as Layer<S>>::Service as Service<Request<HyperBody>>>::Response: Send,
+    <<L as Layer<S>>::Service as Service<Request<HyperBody>>>::Future: Send,
 {
-    type Response = <<S as MakeService>::Service as Service<Request<HyperBody>>>::Response;
+    type Response = <<L as Layer<S>>::Service as Service<Request<HyperBody>>>::Response;
     type Error = Error;
     type Future = BoxFuture<'a, Result<Self::Response, Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let source = &mut self.source;
+        let layer = &self.layer;
+        let base = &self.base;
         self.inner
-            .get_or_insert_with(|| source.make_service())
+            .get_or_insert_with(|| layer.layer(base.clone()))
             .poll_ready(cx)
     }
 
@@ -362,27 +341,13 @@ mod test {
     use async_trait::async_trait;
     use http_body::Body as _;
     use tokio::io::AsyncWriteExt;
+    use tower::layer::Identity;
     use tower::ServiceExt;
-    use tower_util::ServiceFn;
-
-    struct OnceMaker<S>(Option<S>);
-
-    impl<S> MakeService for OnceMaker<S> {
-        type Service = S;
-
-        fn make_service(&mut self) -> Self::Service {
-            self.0.take().unwrap()
-        }
-    }
-
-    fn maker_fn<F>(f: F) -> OnceMaker<ServiceFn<F>> {
-        OnceMaker(Some(tower::service_fn(f)))
-    }
 
     #[tokio::test]
     async fn no_body() {
-        let service = RetryLayer::new(0, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<_>| async move {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 0, Duration::from_secs(0)).layer(
+            tower::service_fn(|req: Request<_>| async move {
                 assert_eq!(req.headers().get(CONTENT_LENGTH), None);
                 assert_eq!(req.headers().get(CONTENT_TYPE), None);
 
@@ -392,8 +357,8 @@ mod test {
                 }
 
                 Ok(())
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
@@ -406,8 +371,8 @@ mod test {
     async fn fixed_size_body() {
         let body = "hello world";
 
-        let service = RetryLayer::new(0, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<_>| async move {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 0, Duration::from_secs(0)).layer(
+            tower::service_fn(|req: Request<_>| async move {
                 assert_eq!(
                     req.headers().get(CONTENT_LENGTH).unwrap(),
                     &*body.len().to_string()
@@ -420,8 +385,8 @@ mod test {
                 }
 
                 Ok(())
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
@@ -459,8 +424,8 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body() {
-        let service = RetryLayer::new(0, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<_>| async move {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 0, Duration::from_secs(0)).layer(
+            tower::service_fn(|req: Request<_>| async move {
                 assert_eq!(req.headers().get(CONTENT_LENGTH), None);
                 assert_eq!(req.headers().get(CONTENT_TYPE).unwrap(), "text/plain");
 
@@ -472,8 +437,8 @@ mod test {
                 assert_eq!(body, "hello world");
 
                 Ok(())
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
@@ -508,13 +473,13 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body_hangup() {
-        let service = RetryLayer::new(0, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<HyperBody>| async move {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 0, Duration::from_secs(0)).layer(
+            tower::service_fn(|req: Request<HyperBody>| async move {
                 req.into_body().data().await.unwrap().unwrap();
 
                 Err::<(), _>(Error::internal_safe("blammo"))
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
@@ -552,15 +517,15 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body_error() {
-        let service = RetryLayer::new(0, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<HyperBody>| async move {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 0, Duration::from_secs(0)).layer(
+            tower::service_fn(|req: Request<HyperBody>| async move {
                 hyper::body::to_bytes(req.into_body())
                     .await
                     .map_err(Error::internal_safe)?;
 
                 Ok(())
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
@@ -621,8 +586,8 @@ mod test {
     #[tokio::test]
     async fn retry_after_unavailable() {
         let mut attempt = 0;
-        let service = RetryLayer::new(2, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<HyperBody>| {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 2, Duration::from_secs(0)).layer(
+            tower::service_fn(move |req: Request<HyperBody>| {
                 attempt += 1;
                 async move {
                     let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -634,8 +599,8 @@ mod test {
                         _ => panic!(),
                     }
                 }
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
@@ -649,8 +614,8 @@ mod test {
     #[tokio::test]
     async fn retry_after_throttled() {
         let mut attempt = 0;
-        let service = RetryLayer::new(2, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<HyperBody>| {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 2, Duration::from_secs(0)).layer(
+            tower::service_fn(move |req: Request<HyperBody>| {
                 attempt += 1;
                 async move {
                     let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -662,8 +627,8 @@ mod test {
                         _ => panic!(),
                     }
                 }
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
@@ -677,8 +642,8 @@ mod test {
     #[tokio::test]
     async fn no_retry_after_propagated_unavailable() {
         let mut attempt = 0;
-        let service = RetryLayer::new(2, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<HyperBody>| {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 2, Duration::from_secs(0)).layer(
+            tower::service_fn(move |req: Request<HyperBody>| {
                 attempt += 1;
                 async move {
                     let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -690,8 +655,8 @@ mod test {
                         _ => panic!(),
                     }
                 }
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
@@ -705,8 +670,8 @@ mod test {
     #[tokio::test]
     async fn no_retry_after_propagated_throttled() {
         let mut attempt = 0;
-        let service = RetryLayer::new(2, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<HyperBody>| {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 2, Duration::from_secs(0)).layer(
+            tower::service_fn(move |req: Request<HyperBody>| {
                 attempt += 1;
                 async move {
                     let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -718,8 +683,8 @@ mod test {
                         _ => panic!(),
                     }
                 }
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
@@ -733,16 +698,18 @@ mod test {
     #[tokio::test]
     async fn no_retry_non_idempotent() {
         let mut attempt = 0;
-        let service = RetryLayer::new(2, Duration::from_secs(0)).layer(maker_fn(|_| {
-            attempt += 1;
-            async move {
-                match attempt {
-                    1 => Err(Error::internal_safe(UnavailableError(()))),
-                    2 => Ok(()),
-                    _ => panic!(),
+        let service = RetryLayer::new(Arc::new(Identity::new()), 2, Duration::from_secs(0)).layer(
+            tower::service_fn(move |_| {
+                attempt += 1;
+                async move {
+                    match attempt {
+                        1 => Err(Error::internal_safe(UnavailableError(()))),
+                        2 => Ok(()),
+                        _ => panic!(),
+                    }
                 }
-            }
-        }));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: false })
@@ -755,8 +722,8 @@ mod test {
     #[tokio::test]
     async fn no_reset_unread_body() {
         let mut attempt = 0;
-        let service = RetryLayer::new(2, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<HyperBody>| {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 2, Duration::from_secs(0)).layer(
+            tower::service_fn(move |req: Request<HyperBody>| {
                 attempt += 1;
                 async move {
                     match attempt {
@@ -770,8 +737,8 @@ mod test {
                         _ => panic!(),
                     }
                 }
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })
@@ -785,8 +752,8 @@ mod test {
     #[tokio::test]
     async fn give_up_after_limit() {
         let mut attempt = 0;
-        let service = RetryLayer::new(2, Duration::from_secs(0)).layer(maker_fn(
-            |req: Request<HyperBody>| {
+        let service = RetryLayer::new(Arc::new(Identity::new()), 2, Duration::from_secs(0)).layer(
+            tower::service_fn(move |req: Request<HyperBody>| {
                 attempt += 1;
                 async move {
                     let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -797,8 +764,8 @@ mod test {
                         _ => panic!(),
                     }
                 }
-            },
-        ));
+            }),
+        );
 
         let request = Request::builder()
             .extension(RetryConfig { idempotent: true })

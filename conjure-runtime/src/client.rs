@@ -12,20 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::service::boxed::BoxLayer;
-use crate::service::gzip::GzipLayer;
+use crate::service::gzip::{DecodedBody, GzipLayer};
 use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
 use crate::service::metrics::MetricsLayer;
 use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService, ProxyLayer};
+use crate::service::request::RequestLayer;
 use crate::service::response::ResponseLayer;
-use crate::service::span::SpanLayer;
+use crate::service::retry::RetryLayer;
+use crate::service::span::{SpanBody, SpanLayer};
+use crate::service::timeout::TimeoutLayer;
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
-use crate::{
-    send, Agent, HostMetricsRegistry, HyperBody, Request, RequestBuilder, Response, UserAgent,
-};
+use crate::{Agent, HostMetricsRegistry, HyperBody, Request, RequestBuilder, Response, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
 use conjure_runtime_config::ServiceConfig;
@@ -35,7 +36,7 @@ use hyper_openssl::{HttpsConnector, HttpsLayer};
 use openssl::ssl::{SslConnector, SslMethod};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tower::ServiceBuilder;
+use tower::{ServiceBuilder, ServiceExt};
 use witchcraft_log::info;
 use witchcraft_metrics::MetricRegistry;
 
@@ -45,15 +46,16 @@ const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
 const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 
 type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
+type AttemptLayer = BoxLayer<
+    hyper::Client<ConjureConnector, HyperBody>,
+    hyper::Request<HyperBody>,
+    hyper::Response<SpanBody<DecodedBody>>,
+    Error,
+>;
 
 pub(crate) struct ClientState {
     pub(crate) client: hyper::Client<ConjureConnector, HyperBody>,
-    pub(crate) layer: BoxLayer<
-        hyper::Client<ConjureConnector, HyperBody>,
-        http::Request<HyperBody>,
-        Response,
-        Error,
-    >,
+    pub(crate) attempt_layer: Arc<AttemptLayer>,
     pub(crate) max_num_retries: u32,
     pub(crate) backoff_slot_size: Duration,
     pub(crate) request_timeout: Duration,
@@ -93,10 +95,9 @@ impl ClientState {
             .pool_idle_timeout(HTTP_KEEPALIVE)
             .build(connector);
 
-        let layer = ServiceBuilder::new()
-            .layer(ResponseLayer::new(service_config.request_timeout()))
+        let attempt_layer = ServiceBuilder::new()
             .layer(HttpErrorLayer)
-            .layer(SpanLayer::new("conjure-runtime: wait-for-headers"))
+            .layer(SpanLayer)
             .layer(MetricsLayer::new(metrics, service))
             .layer(NodeSelectorLayer::new(
                 service,
@@ -111,15 +112,32 @@ impl ClientState {
             .layer(GzipLayer)
             .layer(MapErrorLayer)
             .into_inner();
-        let layer = BoxLayer::new(layer);
+        let attempt_layer = Arc::new(BoxLayer::new(attempt_layer));
 
         Ok(ClientState {
             client,
-            layer,
+            attempt_layer,
             max_num_retries: service_config.max_num_retries(),
             backoff_slot_size: service_config.backoff_slot_size(),
             request_timeout: service_config.request_timeout(),
         })
+    }
+
+    async fn send(&self, request: Request<'_>) -> Result<Response, Error> {
+        // Ideally we'd build the layer once and store it in ClientState instead of just the attempt layer, but
+        // https://github.com/rust-lang/rust/issues/71462 prevents us from doing that.
+        ServiceBuilder::new()
+            .layer(RequestLayer)
+            .layer(ResponseLayer)
+            .layer(TimeoutLayer::new(self.request_timeout))
+            .layer(RetryLayer::new(
+                self.attempt_layer.clone(),
+                self.max_num_retries,
+                self.backoff_slot_size,
+            ))
+            .service(self.client.clone())
+            .oneshot(request)
+            .await
     }
 }
 
@@ -254,7 +272,7 @@ impl Client {
     }
 
     pub(crate) async fn send(&self, request: Request<'_>) -> Result<Response, Error> {
-        send::send(self, request).await
+        self.shared.state.load().send(request).await
     }
 }
 

@@ -11,46 +11,36 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::service::gzip::DecodedBody;
 use crate::Response;
+use bytes::Bytes;
+use http_body::Body;
 use pin_project::pin_project;
 use std::future::Future;
+use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
 use tower::layer::Layer;
 use tower::Service;
 
 /// A layer which converts a hyper `Response` to a conjure-runtime `Response.
-pub struct ResponseLayer {
-    request_timeout: Duration,
-}
-
-impl ResponseLayer {
-    pub fn new(request_timeout: Duration) -> ResponseLayer {
-        ResponseLayer { request_timeout }
-    }
-}
+pub struct ResponseLayer;
 
 impl<S> Layer<S> for ResponseLayer {
     type Service = ResponseService<S>;
 
     fn layer(&self, inner: S) -> ResponseService<S> {
-        ResponseService {
-            inner,
-            deadline: Instant::now() + self.request_timeout,
-        }
+        ResponseService { inner }
     }
 }
 
 pub struct ResponseService<S> {
     inner: S,
-    deadline: Instant,
 }
 
-impl<S, R> Service<R> for ResponseService<S>
+impl<S, R, B> Service<R> for ResponseService<S>
 where
-    S: Service<R, Response = http::Response<DecodedBody>>,
+    S: Service<R, Response = http::Response<B>>,
+    B: Body<Data = Bytes, Error = io::Error> + 'static + Sync + Send,
 {
     type Response = Response;
     type Error = S::Error;
@@ -63,7 +53,6 @@ where
     fn call(&mut self, req: R) -> Self::Future {
         ResponseFuture {
             future: self.inner.call(req),
-            deadline: self.deadline,
         }
     }
 }
@@ -72,29 +61,18 @@ where
 pub struct ResponseFuture<F> {
     #[pin]
     future: F,
-    deadline: Instant,
 }
 
-impl<F, E> Future for ResponseFuture<F>
+impl<F, B, E> Future for ResponseFuture<F>
 where
-    F: Future<Output = Result<http::Response<DecodedBody>, E>>,
+    F: Future<Output = Result<http::Response<B>, E>>,
+    B: Body<Data = Bytes, Error = io::Error> + 'static + Sync + Send,
 {
     type Output = Result<Response, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
-        this.future.poll(cx).map_ok({
-            let deadline = *this.deadline;
-            move |r| {
-                Response::new(
-                    r,
-                    deadline,
-                    zipkin::next_span()
-                        .with_name("conjure-runtime: wait-for-body")
-                        .detach(),
-                )
-            }
-        })
+        this.future.poll(cx).map_ok(Response::new)
     }
 }

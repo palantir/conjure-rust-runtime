@@ -13,8 +13,12 @@
 // limitations under the License.
 use crate::errors::TimeoutError;
 use conjure_error::Error;
+use futures::ready;
+use http::{HeaderMap, Response};
+use http_body::{Body, SizeHint};
 use pin_project::pin_project;
 use std::future::Future;
+use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -51,11 +55,12 @@ pub struct TimeoutService<S> {
     delay: Option<Delay>,
 }
 
-impl<S, R> Service<R> for TimeoutService<S>
+impl<S, R, B> Service<R> for TimeoutService<S>
 where
-    S: Service<R, Error = Error>,
+    S: Service<R, Response = Response<B>, Error = Error>,
+    B: Body,
 {
-    type Response = S::Response;
+    type Response = Response<TimeoutBody<B>>;
     type Error = Error;
     type Future = TimeoutFuture<S::Future>;
 
@@ -85,20 +90,82 @@ pub struct TimeoutFuture<F> {
     delay: Delay,
 }
 
-impl<F, T> Future for TimeoutFuture<F>
+impl<F, B> Future for TimeoutFuture<F>
 where
-    F: Future<Output = Result<T, Error>>,
+    F: Future<Output = Result<Response<B>, Error>>,
 {
-    type Output = F::Output;
+    type Output = Result<Response<TimeoutBody<B>>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
+        let mut this = self.project();
 
-        if this.delay.poll(cx).is_ready() {
+        if this.delay.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Err(Error::internal_safe(TimeoutError(()))));
         }
 
-        this.future.poll(cx)
+        let response = ready!(this.future.poll(cx))?;
+
+        let deadline = this.delay.deadline();
+        Poll::Ready(Ok(response.map(|body| TimeoutBody {
+            body,
+            delay: time::delay_until(deadline),
+        })))
+    }
+}
+
+#[pin_project]
+pub struct TimeoutBody<B> {
+    #[pin]
+    body: B,
+    #[pin]
+    delay: Delay,
+}
+
+impl<B> Body for TimeoutBody<B>
+where
+    B: Body<Error = io::Error>,
+{
+    type Data = B::Data;
+    type Error = io::Error;
+
+    fn poll_data(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+        let this = self.project();
+
+        if this.delay.poll(cx).is_ready() {
+            return Poll::Ready(Some(Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                TimeoutError(()),
+            ))));
+        }
+
+        this.body.poll_data(cx)
+    }
+
+    fn poll_trailers(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
+        let this = self.project();
+
+        if this.delay.poll(cx).is_ready() {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                TimeoutError(()),
+            )));
+        }
+
+        this.body.poll_trailers(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.body.size_hint()
     }
 }
 
@@ -107,12 +174,35 @@ mod test {
     use super::*;
     use tower::ServiceExt;
 
+    struct TestBody;
+
+    impl Body for TestBody {
+        type Data = &'static [u8];
+        type Error = io::Error;
+
+        fn poll_data(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+            Poll::Ready(Some(Ok(b"hello world")))
+        }
+
+        fn poll_trailers(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
+            Poll::Ready(Ok(None))
+        }
+    }
+
     #[tokio::test]
     async fn no_timeout() {
         time::pause();
 
-        let service = TimeoutLayer::new(Duration::from_secs(1))
-            .layer(tower::service_fn(|_| async move { Ok(()) }));
+        let service =
+            TimeoutLayer::new(Duration::from_secs(1)).layer(tower::service_fn(|_| async move {
+                Ok(Response::new(TestBody))
+            }));
 
         service.oneshot(()).await.unwrap();
     }
@@ -124,9 +214,26 @@ mod test {
         let service =
             TimeoutLayer::new(Duration::from_secs(1)).layer(tower::service_fn(|_| async move {
                 time::advance(Duration::from_secs(2)).await;
-                Ok(())
+
+                Ok(Response::new(TestBody))
             }));
 
         service.oneshot(()).await.err().unwrap();
+    }
+
+    #[tokio::test]
+    async fn body_timeout() {
+        time::pause();
+
+        let service =
+            TimeoutLayer::new(Duration::from_secs(1)).layer(tower::service_fn(|_| async move {
+                Ok(Response::new(TestBody))
+            }));
+
+        let mut response = service.oneshot(()).await.unwrap();
+        assert_eq!(response.data().await.unwrap().unwrap(), b"hello world");
+
+        time::advance(Duration::from_secs(2)).await;
+        response.data().await.unwrap().err().unwrap();
     }
 }
