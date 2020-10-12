@@ -120,42 +120,48 @@ where
 
                     if response.status().is_success() {
                         return Poll::Ready(Ok(response));
-                    } else if response.status() == StatusCode::TOO_MANY_REQUESTS {
-                        let retry_after = response
-                            .headers()
-                            .get(RETRY_AFTER)
-                            .and_then(|h| h.to_str().ok())
-                            .and_then(|s| s.parse().ok())
-                            .map(Duration::from_secs);
-                        let error = ThrottledError { retry_after };
+                    }
 
-                        let e = if config.propagate_qos_errors {
-                            match retry_after {
-                                Some(retry_after) => Error::throttle_for_safe(error, retry_after),
-                                None => Error::throttle_safe(error),
-                            }
-                        } else {
-                            Error::internal_safe(error)
-                        };
+                    match response.status() {
+                        StatusCode::TOO_MANY_REQUESTS => {
+                            let retry_after = response
+                                .headers()
+                                .get(RETRY_AFTER)
+                                .and_then(|h| h.to_str().ok())
+                                .and_then(|s| s.parse().ok())
+                                .map(Duration::from_secs);
+                            let error = ThrottledError { retry_after };
 
-                        return Poll::Ready(Err(e));
-                    } else if response.status() == StatusCode::SERVICE_UNAVAILABLE {
-                        let error = UnavailableError(());
+                            let e = if config.propagate_qos_errors {
+                                match retry_after {
+                                    Some(retry_after) => {
+                                        Error::throttle_for_safe(error, retry_after)
+                                    }
+                                    None => Error::throttle_safe(error),
+                                }
+                            } else {
+                                Error::internal_safe(error)
+                            };
 
-                        let e = if config.propagate_qos_errors {
-                            Error::unavailable_safe(error)
-                        } else {
-                            Error::internal_safe(error)
-                        };
+                            return Poll::Ready(Err(e));
+                        }
+                        StatusCode::SERVICE_UNAVAILABLE => {
+                            let error = UnavailableError(());
 
-                        return Poll::Ready(Err(e));
-                    } else {
-                        HttpErrorFuture::ReadingBody {
+                            let e = if config.propagate_qos_errors {
+                                Error::unavailable_safe(error)
+                            } else {
+                                Error::internal_safe(error)
+                            };
+
+                            return Poll::Ready(Err(e));
+                        }
+                        _ => HttpErrorFuture::ReadingBody {
                             status: response.status(),
                             body: response.into_body(),
                             buf: vec![],
                             config: *config,
-                        }
+                        },
                     }
                 }
                 Projection::ReadingBody {
