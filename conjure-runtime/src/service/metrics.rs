@@ -31,6 +31,7 @@ struct Metrics {
 /// A layer which updates the `client.response` and `client.response.error` metrics.
 ///
 /// Only errors with a cause of `hyper::Error` will be treated as IO errors.
+#[derive(Clone)]
 pub struct MetricsLayer {
     metrics: Arc<Metrics>,
 }

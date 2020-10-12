@@ -53,12 +53,13 @@ type AttemptLayer = BoxLayer<
     Error,
 >;
 
-pub(crate) struct ClientState {
-    pub(crate) client: hyper::Client<ConjureConnector, HyperBody>,
-    pub(crate) attempt_layer: Arc<AttemptLayer>,
-    pub(crate) max_num_retries: u32,
-    pub(crate) backoff_slot_size: Duration,
-    pub(crate) request_timeout: Duration,
+struct ClientState {
+    client: hyper::Client<ConjureConnector, HyperBody>,
+    attempt_layer: Arc<AttemptLayer>,
+    metrics_layer: MetricsLayer,
+    max_num_retries: u32,
+    backoff_slot_size: Duration,
+    request_timeout: Duration,
 }
 
 impl ClientState {
@@ -98,7 +99,6 @@ impl ClientState {
         let attempt_layer = ServiceBuilder::new()
             .layer(HttpErrorLayer)
             .layer(SpanLayer)
-            .layer(MetricsLayer::new(metrics, service))
             .layer(NodeSelectorLayer::new(
                 service,
                 host_metrics,
@@ -117,6 +117,7 @@ impl ClientState {
         Ok(ClientState {
             client,
             attempt_layer,
+            metrics_layer: MetricsLayer::new(metrics, service),
             max_num_retries: service_config.max_num_retries(),
             backoff_slot_size: service_config.backoff_slot_size(),
             request_timeout: service_config.request_timeout(),
@@ -127,6 +128,7 @@ impl ClientState {
         // Ideally we'd build the layer once and store it in ClientState instead of just the attempt layer, but
         // https://github.com/rust-lang/rust/issues/71462 prevents us from doing that.
         ServiceBuilder::new()
+            .layer(self.metrics_layer.clone())
             .layer(RequestLayer)
             .layer(ResponseLayer)
             .layer(TimeoutLayer::new(self.request_timeout))
@@ -141,12 +143,12 @@ impl ClientState {
     }
 }
 
-pub(crate) struct SharedClient {
-    pub(crate) service: String,
-    pub(crate) user_agent: UserAgent,
-    pub(crate) state: ArcSwap<ClientState>,
-    pub(crate) metrics: Arc<MetricRegistry>,
-    pub(crate) host_metrics: Arc<HostMetricsRegistry>,
+struct SharedClient {
+    service: String,
+    user_agent: UserAgent,
+    state: ArcSwap<ClientState>,
+    metrics: Arc<MetricRegistry>,
+    host_metrics: Arc<HostMetricsRegistry>,
 }
 
 /// An asynchronous HTTP client to a remote service.
@@ -155,7 +157,7 @@ pub(crate) struct SharedClient {
 /// don't provide Conjure service definitions.
 #[derive(Clone)]
 pub struct Client {
-    pub(crate) shared: Arc<SharedClient>,
+    shared: Arc<SharedClient>,
     assume_idempotent: bool,
     propagate_qos_errors: bool,
     propagate_service_errors: bool,
