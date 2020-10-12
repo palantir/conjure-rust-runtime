@@ -140,14 +140,6 @@ impl Body for DecodedBody {
     }
 }
 
-impl Stream for DecodedBody {
-    type Item = io::Result<Bytes>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.poll_data(cx)
-    }
-}
-
 #[pin_project]
 struct IdentityBody<T> {
     #[pin]

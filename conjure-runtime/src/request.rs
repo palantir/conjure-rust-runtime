@@ -19,6 +19,7 @@ use hyper::http::header::AUTHORIZATION;
 use hyper::{HeaderMap, Method};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::pin::Pin;
 
 static DEFAULT_ACCEPT: Lazy<HeaderValue> = Lazy::new(|| HeaderValue::from_static("*/*"));
@@ -117,6 +118,8 @@ pub(crate) struct Request<'a> {
     pub(crate) headers: HeaderMap,
     pub(crate) body: Option<Pin<Box<ResetTrackingBody<dyn Body + Sync + Send + 'a>>>>,
     pub(crate) idempotent: bool,
+    pub(crate) propagate_qos_errors: bool,
+    pub(crate) propagate_service_errors: bool,
 }
 
 impl<'a> Request<'a> {
@@ -125,18 +128,20 @@ impl<'a> Request<'a> {
         headers.insert(ACCEPT, DEFAULT_ACCEPT.clone());
 
         Request {
-            pattern,
-            params: HashMap::new(),
             idempotent: client.assume_idempotent() || method.is_idempotent(),
             method,
+            pattern,
+            params: HashMap::new(),
             headers,
             body: None,
+            propagate_qos_errors: client.propagate_qos_errors(),
+            propagate_service_errors: client.propagate_service_errors(),
         }
     }
 
     pub(crate) fn bearer_token(&mut self, token: &BearerToken) {
         let value = format!("Bearer {}", token.as_str());
-        let value = HeaderValue::from_str(&value).expect("already checked syntax");
+        let value = HeaderValue::try_from(value).expect("already checked syntax");
         self.headers.insert(AUTHORIZATION, value);
     }
 

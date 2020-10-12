@@ -123,10 +123,7 @@ impl http_body::Body for HyperBody {
     }
 
     fn is_end_stream(&self) -> bool {
-        match self {
-            HyperBody::Empty => true,
-            _ => false,
-        }
+        matches!(self, HyperBody::Empty)
     }
 }
 
@@ -170,7 +167,7 @@ where
     }
 }
 
-/// The asynchronous writer passed to `Body::write_body`.
+/// The asynchronous writer passed to `Body::write`.
 pub struct BodyWriter {
     sender: mpsc::Sender<BodyPart>,
     buf: BytesMut,

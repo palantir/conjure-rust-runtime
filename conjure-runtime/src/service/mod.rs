@@ -13,11 +13,16 @@
 // limitations under the License.
 pub mod boxed;
 pub mod gzip;
+pub mod http_error;
 pub mod map_error;
+pub mod metrics;
 pub mod node;
 pub mod proxy;
+pub mod request;
 pub mod response;
+pub mod retry;
 pub mod span;
+pub mod timeout;
 pub mod tls_metrics;
 pub mod trace_propagation;
 pub mod user_agent;

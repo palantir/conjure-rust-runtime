@@ -172,7 +172,7 @@ where
     }
 }
 
-/// The blocking writer passed to `Payload::write_body`.
+/// The blocking writer passed to `Body::write`.
 pub struct BodyWriter {
     sender: mpsc::Sender<BodyPart>,
     buf: BytesMut,

@@ -11,24 +11,17 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::errors::{RemoteError, TimeoutError};
-use crate::service::gzip::DecodedBody;
 use bytes::{Buf, Bytes};
-use conjure_error::Error;
-use futures::stream::Fuse;
-use futures::{ready, Future, Stream, StreamExt, TryStreamExt};
-use hyper::{HeaderMap, StatusCode};
+use futures::ready;
+use http::{HeaderMap, StatusCode};
+use http_body::Body;
 use pin_project::pin_project;
 use std::io;
 use std::mem;
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::Instant;
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt};
-use tokio::time::{self, Delay};
-use witchcraft_log::info;
-use zipkin::{Detached, OpenSpan};
+use tokio::io::{AsyncBufRead, AsyncRead};
 
 /// An asynchronous HTTP response.
 pub struct Response {
@@ -38,50 +31,18 @@ pub struct Response {
 }
 
 impl Response {
-    pub(crate) fn new(
-        response: hyper::Response<DecodedBody>,
-        deadline: Instant,
-        span: OpenSpan<Detached>,
-    ) -> Response {
+    pub(crate) fn new<B>(response: hyper::Response<B>) -> Response
+    where
+        B: Body<Data = Bytes, Error = io::Error> + 'static + Sync + Send,
+    {
         let (parts, body) = response.into_parts();
-        let body = ResponseBody::new(body, deadline, span);
+        let body = ResponseBody::new(body);
 
         Response {
             status: parts.status,
             headers: parts.headers,
             body,
         }
-    }
-
-    pub(crate) async fn into_error(self, propagate_service_errors: bool) -> Error {
-        let status = self.status();
-
-        let mut buf = vec![];
-        // limit how much we read in case something weird's going on
-        if let Err(e) = self.into_body().take(10 * 1024).read_to_end(&mut buf).await {
-            info!(
-                "error reading response body",
-                error: Error::internal_safe(e),
-            );
-        }
-
-        let error = RemoteError {
-            status,
-            error: conjure_serde::json::client_from_slice(&buf).ok(),
-        };
-        let log_body = error.error.is_none();
-        let mut error = match &error.error {
-            Some(e) if propagate_service_errors => {
-                let e = e.clone();
-                Error::service_safe(error, e)
-            }
-            _ => Error::internal_safe(error),
-        };
-        if log_body {
-            error = error.with_unsafe_param("body", String::from_utf8_lossy(&buf));
-        }
-
-        error
     }
 
     /// Returns the response's status.
@@ -102,23 +63,18 @@ impl Response {
 
 /// An asynchronous streaming response body.
 pub struct ResponseBody {
-    stream: Fuse<TimeoutStream<DecodedBody>>,
+    body: Pin<Box<dyn Body<Data = Bytes, Error = io::Error> + Sync + Send>>,
     cur: Bytes,
-    _span: OpenSpan<Detached>,
 }
 
 impl ResponseBody {
-    #[allow(clippy::borrow_interior_mutable_const)]
-    fn new(body: DecodedBody, deadline: Instant, span: OpenSpan<Detached>) -> ResponseBody {
-        let stream = TimeoutStream {
-            stream: body,
-            deadline: time::delay_until(time::Instant::from(deadline)),
-        };
-
+    fn new<B>(body: B) -> ResponseBody
+    where
+        B: Body<Data = Bytes, Error = io::Error> + 'static + Sync + Send,
+    {
         ResponseBody {
-            stream: stream.fuse(),
+            body: Box::pin(FuseBody::new(body)),
             cur: Bytes::new(),
-            _span: span,
         }
     }
 
@@ -130,7 +86,7 @@ impl ResponseBody {
         if self.cur.has_remaining() {
             Ok(Some(mem::replace(&mut self.cur, Bytes::new())))
         } else {
-            self.stream.try_next().await
+            self.body.data().await.transpose()
         }
     }
 }
@@ -156,7 +112,7 @@ impl AsyncRead for ResponseBody {
 impl AsyncBufRead for ResponseBody {
     fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
         while !self.cur.has_remaining() {
-            match ready!(self.stream.poll_next_unpin(cx)).transpose()? {
+            match ready!(Pin::new(&mut self.body).poll_data(cx)).transpose()? {
                 Some(bytes) => self.cur = bytes,
                 None => break,
             }
@@ -171,29 +127,47 @@ impl AsyncBufRead for ResponseBody {
 }
 
 #[pin_project]
-struct TimeoutStream<T> {
+struct FuseBody<B> {
     #[pin]
-    stream: T,
-    #[pin]
-    deadline: Delay,
+    body: B,
+    done: bool,
 }
 
-impl<T, U> Stream for TimeoutStream<T>
-where
-    T: Stream<Item = io::Result<U>>,
-{
-    type Item = io::Result<U>;
+impl<B> FuseBody<B> {
+    fn new(body: B) -> FuseBody<B> {
+        FuseBody { body, done: false }
+    }
+}
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+impl<B> Body for FuseBody<B>
+where
+    B: Body,
+{
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_data(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
         let this = self.project();
 
-        if this.deadline.poll(cx).is_ready() {
-            return Poll::Ready(Some(Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                TimeoutError(()),
-            ))));
+        if *this.done {
+            return Poll::Ready(None);
         }
 
-        this.stream.poll_next(cx)
+        let chunk = ready!(this.body.poll_data(cx));
+        if chunk.is_none() {
+            *this.done = true;
+        }
+
+        Poll::Ready(chunk)
+    }
+
+    fn poll_trailers(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
+        self.project().body.poll_trailers(cx)
     }
 }

@@ -223,7 +223,6 @@ mod host_metrics;
 mod payload;
 mod request;
 mod response;
-mod send;
 mod service;
 #[cfg(test)]
 mod test;

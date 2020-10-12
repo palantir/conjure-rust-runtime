@@ -17,6 +17,7 @@ use conjure_error::SerializableError;
 use hyper::StatusCode;
 use std::error::Error;
 use std::fmt;
+use std::time::Duration;
 
 /// An error received from a remote service.
 #[derive(Debug)]
@@ -56,7 +57,9 @@ impl RemoteError {
 
 /// An 429 error received from a remote service.
 #[derive(Debug)]
-pub struct ThrottledError(pub(crate) ());
+pub struct ThrottledError {
+    pub(crate) retry_after: Option<Duration>,
+}
 
 impl fmt::Display for ThrottledError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
