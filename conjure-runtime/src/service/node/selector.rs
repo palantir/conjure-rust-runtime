@@ -53,7 +53,7 @@ struct TrackedNode {
 }
 
 /// A layer which selects a node to use for the request, injecting it into the request's extensions map.
-pub struct NodeSelectorLayer<T> {
+pub struct NodeSelectorLayer<T = RandShuffler> {
     state: Arc<State>,
     shuffler: T,
 }
