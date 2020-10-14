@@ -11,8 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::service::boxed::BoxLayer;
-use crate::service::gzip::{DecodedBody, GzipLayer};
+use crate::service::gzip::GzipLayer;
 use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
 use crate::service::metrics::MetricsLayer;
@@ -21,7 +20,7 @@ use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorServ
 use crate::service::request::RequestLayer;
 use crate::service::response::ResponseLayer;
 use crate::service::retry::RetryLayer;
-use crate::service::span::{SpanBody, SpanLayer};
+use crate::service::span::SpanLayer;
 use crate::service::timeout::TimeoutLayer;
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::service::trace_propagation::TracePropagationLayer;
@@ -36,6 +35,7 @@ use hyper_openssl::{HttpsConnector, HttpsLayer};
 use openssl::ssl::{SslConnector, SslMethod};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
+use tower::layer::{Identity, Layer, Stack};
 use tower::{ServiceBuilder, ServiceExt};
 use witchcraft_log::info;
 use witchcraft_metrics::MetricRegistry;
@@ -46,19 +46,38 @@ const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
 const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 
 type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
-type AttemptLayer = BoxLayer<
-    hyper::Client<ConjureConnector, HyperBody>,
-    hyper::Request<HyperBody>,
-    hyper::Response<SpanBody<DecodedBody>>,
-    Error,
->;
 
-pub(crate) struct ClientState {
-    pub(crate) client: hyper::Client<ConjureConnector, HyperBody>,
-    pub(crate) attempt_layer: Arc<AttemptLayer>,
-    pub(crate) max_num_retries: u32,
-    pub(crate) backoff_slot_size: Duration,
-    pub(crate) request_timeout: Duration,
+macro_rules! layers {
+    () => { Identity };
+    ($layer:ty, $($rem:tt)*) => { Stack<$layer, layers!($($rem)*)> };
+}
+
+// NB: The types here are declared in reverse order compared to the ServiceBuilder declarations below since it was
+// easier to define the macro that way.
+type AttemptLayer = layers!(
+    MapErrorLayer,
+    GzipLayer,
+    UserAgentLayer,
+    TracePropagationLayer,
+    ProxyLayer,
+    NodeMetricsLayer,
+    NodeUriLayer,
+    NodeSelectorLayer,
+    SpanLayer,
+    HttpErrorLayer,
+);
+
+type BaseLayer = layers!(
+    RetryLayer<AttemptLayer>,
+    TimeoutLayer,
+    ResponseLayer,
+    RequestLayer,
+    MetricsLayer,
+);
+
+struct ClientState {
+    client: hyper::Client<ConjureConnector, HyperBody>,
+    layer: BaseLayer,
 }
 
 impl ClientState {
@@ -98,7 +117,6 @@ impl ClientState {
         let attempt_layer = ServiceBuilder::new()
             .layer(HttpErrorLayer)
             .layer(SpanLayer)
-            .layer(MetricsLayer::new(metrics, service))
             .layer(NodeSelectorLayer::new(
                 service,
                 host_metrics,
@@ -112,41 +130,33 @@ impl ClientState {
             .layer(GzipLayer)
             .layer(MapErrorLayer)
             .into_inner();
-        let attempt_layer = Arc::new(BoxLayer::new(attempt_layer));
 
-        Ok(ClientState {
-            client,
-            attempt_layer,
-            max_num_retries: service_config.max_num_retries(),
-            backoff_slot_size: service_config.backoff_slot_size(),
-            request_timeout: service_config.request_timeout(),
-        })
+        let layer = ServiceBuilder::new()
+            .layer(MetricsLayer::new(metrics, service))
+            .layer(RequestLayer)
+            .layer(ResponseLayer)
+            .layer(TimeoutLayer::new(service_config.request_timeout()))
+            .layer(RetryLayer::new(
+                Arc::new(attempt_layer),
+                service_config.max_num_retries(),
+                service_config.backoff_slot_size(),
+            ))
+            .into_inner();
+
+        Ok(ClientState { client, layer })
     }
 
     async fn send(&self, request: Request<'_>) -> Result<Response, Error> {
-        // Ideally we'd build the layer once and store it in ClientState instead of just the attempt layer, but
-        // https://github.com/rust-lang/rust/issues/71462 prevents us from doing that.
-        ServiceBuilder::new()
-            .layer(RequestLayer)
-            .layer(ResponseLayer)
-            .layer(TimeoutLayer::new(self.request_timeout))
-            .layer(RetryLayer::new(
-                self.attempt_layer.clone(),
-                self.max_num_retries,
-                self.backoff_slot_size,
-            ))
-            .service(self.client.clone())
-            .oneshot(request)
-            .await
+        self.layer.layer(self.client.clone()).oneshot(request).await
     }
 }
 
-pub(crate) struct SharedClient {
-    pub(crate) service: String,
-    pub(crate) user_agent: UserAgent,
-    pub(crate) state: ArcSwap<ClientState>,
-    pub(crate) metrics: Arc<MetricRegistry>,
-    pub(crate) host_metrics: Arc<HostMetricsRegistry>,
+struct SharedClient {
+    service: String,
+    user_agent: UserAgent,
+    state: ArcSwap<ClientState>,
+    metrics: Arc<MetricRegistry>,
+    host_metrics: Arc<HostMetricsRegistry>,
 }
 
 /// An asynchronous HTTP client to a remote service.
@@ -155,7 +165,7 @@ pub(crate) struct SharedClient {
 /// don't provide Conjure service definitions.
 #[derive(Clone)]
 pub struct Client {
-    pub(crate) shared: Arc<SharedClient>,
+    shared: Arc<SharedClient>,
     assume_idempotent: bool,
     propagate_qos_errors: bool,
     propagate_service_errors: bool,

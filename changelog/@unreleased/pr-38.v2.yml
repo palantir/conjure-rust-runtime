@@ -1,0 +1,7 @@
+type: improvement
+improvement:
+  description: The `client.response` and `client.response.error` metrics now track
+    user-perceived requests including retries/backoff/etc rather than individual HTTP-level
+    requests.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/38
