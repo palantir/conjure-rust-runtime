@@ -34,7 +34,7 @@ impl<'a> RequestBuilder<'a> {
     pub(crate) fn new(client: &'a Client, method: Method, pattern: &'a str) -> RequestBuilder<'a> {
         RequestBuilder {
             client,
-            request: Request::new(client, method, pattern),
+            request: Request::new(method, pattern),
         }
     }
 
@@ -89,10 +89,9 @@ impl<'a> RequestBuilder<'a> {
     ///
     /// Idempotent requests can be retried if an IO error is encountered.
     ///
-    /// This is by default derived from the HTTP method. `GET`, `HEAD`,
-    /// `OPTIONS`, `TRACE`, `PUT`, and `DELETE` are defined as idempotent.
+    /// The default value is controlled by the `Idempotency` enum.
     pub fn idempotent(mut self, idempotent: bool) -> RequestBuilder<'a> {
-        self.request.idempotent = idempotent;
+        self.request.idempotent = Some(idempotent);
         self
     }
 
@@ -117,25 +116,21 @@ pub(crate) struct Request<'a> {
     pub(crate) params: HashMap<String, Vec<String>>,
     pub(crate) headers: HeaderMap,
     pub(crate) body: Option<Pin<Box<ResetTrackingBody<dyn Body + Sync + Send + 'a>>>>,
-    pub(crate) idempotent: bool,
-    pub(crate) propagate_qos_errors: bool,
-    pub(crate) propagate_service_errors: bool,
+    pub(crate) idempotent: Option<bool>,
 }
 
 impl<'a> Request<'a> {
-    pub(crate) fn new(client: &Client, method: Method, pattern: &'a str) -> Request<'a> {
+    pub(crate) fn new(method: Method, pattern: &'a str) -> Request<'a> {
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, DEFAULT_ACCEPT.clone());
 
         Request {
-            idempotent: client.assume_idempotent() || method.is_idempotent(),
+            idempotent: None,
             method,
             pattern,
             params: HashMap::new(),
             headers,
             body: None,
-            propagate_qos_errors: client.propagate_qos_errors(),
-            propagate_service_errors: client.propagate_service_errors(),
         }
     }
 

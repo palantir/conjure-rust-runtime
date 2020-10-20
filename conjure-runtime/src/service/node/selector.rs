@@ -11,9 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::config::ServiceConfig;
 use crate::service::node::Node;
-use crate::HostMetricsRegistry;
+use crate::Builder;
 use conjure_error::Error;
 use futures::future::{self, Either, Ready};
 use futures::ready;
@@ -59,12 +58,8 @@ pub struct NodeSelectorLayer<T = RandShuffler> {
 }
 
 impl NodeSelectorLayer<RandShuffler> {
-    pub fn new(
-        service: &str,
-        host_metrics: &HostMetricsRegistry,
-        config: &ServiceConfig,
-    ) -> NodeSelectorLayer<RandShuffler> {
-        Self::with_selector(service, host_metrics, config, RandShuffler)
+    pub fn new(service: &str, builder: &Builder) -> NodeSelectorLayer<RandShuffler> {
+        Self::with_shuffler(service, builder, RandShuffler)
     }
 }
 
@@ -72,16 +67,11 @@ impl<T> NodeSelectorLayer<T>
 where
     T: Shuffle,
 {
-    pub fn with_selector(
-        service: &str,
-        host_metrics: &HostMetricsRegistry,
-        config: &ServiceConfig,
-        shuffler: T,
-    ) -> NodeSelectorLayer<T> {
+    pub fn with_shuffler(service: &str, builder: &Builder, shuffler: T) -> NodeSelectorLayer<T> {
         let now = Instant::now();
 
-        let nodes = config
-            .uris()
+        let nodes = builder
+            .uris
             .iter()
             .map(|url| {
                 // normalize by stripping a trailing `/` if present
@@ -90,11 +80,13 @@ where
 
                 TrackedNode {
                     node: Arc::new(Node {
-                        host_metrics: host_metrics.get(
-                            service,
-                            url.host_str().unwrap(),
-                            url.port_or_known_default().unwrap(),
-                        ),
+                        host_metrics: builder.host_metrics.as_ref().map(|m| {
+                            m.get(
+                                service,
+                                url.host_str().unwrap(),
+                                url.port_or_known_default().unwrap(),
+                            )
+                        }),
                         url,
                     }),
                     timeout: Mutex::new(now),
@@ -105,7 +97,7 @@ where
         NodeSelectorLayer {
             state: Arc::new(State {
                 nodes,
-                failed_url_cooldown: config.failed_url_cooldown(),
+                failed_url_cooldown: builder.failed_url_cooldown,
             }),
             shuffler,
         }
@@ -255,30 +247,20 @@ mod test {
 
     #[tokio::test]
     async fn empty_nodes() {
-        let config = ServiceConfig::builder().build();
-        let service = NodeSelectorLayer::with_selector(
-            "service",
-            &HostMetricsRegistry::new(),
-            &config,
-            ReverseShuffler,
-        )
-        .layer(tower::service_fn(|_| async { Ok(Response::new(())) }));
+        let service = NodeSelectorLayer::with_shuffler("service", &Builder::new(), ReverseShuffler)
+            .layer(tower::service_fn(|_| async { Ok(Response::new(())) }));
 
         service.oneshot(Request::new(())).await.err().unwrap();
     }
 
     #[tokio::test]
     async fn rotate_between_calls() {
-        let config = ServiceConfig::builder()
-            .uris(vec![
+        let mut service = NodeSelectorLayer::with_shuffler(
+            "service",
+            Builder::new().uris(vec![
                 "http://a/".parse().unwrap(),
                 "http://b/".parse().unwrap(),
-            ])
-            .build();
-        let mut service = NodeSelectorLayer::with_selector(
-            "service",
-            &HostMetricsRegistry::new(),
-            &config,
+            ]),
             ReverseShuffler,
         )
         .layer(tower::service_fn(|req: Request<()>| async move {
@@ -301,16 +283,12 @@ mod test {
     async fn reuse_on_success() {
         tokio::time::pause();
 
-        let config = ServiceConfig::builder()
-            .uris(vec![
+        let layer = NodeSelectorLayer::with_shuffler(
+            "service",
+            Builder::new().uris(vec![
                 "http://a/".parse().unwrap(),
                 "http://b/".parse().unwrap(),
-            ])
-            .build();
-        let layer = NodeSelectorLayer::with_selector(
-            "service",
-            &HostMetricsRegistry::new(),
-            &config,
+            ]),
             ReverseShuffler,
         );
 
@@ -341,16 +319,12 @@ mod test {
     async fn skip_on_503() {
         tokio::time::pause();
 
-        let config = ServiceConfig::builder()
-            .uris(vec![
+        let layer = NodeSelectorLayer::with_shuffler(
+            "service",
+            Builder::new().uris(vec![
                 "http://a/".parse().unwrap(),
                 "http://b/".parse().unwrap(),
-            ])
-            .build();
-        let layer = NodeSelectorLayer::with_selector(
-            "service",
-            &HostMetricsRegistry::new(),
-            &config,
+            ]),
             ReverseShuffler,
         );
 
@@ -385,16 +359,12 @@ mod test {
     async fn skip_on_error() {
         tokio::time::pause();
 
-        let config = ServiceConfig::builder()
-            .uris(vec![
+        let layer = NodeSelectorLayer::with_shuffler(
+            "service",
+            Builder::new().uris(vec![
                 "http://a/".parse().unwrap(),
                 "http://b/".parse().unwrap(),
-            ])
-            .build();
-        let layer = NodeSelectorLayer::with_selector(
-            "service",
-            &HostMetricsRegistry::new(),
-            &config,
+            ]),
             ReverseShuffler,
         );
 
@@ -425,17 +395,14 @@ mod test {
     async fn unblock_after_cooldown() {
         tokio::time::pause();
 
-        let config = ServiceConfig::builder()
-            .uris(vec![
-                "http://a/".parse().unwrap(),
-                "http://b/".parse().unwrap(),
-            ])
-            .failed_url_cooldown(Duration::from_secs(10))
-            .build();
-        let layer = NodeSelectorLayer::with_selector(
+        let layer = NodeSelectorLayer::with_shuffler(
             "service",
-            &HostMetricsRegistry::new(),
-            &config,
+            Builder::new()
+                .uris(vec![
+                    "http://a/".parse().unwrap(),
+                    "http://b/".parse().unwrap(),
+                ])
+                .failed_url_cooldown(Duration::from_secs(10)),
             ReverseShuffler,
         );
 

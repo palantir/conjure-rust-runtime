@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{RemoteError, TimeoutError};
-use crate::{blocking, Agent, Body, BodyWriter, Client, HostMetricsRegistry, UserAgent};
+use crate::{
+    blocking, Agent, Body, BodyWriter, Builder, Client, ServerQos, ServiceError, UserAgent,
+};
 use async_trait::async_trait;
 use bytes::Bytes;
 use conjure_error::NotFound;
 use conjure_error::{Error, ErrorKind};
-use conjure_runtime_config::{ServiceConfig, ServicesConfig};
+use conjure_runtime_config::ServiceConfig;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures::task::Context;
@@ -32,7 +34,6 @@ use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::Poll;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -40,15 +41,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
 use tokio::time;
-use witchcraft_metrics::MetricRegistry;
 use zipkin::{SpanId, TraceContext, TraceId};
 
 const STOCK_CONFIG: &str = r#"
-services:
-  service:
-    uris: ["https://localhost:{{port}}"]
-    security:
-      ca-file: "{{ca_file}}"
+uris: ["https://localhost:{{port}}"]
+security:
+  ca-file: "{{ca_file}}"
     "#;
 
 fn test_dir() -> PathBuf {
@@ -76,7 +74,7 @@ async fn test<F, G>(
     config: &str,
     requests: u32,
     handler: impl FnMut(Request<hyper::Body>) -> F + 'static,
-    check: impl FnOnce(Client) -> G,
+    check: impl FnOnce(Builder) -> G,
 ) where
     F: Future<Output = Result<Response<hyper::Body>, &'static str>> + 'static + Send,
     G: Future<Output = ()>,
@@ -104,11 +102,12 @@ fn blocking_test<F>(
 
     let server = thread::spawn(move || runtime.block_on(server(listener, requests, handler)));
 
-    let config = parse_config(config, port);
-    let agent = UserAgent::new(Agent::new("test", "1.0"));
-    let node_health = Arc::new(HostMetricsRegistry::new());
-    let metrics = Arc::new(MetricRegistry::new());
-    let client = blocking::Client::new("service", agent, &node_health, &metrics, &config).unwrap();
+    let client = Client::builder()
+        .from_config(&parse_config(config, port))
+        .service("service")
+        .user_agent(UserAgent::new(Agent::new("test", "1.0")))
+        .build_blocking()
+        .unwrap();
 
     check(client);
     server.join().unwrap();
@@ -133,25 +132,23 @@ async fn server<F>(
     }
 }
 
-async fn client<F>(config: &str, port: u16, check: impl FnOnce(Client) -> F)
+async fn client<F>(config: &str, port: u16, check: impl FnOnce(Builder) -> F)
 where
     F: Future<Output = ()>,
 {
-    let config = parse_config(config, port);
-    let agent = UserAgent::new(Agent::new("test", "1.0"));
-    let node_health = Arc::new(HostMetricsRegistry::new());
-    let metrics = Arc::new(MetricRegistry::new());
-    let client = Client::new("service", agent, &node_health, &metrics, &config).unwrap();
-
-    check(client).await
+    let mut builder = Client::builder();
+    builder
+        .from_config(&parse_config(config, port))
+        .service("service")
+        .user_agent(UserAgent::new(Agent::new("test", "1.0")));
+    check(builder).await
 }
 
 fn parse_config(config: &str, port: u16) -> ServiceConfig {
     let config = config
         .replace("{{port}}", &port.to_string())
         .replace("{{ca_file}}", &cert_file().display().to_string());
-    let config = serde_yaml::from_str::<ServicesConfig>(&config).unwrap();
-    config.service("service").unwrap().clone()
+    serde_yaml::from_str(&config).unwrap()
 }
 
 struct TestService<'a, F>(&'a mut F);
@@ -178,15 +175,13 @@ where
 async fn mesh_proxy() {
     test(
         r#"
-services:
-  service:
-    uris: ["https://www.google.com:1234"]
-    security:
-      ca-file: "{{ca_file}}"
-    proxy:
-      type: mesh
-      host-and-port: "localhost:{{port}}"
-    "#,
+uris: ["https://www.google.com:1234"]
+security:
+  ca-file: "{{ca_file}}"
+proxy:
+  type: mesh
+  host-and-port: "localhost:{{port}}"
+"#,
         1,
         |req| async move {
             let host = req.headers().get(HOST).unwrap();
@@ -195,8 +190,10 @@ services:
 
             Ok(Response::new(hyper::Body::empty()))
         },
-        |client| async move {
-            client
+        |builder| async move {
+            builder
+                .build()
+                .unwrap()
                 .get("/foo/bar")
                 .param("fizz", "buzz")
                 .send()
@@ -227,8 +224,8 @@ async fn retry_after_503() {
                 }
             }
         },
-        |client| async move {
-            let response = client.get("/").send().await.unwrap();
+        |builder| async move {
+            let response = builder.build().unwrap().get("/").send().await.unwrap();
             assert_eq!(response.status(), StatusCode::OK);
         },
     )
@@ -247,8 +244,15 @@ async fn no_retry_after_404() {
                 .body(hyper::Body::empty())
                 .unwrap())
         },
-        |client| async move {
-            let error = client.get("/").send().await.err().unwrap();
+        |builder| async move {
+            let error = builder
+                .build()
+                .unwrap()
+                .get("/")
+                .send()
+                .await
+                .err()
+                .unwrap();
             assert_eq!(
                 error
                     .cause()
@@ -283,9 +287,9 @@ async fn retry_after_overrides() {
                 }
             }
         },
-        |client| async move {
+        |builder| async move {
             let time = Instant::now();
-            let response = client.get("/").send().await.unwrap();
+            let response = builder.build().unwrap().get("/").send().await.unwrap();
             assert_eq!(response.status(), StatusCode::OK);
             assert!(time.elapsed() >= Duration::from_secs(1));
         },
@@ -341,8 +345,15 @@ async fn connect_error_doesnt_reset_body() {
         .await;
     };
 
-    let client = client(STOCK_CONFIG, port, |client| async move {
-        let response = client.put("/").body(TestBody(false)).send().await.unwrap();
+    let client = client(STOCK_CONFIG, port, |builder| async move {
+        let response = builder
+            .build()
+            .unwrap()
+            .put("/")
+            .body(TestBody(false))
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     });
 
@@ -360,9 +371,16 @@ async fn propagate_429() {
                 .body(hyper::Body::empty())
                 .unwrap())
         },
-        |mut client| async move {
-            client.set_propagate_qos_errors(true);
-            let error = client.get("/").send().await.err().unwrap();
+        |mut builder| async move {
+            let error = builder
+                .server_qos(ServerQos::Propagate429And503ToCaller)
+                .build()
+                .unwrap()
+                .get("/")
+                .send()
+                .await
+                .err()
+                .unwrap();
             match error.kind() {
                 ErrorKind::Throttle(e) => assert_eq!(e.duration(), None),
                 _ => panic!("wrong error kind"),
@@ -384,9 +402,16 @@ async fn propagate_429_with_retry_after() {
                 .body(hyper::Body::empty())
                 .unwrap())
         },
-        |mut client| async move {
-            client.set_propagate_qos_errors(true);
-            let error = client.get("/").send().await.err().unwrap();
+        |mut builder| async move {
+            let error = builder
+                .server_qos(ServerQos::Propagate429And503ToCaller)
+                .build()
+                .unwrap()
+                .get("/")
+                .send()
+                .await
+                .err()
+                .unwrap();
             match error.kind() {
                 ErrorKind::Throttle(e) => assert_eq!(e.duration(), Some(Duration::from_secs(100))),
                 _ => panic!("wrong error kind"),
@@ -407,9 +432,16 @@ async fn propagate_503() {
                 .body(hyper::Body::empty())
                 .unwrap())
         },
-        |mut client| async move {
-            client.set_propagate_qos_errors(true);
-            let error = client.get("/").send().await.err().unwrap();
+        |mut builder| async move {
+            let error = builder
+                .server_qos(ServerQos::Propagate429And503ToCaller)
+                .build()
+                .unwrap()
+                .get("/")
+                .send()
+                .await
+                .err()
+                .unwrap();
             match error.kind() {
                 ErrorKind::Unavailable(_) => {}
                 _ => panic!("wrong error kind"),
@@ -436,9 +468,15 @@ async fn dont_propagate_protocol_errors() {
                 }
             }
         },
-        |mut client| async move {
-            client.set_propagate_qos_errors(true);
-            let response = client.get("/").send().await.unwrap();
+        |mut builder| async move {
+            let response = builder
+                .server_qos(ServerQos::Propagate429And503ToCaller)
+                .build()
+                .unwrap()
+                .get("/")
+                .send()
+                .await
+                .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
         },
     )
@@ -450,12 +488,10 @@ async fn dont_bail_when_all_timed_out() {
     let mut first = true;
     test(
         r#"
-services:
-  service:
-    uris: ["https://localhost:{{port}}"]
-    security:
-      ca-file: "{{ca_file}}"
-    failed-url-cooldown: 1h
+uris: ["https://localhost:{{port}}"]
+security:
+  ca-file: "{{ca_file}}"
+failed-url-cooldown: 1h
     "#,
         2,
         move |_| {
@@ -469,8 +505,8 @@ services:
                 }
             }
         },
-        |client| async move {
-            let response = client.get("/").send().await.unwrap();
+        |builder| async move {
+            let response = builder.build().unwrap().get("/").send().await.unwrap();
             assert_eq!(response.status(), StatusCode::OK);
         },
     )
@@ -481,21 +517,26 @@ services:
 async fn slow_headers() {
     test(
         r#"
-services:
-  service:
-    uris: ["https://localhost:{{port}}"]
-    security:
-      ca-file: "{{ca_file}}"
-    request-timeout: 1s
+uris: ["https://localhost:{{port}}"]
+security:
+  ca-file: "{{ca_file}}"
+request-timeout: 1s
     "#,
         1,
         |_| async {
             time::delay_for(Duration::from_secs(2)).await;
             Ok(Response::new(hyper::Body::empty()))
         },
-        |client| async move {
+        |builder| async move {
             let start = Instant::now();
-            let error = client.get("/").send().await.err().unwrap();
+            let error = builder
+                .build()
+                .unwrap()
+                .get("/")
+                .send()
+                .await
+                .err()
+                .unwrap();
             assert!(start.elapsed() < Duration::from_secs(2));
             assert!(error.cause().is::<TimeoutError>());
         },
@@ -507,21 +548,21 @@ services:
 async fn slow_request_body() {
     test(
         r#"
-services:
-  service:
-    uris: ["https://localhost:{{port}}"]
-    security:
-      ca-file: "{{ca_file}}"
-    request-timeout: 1s
+uris: ["https://localhost:{{port}}"]
+security:
+  ca-file: "{{ca_file}}"
+request-timeout: 1s
     "#,
         1,
         |req| async {
             req.into_body().for_each(|_| async {}).await;
             Ok(Response::new(hyper::Body::empty()))
         },
-        |client| async move {
+        |builder| async move {
             let start = Instant::now();
-            let error = client
+            let error = builder
+                .build()
+                .unwrap()
                 .post("/")
                 .body(InfiniteBody)
                 .send()
@@ -539,12 +580,10 @@ services:
 async fn slow_response_body() {
     test(
         r#"
-services:
-  service:
-    uris: ["https://localhost:{{port}}"]
-    security:
-      ca-file: "{{ca_file}}"
-    request-timeout: 1s
+uris: ["https://localhost:{{port}}"]
+security:
+  ca-file: "{{ca_file}}"
+request-timeout: 1s
     "#,
         1,
         |_| async {
@@ -555,9 +594,9 @@ services:
             });
             Ok(Response::new(body))
         },
-        |client| async move {
+        |builder| async move {
             let start = Instant::now();
-            let response = client.get("/").send().await.unwrap();
+            let response = builder.build().unwrap().get("/").send().await.unwrap();
             let error = response
                 .into_body()
                 .read_to_end(&mut vec![])
@@ -577,11 +616,17 @@ async fn body_write_ends_after_error() {
         STOCK_CONFIG,
         1,
         |_| async { Ok(Response::new(hyper::Body::empty())) },
-        |client| {
+        |builder| {
             async move {
                 // This could succeed or fail depending on if we get an EPIPE or the response. The important thing is
                 // that we don't deadlock.
-                let _ = client.post("/").body(InfiniteBody).send().await;
+                let _ = builder
+                    .build()
+                    .unwrap()
+                    .post("/")
+                    .body(InfiniteBody)
+                    .send()
+                    .await;
             }
         },
     )
@@ -618,8 +663,16 @@ async fn streaming_write_error_reporting() {
             req.into_body().for_each(|_| async {}).await;
             Ok(Response::new(hyper::Body::empty()))
         },
-        |client| async move {
-            let error = client.post("/").body(TestBody).send().await.err().unwrap();
+        |builder| async move {
+            let error = builder
+                .build()
+                .unwrap()
+                .post("/")
+                .body(TestBody)
+                .send()
+                .await
+                .err()
+                .unwrap();
             assert_eq!(error.cause().to_string(), "foobar");
         },
     )
@@ -640,9 +693,16 @@ async fn service_error_propagation() {
                 .body(hyper::Body::from(body))
                 .unwrap())
         },
-        |mut client| async move {
-            client.set_propagate_service_errors(true);
-            let error = client.get("/").send().await.err().unwrap();
+        |mut builder| async move {
+            let error = builder
+                .service_error(ServiceError::PropagateToCaller)
+                .build()
+                .unwrap()
+                .get("/")
+                .send()
+                .await
+                .err()
+                .unwrap();
             match error.kind() {
                 ErrorKind::Service(e) => assert_eq!(e.error_name(), "Default:NotFound"),
                 _ => panic!("invalid error kind"),
@@ -667,8 +727,8 @@ async fn gzip_body() {
                 .body(hyper::Body::from(body))
                 .unwrap())
         },
-        |client| async move {
-            let response = client.get("/").send().await.unwrap();
+        |builder| async move {
+            let response = builder.build().unwrap().get("/").send().await.unwrap();
             let mut body = vec![];
             response.into_body().read_to_end(&mut body).await.unwrap();
             assert_eq!(body, b"hello world");
@@ -690,13 +750,13 @@ async fn zipkin_propagation() {
             );
             Ok(Response::new(hyper::Body::empty()))
         },
-        |client| {
+        |builder| {
             let context = TraceContext::builder()
                 .trace_id(trace_id)
                 .span_id(SpanId::from(*b"abcdefgh"))
                 .build();
             zipkin::join_trace(context).detach().bind(async move {
-                client.get("/").send().await.unwrap();
+                builder.build().unwrap().get("/").send().await.unwrap();
             })
         },
     )
@@ -740,8 +800,15 @@ async fn read_past_eof() {
             });
             Ok(Response::new(rx))
         },
-        |client| async move {
-            let mut body = client.get("/").send().await.unwrap().into_body();
+        |builder| async move {
+            let mut body = builder
+                .build()
+                .unwrap()
+                .get("/")
+                .send()
+                .await
+                .unwrap()
+                .into_body();
             let mut buf = vec![];
             body.read_to_end(&mut buf).await.unwrap();
             assert_eq!(buf, b"hello world");

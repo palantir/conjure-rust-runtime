@@ -84,12 +84,11 @@ where
 
         let result = ready!(this.inner.poll(cx));
 
-        match &result {
-            Ok(response) => this
-                .node
-                .host_metrics
-                .update(response.status(), this.start.elapsed()),
-            Err(_) => this.node.host_metrics.update_io_error(),
+        if let Some(host_metrics) = &this.node.host_metrics {
+            match &result {
+                Ok(response) => host_metrics.update(response.status(), this.start.elapsed()),
+                Err(_) => host_metrics.update_io_error(),
+            }
         }
 
         Poll::Ready(result)

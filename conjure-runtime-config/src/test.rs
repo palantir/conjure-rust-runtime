@@ -35,15 +35,10 @@ fn minimal() {
         }
     "#;
     let config = serde_json::from_str::<ServicesConfig>(config).unwrap();
-    let expected = ServicesConfig::builder()
-        .service(
-            "foo",
-            ServiceConfig::builder()
-                .uris(vec!["http://foo1.com".parse().unwrap()])
-                .build(),
-        )
+    let expected = ServiceConfig::builder()
+        .uris(vec!["http://foo1.com".parse().unwrap()])
         .build();
-    assert_eq!(config, expected);
+    assert_eq!(config.merged_service("foo"), Some(expected));
 }
 
 #[test]
@@ -73,28 +68,23 @@ fn root_defaults() {
         }
     "#;
     let config = serde_json::from_str::<ServicesConfig>(config).unwrap();
-    let expected = ServicesConfig::builder()
-        .service(
-            "foo",
-            ServiceConfig::builder()
-                .uris(vec!["http://foo1.com".parse().unwrap()])
-                .security(
-                    SecurityConfig::builder()
-                        .ca_file(Some("/foo/bar".into()))
-                        .build(),
-                )
-                .proxy(ProxyConfig::Http(
-                    HttpProxyConfig::builder()
-                        .host_and_port(HostAndPort::new("localhost", 1234))
-                        .credentials(Some(BasicCredentials::new("admin", "palantir")))
-                        .build(),
-                ))
-                .connect_timeout(Duration::from_secs(11))
-                .request_timeout(Duration::from_secs(3 * 60))
+    let expected = ServiceConfig::builder()
+        .uris(vec!["http://foo1.com".parse().unwrap()])
+        .security(
+            SecurityConfig::builder()
+                .ca_file(Some("/foo/bar".into()))
                 .build(),
         )
+        .proxy(ProxyConfig::Http(
+            HttpProxyConfig::builder()
+                .host_and_port(HostAndPort::new("localhost", 1234))
+                .credentials(Some(BasicCredentials::new("admin", "palantir")))
+                .build(),
+        ))
+        .connect_timeout(Duration::from_secs(11))
+        .request_timeout(Duration::from_secs(3 * 60))
         .build();
-    assert_eq!(config, expected);
+    assert_eq!(config.merged_service("foo"), Some(expected));
 }
 
 #[test]
@@ -133,25 +123,20 @@ fn service_overrides() {
         }
     "#;
     let config = serde_json::from_str::<ServicesConfig>(config).unwrap();
-    let expected = ServicesConfig::builder()
-        .service(
-            "foo",
-            ServiceConfig::builder()
-                .uris(vec!["http://foo1.com".parse().unwrap()])
-                .security(
-                    SecurityConfig::builder()
-                        .ca_file(Some("/fizz/buzz".into()))
-                        .build(),
-                )
-                .proxy(ProxyConfig::Mesh(
-                    MeshProxyConfig::builder()
-                        .host_and_port(HostAndPort::new("localhost", 5678))
-                        .build(),
-                ))
-                .connect_timeout(Duration::from_secs(13))
-                .request_timeout(Duration::from_secs(2 * 60))
+    let expected = ServiceConfig::builder()
+        .uris(vec!["http://foo1.com".parse().unwrap()])
+        .security(
+            SecurityConfig::builder()
+                .ca_file(Some("/fizz/buzz".into()))
                 .build(),
         )
+        .proxy(ProxyConfig::Mesh(
+            MeshProxyConfig::builder()
+                .host_and_port(HostAndPort::new("localhost", 5678))
+                .build(),
+        ))
+        .connect_timeout(Duration::from_secs(13))
+        .request_timeout(Duration::from_secs(2 * 60))
         .build();
-    assert_eq!(config, expected);
+    assert_eq!(config.merged_service("foo"), Some(expected));
 }

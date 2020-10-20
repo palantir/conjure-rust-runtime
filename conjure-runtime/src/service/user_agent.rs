@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::user_agent::UserAgent;
+use crate::UserAgent;
 use http::header::USER_AGENT;
 use http::{HeaderValue, Request};
 use std::convert::TryFrom;

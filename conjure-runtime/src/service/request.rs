@@ -13,7 +13,6 @@
 // limitations under the License.
 use crate::body::ResetTrackingBody;
 use crate::request::Request;
-use crate::service::http_error::PropagationConfig;
 use crate::service::retry::RetryConfig;
 use crate::Body;
 use http::Uri;
@@ -87,13 +86,9 @@ where
         *new_req.method_mut() = req.method;
         *new_req.uri_mut() = build_url(req.pattern, req.params);
         *new_req.headers_mut() = req.headers;
-        new_req.extensions_mut().insert(RetryConfig {
-            idempotent: req.idempotent,
-        });
-        new_req.extensions_mut().insert(PropagationConfig {
-            propagate_qos_errors: req.propagate_qos_errors,
-            propagate_service_errors: req.propagate_service_errors,
-        });
+        if let Some(idempotent) = req.idempotent {
+            new_req.extensions_mut().insert(RetryConfig { idempotent });
+        }
 
         span.bind(self.inner.call(new_req))
     }
@@ -153,27 +148,14 @@ fn parse_param(segment: &str) -> Option<&str> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use http::{HeaderMap, Method};
+    use http::Method;
     use tower::ServiceExt;
-
-    fn request(method: Method, pattern: &str) -> Request<'_> {
-        Request {
-            method,
-            pattern,
-            params: HashMap::new(),
-            headers: HeaderMap::new(),
-            body: None,
-            idempotent: false,
-            propagate_qos_errors: false,
-            propagate_service_errors: false,
-        }
-    }
 
     #[tokio::test]
     async fn literal_pattern() {
         let service = RequestLayer.layer(tower::service_fn(|req| async move { Ok::<_, ()>(req) }));
 
-        let req = request(Method::GET, "/foo/bar");
+        let req = Request::new(Method::GET, "/foo/bar");
         let out = service.oneshot(req).await.unwrap();
 
         assert_eq!(out.uri(), "/foo/bar");
@@ -183,7 +165,7 @@ mod test {
     async fn expanded_pattern() {
         let service = RequestLayer.layer(tower::service_fn(|req| async move { Ok::<_, ()>(req) }));
 
-        let mut req = request(Method::GET, "/foo/{bar}");
+        let mut req = Request::new(Method::GET, "/foo/{bar}");
         req.param("bar", "hello/ world");
         req.param("bazes", "one?");
         req.param("bazes", "two!");
