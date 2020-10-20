@@ -32,16 +32,14 @@ use witchcraft_log::info;
 
 /// A layer which maps raw HTTP responses into Conjure `Error`s.
 ///
-/// Propagation configuration is passed via the `PropagationConfig` struct in the request's extension map for now.
+/// If `server_qos` is `ServerQos::Propagate429And503ToCaller`, 429 and 503 responses will be turned into Conjure
+/// "throttle" and "service unavailable" errors respectively. Otherwise, they run into service errors. In both cases,
+/// the error's cause will be the `ThrottledError` and `UnavailableError` types respectvely. If a `Retry-After` header
+/// is present on a 429 response it will be included in the error.
 ///
-/// If `propagate_qos_errors` is `true`, 429 and 503 responses will be turned into Conjure "throttle" and "service
-/// unavailable" errors respectively. Otherwise, they run into service errors. In both cases, the error's cause will be
-/// the `ThrottledError` and `UnavailableError` types respectvely. If a `Retry-After` header is present on a 429
-/// response it will be included in the error.
-///
-/// If `propagate_service_errors` is `true`, Conjure errors returned by the server will be propagated, with the new
-/// `Error` inheriting the incoming error's code, name, instance ID, and parameters. Otherwise it will be treated as a
-/// generic internal error. In both cases, the cause will be a `RemoteError`.
+/// If `service_error` is `ServiceError::PropagateToCaller`, Conjure errors returned by the server will be propagated,
+/// with the new `Error` inheriting the incoming error's code, name, instance ID, and parameters. Otherwise it will be
+/// treated as a generic internal error. In both cases, the cause will be a `RemoteError`.
 pub struct HttpErrorLayer {
     server_qos: ServerQos,
     service_error: ServiceError,
