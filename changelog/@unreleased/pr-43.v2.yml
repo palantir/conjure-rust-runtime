@@ -1,0 +1,6 @@
+type: break
+break:
+  description: Client construction has been refactored to use the `refreshables` crate
+    and builder-style types.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/43
