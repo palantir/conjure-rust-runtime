@@ -141,18 +141,14 @@ impl ClientState {
     }
 }
 
-struct SharedClient {
-    state: Arc<ArcSwap<ClientState>>,
-    _subscription: Option<Subscription<ServiceConfig, Error>>,
-}
-
 /// An asynchronous HTTP client to a remote service.
 ///
 /// It implements the Conjure `AsyncClient` trait, but also offers a "raw" request interface for use with services that
 /// don't provide Conjure service definitions.
 #[derive(Clone)]
 pub struct Client {
-    shared: Arc<SharedClient>,
+    state: Arc<ArcSwap<ClientState>>,
+    _subscription: Option<Arc<Subscription<ServiceConfig, Error>>>,
 }
 
 impl Client {
@@ -166,10 +162,8 @@ impl Client {
         subscription: Option<Subscription<ServiceConfig, Error>>,
     ) -> Client {
         Client {
-            shared: Arc::new(SharedClient {
-                state,
-                _subscription: subscription,
-            }),
+            state,
+            _subscription: subscription.map(Arc::new),
         }
     }
 
@@ -207,6 +201,6 @@ impl Client {
     }
 
     pub(crate) async fn send(&self, request: Request<'_>) -> Result<Response, Error> {
-        self.shared.state.load().send(request).await
+        self.state.load().send(request).await
     }
 }
