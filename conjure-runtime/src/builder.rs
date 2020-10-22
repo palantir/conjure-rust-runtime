@@ -37,6 +37,7 @@ pub struct Builder {
     pub(crate) server_qos: ServerQos,
     pub(crate) service_error: ServiceError,
     pub(crate) idempotency: Idempotency,
+    pub(crate) node_selection_strategy: NodeSelectionStrategy,
     pub(crate) metrics: Option<Arc<MetricRegistry>>,
     pub(crate) host_metrics: Option<Arc<HostMetricsRegistry>>,
 }
@@ -64,6 +65,7 @@ impl Builder {
             server_qos: ServerQos::AutomaticRetry,
             service_error: ServiceError::WrapInNewError,
             idempotency: Idempotency::ByMethod,
+            node_selection_strategy: NodeSelectionStrategy::PinUntilError,
             metrics: None,
             host_metrics: None,
         }
@@ -318,4 +320,11 @@ pub enum Idempotency {
 
     /// No requests are assumed to be idempotent.
     Never,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NodeSelectionStrategy {
+    PinUntilError,
+    PinUntilErrorWithoutReshuffle,
 }
