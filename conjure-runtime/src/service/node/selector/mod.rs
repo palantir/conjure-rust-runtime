@@ -11,12 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::service::node::selector::empty::{
+    EmptyNodeSelectorFuture, EmptyNodeSelectorLayer, EmptyNodeSelectorService,
+};
 use crate::service::node::selector::pin_until_error::{
     FixedNodes, PinUntilErrorNodeSelectorFuture, PinUntilErrorNodeSelectorLayer,
     PinUntilErrorNodeSelectorService, ReshufflingNodes,
 };
 use crate::service::node::Node;
 use crate::{Builder, NodeSelectionStrategy};
+use conjure_error::Error;
 use http::{Request, Response};
 use pin_project::pin_project;
 use std::future::Future;
@@ -26,6 +30,7 @@ use std::task::{Context, Poll};
 use tower::layer::Layer;
 use tower::Service;
 
+mod empty;
 mod pin_until_error;
 
 /// A layer which selects a node to use for the request, injecting it into the request's extensions map.
@@ -33,6 +38,7 @@ mod pin_until_error;
 /// Multiple selection strategies are supported, the choice of which is controlled by the builder's
 /// `NodeSelectionStrategy`.
 pub enum NodeSelectorLayer {
+    Empty(EmptyNodeSelectorLayer),
     PinUntilError(PinUntilErrorNodeSelectorLayer<ReshufflingNodes>),
     PinUntilErrorWithoutReshuffle(PinUntilErrorNodeSelectorLayer<FixedNodes>),
 }
@@ -58,7 +64,11 @@ impl NodeSelectorLayer {
                     url,
                 })
             })
-            .collect();
+            .collect::<Vec<_>>();
+
+        if nodes.is_empty() {
+            return NodeSelectorLayer::Empty(EmptyNodeSelectorLayer);
+        }
 
         match builder.node_selection_strategy {
             NodeSelectionStrategy::PinUntilError => NodeSelectorLayer::PinUntilError(
@@ -78,6 +88,7 @@ impl<S> Layer<S> for NodeSelectorLayer {
 
     fn layer(&self, inner: S) -> Self::Service {
         match self {
+            NodeSelectorLayer::Empty(l) => NodeSelectorService::Empty(l.layer(inner)),
             NodeSelectorLayer::PinUntilError(l) => {
                 NodeSelectorService::PinUntilError(l.layer(inner))
             }
@@ -89,13 +100,14 @@ impl<S> Layer<S> for NodeSelectorLayer {
 }
 
 pub enum NodeSelectorService<S> {
+    Empty(EmptyNodeSelectorService<S>),
     PinUntilError(PinUntilErrorNodeSelectorService<ReshufflingNodes, S>),
     PinUntilErrorWithoutReshuffle(PinUntilErrorNodeSelectorService<FixedNodes, S>),
 }
 
 impl<S, B1, B2> Service<Request<B1>> for NodeSelectorService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -103,6 +115,7 @@ where
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self {
+            NodeSelectorService::Empty(s) => s.poll_ready(cx),
             NodeSelectorService::PinUntilError(s) => s.poll_ready(cx),
             NodeSelectorService::PinUntilErrorWithoutReshuffle(s) => s.poll_ready(cx),
         }
@@ -110,6 +123,7 @@ where
 
     fn call(&mut self, req: Request<B1>) -> Self::Future {
         match self {
+            NodeSelectorService::Empty(s) => NodeSelectorFuture::Empty(s.call(req)),
             NodeSelectorService::PinUntilError(s) => NodeSelectorFuture::PinUntilError(s.call(req)),
             NodeSelectorService::PinUntilErrorWithoutReshuffle(s) => {
                 NodeSelectorFuture::PinUntilErrorWithoutReshuffle(s.call(req))
@@ -120,18 +134,20 @@ where
 
 #[pin_project(project = Projection)]
 pub enum NodeSelectorFuture<F> {
+    Empty(#[pin] EmptyNodeSelectorFuture<F>),
     PinUntilError(#[pin] PinUntilErrorNodeSelectorFuture<ReshufflingNodes, F>),
     PinUntilErrorWithoutReshuffle(#[pin] PinUntilErrorNodeSelectorFuture<FixedNodes, F>),
 }
 
-impl<F, B, E> Future for NodeSelectorFuture<F>
+impl<F, B> Future for NodeSelectorFuture<F>
 where
-    F: Future<Output = Result<Response<B>, E>>,
+    F: Future<Output = Result<Response<B>, Error>>,
 {
-    type Output = Result<Response<B>, E>;
+    type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
+            Projection::Empty(f) => f.poll(cx),
             Projection::PinUntilError(f) => f.poll(cx),
             Projection::PinUntilErrorWithoutReshuffle(f) => f.poll(cx),
         }
