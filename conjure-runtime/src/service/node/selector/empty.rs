@@ -15,22 +15,37 @@ use conjure_error::Error;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::layer::Layer;
 use tower::Service;
 
 /// A node selector that always returns an error.
-pub struct EmptyNodeSelectorLayer;
+pub struct EmptyNodeSelectorLayer {
+    service: Arc<str>,
+}
+
+impl EmptyNodeSelectorLayer {
+    pub fn new(service: &str) -> EmptyNodeSelectorLayer {
+        EmptyNodeSelectorLayer {
+            service: service.into(),
+        }
+    }
+}
 
 impl<S> Layer<S> for EmptyNodeSelectorLayer {
     type Service = EmptyNodeSelectorService<S>;
 
     fn layer(&self, _: S) -> Self::Service {
-        EmptyNodeSelectorService { _p: PhantomData }
+        EmptyNodeSelectorService {
+            service: self.service.clone(),
+            _p: PhantomData,
+        }
     }
 }
 
 pub struct EmptyNodeSelectorService<S> {
+    service: Arc<str>,
     _p: PhantomData<S>,
 }
 
@@ -47,11 +62,15 @@ where
     }
 
     fn call(&mut self, _: R) -> Self::Future {
-        EmptyNodeSelectorFuture { _p: PhantomData }
+        EmptyNodeSelectorFuture {
+            service: self.service.clone(),
+            _p: PhantomData,
+        }
     }
 }
 
 pub struct EmptyNodeSelectorFuture<F> {
+    service: Arc<str>,
     _p: PhantomData<F>,
 }
 
@@ -62,6 +81,7 @@ where
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(Err(Error::internal_safe("service configured with no URIs")))
+        Poll::Ready(Err(Error::internal_safe("service configured with no URIs")
+            .with_safe_param("service", &*self.service)))
     }
 }

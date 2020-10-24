@@ -72,7 +72,7 @@ impl NodeSelectorLayer {
             .collect::<Vec<_>>();
 
         if nodes.is_empty() {
-            NodeSelectorLayer::Empty(EmptyNodeSelectorLayer)
+            NodeSelectorLayer::Empty(EmptyNodeSelectorLayer::new(service))
         } else if nodes.len() == 1 {
             NodeSelectorLayer::Single(SingleNodeSelectorLayer::new(nodes.pop().unwrap()))
         } else {
