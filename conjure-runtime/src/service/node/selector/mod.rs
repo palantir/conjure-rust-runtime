@@ -18,6 +18,9 @@ use crate::service::node::selector::pin_until_error::{
     FixedNodes, PinUntilErrorNodeSelectorFuture, PinUntilErrorNodeSelectorLayer,
     PinUntilErrorNodeSelectorService, ReshufflingNodes,
 };
+use crate::service::node::selector::single::{
+    SingleNodeSelectorFuture, SingleNodeSelectorLayer, SingleNodeSelectorService,
+};
 use crate::service::node::Node;
 use crate::{Builder, NodeSelectionStrategy};
 use conjure_error::Error;
@@ -32,6 +35,7 @@ use tower::Service;
 
 mod empty;
 mod pin_until_error;
+mod single;
 
 /// A layer which selects a node to use for the request, injecting it into the request's extensions map.
 ///
@@ -39,13 +43,14 @@ mod pin_until_error;
 /// `NodeSelectionStrategy`.
 pub enum NodeSelectorLayer {
     Empty(EmptyNodeSelectorLayer),
+    Single(SingleNodeSelectorLayer),
     PinUntilError(PinUntilErrorNodeSelectorLayer<ReshufflingNodes>),
     PinUntilErrorWithoutReshuffle(PinUntilErrorNodeSelectorLayer<FixedNodes>),
 }
 
 impl NodeSelectorLayer {
     pub fn new(service: &str, builder: &Builder) -> NodeSelectorLayer {
-        let nodes = builder
+        let mut nodes = builder
             .uris
             .iter()
             .map(|url| {
@@ -67,17 +72,19 @@ impl NodeSelectorLayer {
             .collect::<Vec<_>>();
 
         if nodes.is_empty() {
-            return NodeSelectorLayer::Empty(EmptyNodeSelectorLayer);
-        }
-
-        match builder.node_selection_strategy {
-            NodeSelectionStrategy::PinUntilError => NodeSelectorLayer::PinUntilError(
-                PinUntilErrorNodeSelectorLayer::new(ReshufflingNodes::new(nodes)),
-            ),
-            NodeSelectionStrategy::PinUntilErrorWithoutReshuffle => {
-                NodeSelectorLayer::PinUntilErrorWithoutReshuffle(
-                    PinUntilErrorNodeSelectorLayer::new(FixedNodes::new(nodes)),
-                )
+            NodeSelectorLayer::Empty(EmptyNodeSelectorLayer)
+        } else if nodes.len() == 1 {
+            NodeSelectorLayer::Single(SingleNodeSelectorLayer::new(nodes.pop().unwrap()))
+        } else {
+            match builder.node_selection_strategy {
+                NodeSelectionStrategy::PinUntilError => NodeSelectorLayer::PinUntilError(
+                    PinUntilErrorNodeSelectorLayer::new(ReshufflingNodes::new(nodes)),
+                ),
+                NodeSelectionStrategy::PinUntilErrorWithoutReshuffle => {
+                    NodeSelectorLayer::PinUntilErrorWithoutReshuffle(
+                        PinUntilErrorNodeSelectorLayer::new(FixedNodes::new(nodes)),
+                    )
+                }
             }
         }
     }
@@ -89,6 +96,7 @@ impl<S> Layer<S> for NodeSelectorLayer {
     fn layer(&self, inner: S) -> Self::Service {
         match self {
             NodeSelectorLayer::Empty(l) => NodeSelectorService::Empty(l.layer(inner)),
+            NodeSelectorLayer::Single(l) => NodeSelectorService::Single(l.layer(inner)),
             NodeSelectorLayer::PinUntilError(l) => {
                 NodeSelectorService::PinUntilError(l.layer(inner))
             }
@@ -101,6 +109,7 @@ impl<S> Layer<S> for NodeSelectorLayer {
 
 pub enum NodeSelectorService<S> {
     Empty(EmptyNodeSelectorService<S>),
+    Single(SingleNodeSelectorService<S>),
     PinUntilError(PinUntilErrorNodeSelectorService<ReshufflingNodes, S>),
     PinUntilErrorWithoutReshuffle(PinUntilErrorNodeSelectorService<FixedNodes, S>),
 }
@@ -116,6 +125,7 @@ where
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self {
             NodeSelectorService::Empty(s) => s.poll_ready(cx),
+            NodeSelectorService::Single(s) => s.poll_ready(cx),
             NodeSelectorService::PinUntilError(s) => s.poll_ready(cx),
             NodeSelectorService::PinUntilErrorWithoutReshuffle(s) => s.poll_ready(cx),
         }
@@ -124,6 +134,7 @@ where
     fn call(&mut self, req: Request<B1>) -> Self::Future {
         match self {
             NodeSelectorService::Empty(s) => NodeSelectorFuture::Empty(s.call(req)),
+            NodeSelectorService::Single(s) => NodeSelectorFuture::Single(s.call(req)),
             NodeSelectorService::PinUntilError(s) => NodeSelectorFuture::PinUntilError(s.call(req)),
             NodeSelectorService::PinUntilErrorWithoutReshuffle(s) => {
                 NodeSelectorFuture::PinUntilErrorWithoutReshuffle(s.call(req))
@@ -135,6 +146,7 @@ where
 #[pin_project(project = Projection)]
 pub enum NodeSelectorFuture<F> {
     Empty(#[pin] EmptyNodeSelectorFuture<F>),
+    Single(#[pin] SingleNodeSelectorFuture<F>),
     PinUntilError(#[pin] PinUntilErrorNodeSelectorFuture<ReshufflingNodes, F>),
     PinUntilErrorWithoutReshuffle(#[pin] PinUntilErrorNodeSelectorFuture<FixedNodes, F>),
 }
@@ -148,6 +160,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
             Projection::Empty(f) => f.poll(cx),
+            Projection::Single(f) => f.poll(cx),
             Projection::PinUntilError(f) => f.poll(cx),
             Projection::PinUntilErrorWithoutReshuffle(f) => f.poll(cx),
         }
