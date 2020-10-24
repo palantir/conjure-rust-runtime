@@ -126,9 +126,9 @@ where
     }
 
     fn reshuffle_if_necessary(&self) {
-        let next_reshuffle_nanos = self.next_reshuffle_nanos.load(Ordering::SeqCst);
         let now = Instant::now();
 
+        let next_reshuffle_nanos = self.next_reshuffle_nanos.load(Ordering::SeqCst);
         if now < self.start + Duration::from_nanos(next_reshuffle_nanos) {
             return;
         }
