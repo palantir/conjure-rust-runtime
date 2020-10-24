@@ -230,6 +230,17 @@ impl Builder {
         self
     }
 
+    /// Sets the client's strategy for selecting a node for a request.
+    ///
+    /// Defaults to `NodeSelectionStrategy::PinUntilError`.
+    pub fn node_selection_strategy(
+        &mut self,
+        node_selection_strategy: NodeSelectionStrategy,
+    ) -> &mut Self {
+        self.node_selection_strategy = node_selection_strategy;
+        self
+    }
+
     /// Sets the metric registry used to register client metrics.
     ///
     /// Defaults to no registry.
@@ -322,9 +333,19 @@ pub enum Idempotency {
     Never,
 }
 
+/// Specifies the strategy used to select a node of a service to use for a request attempt.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NodeSelectionStrategy {
+    /// Pin to a single host as long as it continues to successfully respond to requests.
+    ///
+    /// If the pinned node fails to successfully respond, the client will rotate through the other nodes until it finds
+    /// one that can successfully respond and then pin to that new node. The pinned node will also be randomly rotated
+    /// periodically to help spread load across the cluster.
+    ///
+    /// This is the default behavior.
     PinUntilError,
+
+    /// Like `PinUntilError` except that the pinned node is never randomly shuffled.
     PinUntilErrorWithoutReshuffle,
 }
