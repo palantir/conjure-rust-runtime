@@ -15,22 +15,22 @@
 #![doc(html_root_url = "https://docs.rs/conjure-runtime-config/0.2")]
 #![warn(missing_docs, clippy::all)]
 
-use serde::de::{Deserialize, Deserializer};
+use serde::de::{Deserializer, Error as _, Unexpected};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use url::Url;
 
-mod raw;
 #[cfg(test)]
 mod test;
 
 /// Configuration for a collection of services.
 ///
 /// This type can be constructed programmatically via the `ServicesConfigBuilder` API or deserialized from e.g. a
-/// configuration file. When deserializing, default values for various configuration options can be overridden at the
-/// top level in addition to being specified per-service.
+/// configuration file. Default values for various configuration options can be set at the top level in addition to
+/// being specified per-service.
 ///
 /// # Examples
 ///
@@ -48,19 +48,20 @@ mod test;
 /// security:
 ///   ca-file: var/security/ca.pem
 /// ```
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", default)]
 pub struct ServicesConfig {
     services: HashMap<String, ServiceConfig>,
-}
-
-impl<'de> Deserialize<'de> for ServicesConfig {
-    fn deserialize<D>(d: D) -> Result<ServicesConfig, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = raw::ServicesConfig::deserialize(d)?;
-        Ok(ServicesConfig::from_raw(raw))
-    }
+    security: Option<SecurityConfig>,
+    proxy: Option<ProxyConfig>,
+    #[serde(deserialize_with = "de_opt_duration")]
+    connect_timeout: Option<Duration>,
+    #[serde(deserialize_with = "de_opt_duration")]
+    request_timeout: Option<Duration>,
+    #[serde(deserialize_with = "de_opt_duration")]
+    backoff_slot_size: Option<Duration>,
+    #[serde(deserialize_with = "de_opt_duration")]
+    failed_url_cooldown: Option<Duration>,
 }
 
 impl ServicesConfig {
@@ -69,49 +70,65 @@ impl ServicesConfig {
         ServicesConfigBuilder::default()
     }
 
-    /// Returns the configuration for the specified service, if present.
-    pub fn service(&self, service: &str) -> Option<&ServiceConfig> {
-        self.services.get(service)
-    }
+    /// Returns the configuration for the specified service with top-level defaults applied.
+    pub fn merged_service(&self, name: &str) -> Option<ServiceConfig> {
+        let mut service = self.services.get(name).cloned()?;
 
-    // FIXME: remove this check when clippy stops complaining.
-    // or_fun_call in newer versions of clippy ignore common cheap calls such as as_ref.
-    #[allow(clippy::or_fun_call)]
-    fn from_raw(raw: raw::ServicesConfig) -> ServicesConfig {
-        let mut config = ServicesConfig::builder();
-
-        for (name, raw_service) in raw.services {
-            let mut service = ServiceConfig::builder();
-            service.uris(raw_service.uris);
-            if let Some(security) = raw_service.security.as_ref().or(raw.security.as_ref()) {
-                service.security(SecurityConfig::from_raw(security));
-            }
-            if let Some(proxy) = raw_service.proxy.as_ref().or(raw.proxy.as_ref()) {
-                service.proxy(ProxyConfig::from_raw(proxy));
-            }
-            if let Some(connect_timeout) = raw_service.connect_timeout.or(raw.connect_timeout) {
-                service.connect_timeout(connect_timeout);
-            }
-            if let Some(request_timeout) = raw_service.request_timeout.or(raw.request_timeout) {
-                service.request_timeout(request_timeout);
-            }
-            if let Some(max_num_retries) = raw_service.max_num_retries {
-                service.max_num_retries(max_num_retries);
-            }
-            if let Some(backoff_slot_size) = raw_service.backoff_slot_size.or(raw.backoff_slot_size)
-            {
-                service.backoff_slot_size(backoff_slot_size);
-            }
-            if let Some(failed_url_cooldown) =
-                raw_service.failed_url_cooldown.or(raw.failed_url_cooldown)
-            {
-                service.failed_url_cooldown(failed_url_cooldown);
-            }
-
-            config.service(&name, service.build());
+        if service.security.is_none() {
+            service.security = self.security.clone();
         }
 
-        config.build()
+        if service.proxy.is_none() {
+            service.proxy = self.proxy.clone();
+        }
+
+        if service.connect_timeout.is_none() {
+            service.connect_timeout = self.connect_timeout;
+        }
+
+        if service.request_timeout.is_none() {
+            service.request_timeout = self.request_timeout;
+        }
+
+        if service.backoff_slot_size.is_none() {
+            service.backoff_slot_size = self.backoff_slot_size;
+        }
+
+        if service.failed_url_cooldown.is_none() {
+            service.failed_url_cooldown = self.failed_url_cooldown;
+        }
+
+        Some(service)
+    }
+
+    /// Returns the security configuration.
+    pub fn security(&self) -> Option<&SecurityConfig> {
+        self.security.as_ref()
+    }
+
+    /// Returns the proxy configuration.
+    pub fn proxy(&self) -> Option<&ProxyConfig> {
+        self.proxy.as_ref()
+    }
+
+    /// Returns the connection timeout.
+    pub fn connect_timeout(&self) -> Option<Duration> {
+        self.connect_timeout
+    }
+
+    /// Returns the request timeout.
+    pub fn request_timeout(&self) -> Option<Duration> {
+        self.request_timeout
+    }
+
+    /// Returns the backoff slot size.
+    pub fn backoff_slot_size(&self) -> Option<Duration> {
+        self.backoff_slot_size
+    }
+
+    /// Returns the failed URL cooldown.
+    pub fn failed_url_cooldown(&self) -> Option<Duration> {
+        self.failed_url_cooldown
     }
 }
 
@@ -137,6 +154,42 @@ impl ServicesConfigBuilder {
         self
     }
 
+    /// Sets the security configuration.
+    pub fn security(&mut self, security: SecurityConfig) -> &mut Self {
+        self.0.security = Some(security);
+        self
+    }
+
+    /// Sets the proxy configuration.
+    pub fn proxy(&mut self, proxy: ProxyConfig) -> &mut Self {
+        self.0.proxy = Some(proxy);
+        self
+    }
+
+    /// Sets the connect timeout.
+    pub fn connect_timeout(&mut self, connect_timeout: Duration) -> &mut Self {
+        self.0.connect_timeout = Some(connect_timeout);
+        self
+    }
+
+    /// Sets the request timeout.
+    pub fn request_timeout(&mut self, request_timeout: Duration) -> &mut Self {
+        self.0.request_timeout = Some(request_timeout);
+        self
+    }
+
+    /// Sets the backoff slot size.
+    pub fn backoff_slot_size(&mut self, backoff_slot_size: Duration) -> &mut Self {
+        self.0.backoff_slot_size = Some(backoff_slot_size);
+        self
+    }
+
+    /// Sets the failed URL cooldown.
+    pub fn failed_url_cooldown(&mut self, failed_url_cooldown: Duration) -> &mut Self {
+        self.0.failed_url_cooldown = Some(failed_url_cooldown);
+        self
+    }
+
     /// Creates a new `ServicesConfig`.
     pub fn build(&self) -> ServicesConfig {
         self.0.clone()
@@ -144,31 +197,21 @@ impl ServicesConfigBuilder {
 }
 
 /// The configuration for an individual service.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case", default)]
 pub struct ServiceConfig {
     uris: Vec<Url>,
-    security: SecurityConfig,
-    connect_timeout: Duration,
-    request_timeout: Duration,
-    max_num_retries: u32,
-    backoff_slot_size: Duration,
-    failed_url_cooldown: Duration,
-    proxy: ProxyConfig,
-}
-
-impl Default for ServiceConfig {
-    fn default() -> ServiceConfig {
-        ServiceConfig {
-            uris: vec![],
-            security: SecurityConfig::builder().build(),
-            proxy: ProxyConfig::Direct,
-            connect_timeout: Duration::from_secs(10),
-            request_timeout: Duration::from_secs(5 * 60),
-            max_num_retries: 3,
-            backoff_slot_size: Duration::from_millis(250),
-            failed_url_cooldown: Duration::from_millis(250),
-        }
-    }
+    security: Option<SecurityConfig>,
+    proxy: Option<ProxyConfig>,
+    #[serde(deserialize_with = "de_opt_duration")]
+    connect_timeout: Option<Duration>,
+    #[serde(deserialize_with = "de_opt_duration")]
+    request_timeout: Option<Duration>,
+    #[serde(deserialize_with = "de_opt_duration")]
+    backoff_slot_size: Option<Duration>,
+    #[serde(deserialize_with = "de_opt_duration")]
+    failed_url_cooldown: Option<Duration>,
+    max_num_retries: Option<u32>,
 }
 
 impl ServiceConfig {
@@ -178,73 +221,49 @@ impl ServiceConfig {
     }
 
     /// Returns the URIs of the service's nodes.
-    ///
-    /// Defaults to an empty list.
     pub fn uris(&self) -> &[Url] {
         &self.uris
     }
 
-    /// Returns the service's security configuration.
-    pub fn security(&self) -> &SecurityConfig {
-        &self.security
+    /// Returns the security configuration.
+    pub fn security(&self) -> Option<&SecurityConfig> {
+        self.security.as_ref()
     }
 
-    /// Returns the timeout used when connecting to the nodes of a service.
-    ///
-    /// Defaults to 10 seconds.
-    pub fn connect_timeout(&self) -> Duration {
+    /// Returns the proxy configuration.
+    pub fn proxy(&self) -> Option<&ProxyConfig> {
+        self.proxy.as_ref()
+    }
+
+    /// Returns the connection timeout.
+    pub fn connect_timeout(&self) -> Option<Duration> {
         self.connect_timeout
     }
 
-    /// Returns the overall request timeout used when making a request to the service.
-    ///
-    /// The timeout is applied from when the request is first started to when the headers of a successful response are
-    /// returned.
-    ///
-    /// Defaults to 5 minutes.
-    pub fn request_timeout(&self) -> Duration {
+    /// Returns the request timeout.
+    pub fn request_timeout(&self) -> Option<Duration> {
         self.request_timeout
     }
 
-    /// Returns the number of times the client will retry a request after failed attempts before giving up.
-    ///
-    /// Defaults to 3.
-    pub fn max_num_retries(&self) -> u32 {
-        self.max_num_retries
-    }
-
-    /// Returns the base time of the exponential backoff algorithm applied between attempts.
-    ///
-    /// Defaults to 250 milliseconds.
-    pub fn backoff_slot_size(&self) -> Duration {
+    /// Returns the backoff slot size.
+    pub fn backoff_slot_size(&self) -> Option<Duration> {
         self.backoff_slot_size
     }
 
-    /// Returns the amount of time a node of a service is blacklisted after a failed request.
-    ///
-    /// While blacklisted, a node will not be used for requests unless no other node is available.
-    ///
-    /// Defaults to 250 milliseconds.
-    pub fn failed_url_cooldown(&self) -> Duration {
+    /// Returns the failed URL cooldown.
+    pub fn failed_url_cooldown(&self) -> Option<Duration> {
         self.failed_url_cooldown
     }
 
-    /// Returns the proxy configuration used to communicate with the service.
-    ///
-    /// Defaults to "direct" (i.e. no proxy).
-    pub fn proxy(&self) -> &ProxyConfig {
-        &self.proxy
+    /// Returns the maximum number of retries for failed RPCs.
+    pub fn max_num_retries(&self) -> Option<u32> {
+        self.max_num_retries
     }
 }
 
 /// A builder type for `ServiceConfig`s.
+#[derive(Default)]
 pub struct ServiceConfigBuilder(ServiceConfig);
-
-impl Default for ServiceConfigBuilder {
-    fn default() -> ServiceConfigBuilder {
-        ServiceConfigBuilder(ServiceConfig::default())
-    }
-}
 
 impl From<ServiceConfig> for ServiceConfigBuilder {
     fn from(config: ServiceConfig) -> ServiceConfigBuilder {
@@ -253,7 +272,13 @@ impl From<ServiceConfig> for ServiceConfigBuilder {
 }
 
 impl ServiceConfigBuilder {
-    /// Sets the URI list.
+    /// Appends a URI to the URIs list.
+    pub fn uri(&mut self, uri: Url) -> &mut Self {
+        self.0.uris.push(uri);
+        self
+    }
+
+    /// Sets the URIs list.
     pub fn uris(&mut self, uris: Vec<Url>) -> &mut Self {
         self.0.uris = uris;
         self
@@ -261,43 +286,43 @@ impl ServiceConfigBuilder {
 
     /// Sets the security configuration.
     pub fn security(&mut self, security: SecurityConfig) -> &mut Self {
-        self.0.security = security;
-        self
-    }
-
-    /// Sets the connect timeout.
-    pub fn connect_timeout(&mut self, connect_timeout: Duration) -> &mut Self {
-        self.0.connect_timeout = connect_timeout;
-        self
-    }
-
-    /// Sets the request timeout.
-    pub fn request_timeout(&mut self, request_timeout: Duration) -> &mut Self {
-        self.0.request_timeout = request_timeout;
-        self
-    }
-
-    /// Sets the maximum retry count.
-    pub fn max_num_retries(&mut self, max_num_retries: u32) -> &mut Self {
-        self.0.max_num_retries = max_num_retries;
-        self
-    }
-
-    /// Sets the backoff slot size.
-    pub fn backoff_slot_size(&mut self, backoff_slot_size: Duration) -> &mut Self {
-        self.0.backoff_slot_size = backoff_slot_size;
-        self
-    }
-
-    /// Sets the failed URL cooldown.
-    pub fn failed_url_cooldown(&mut self, failed_url_cooldown: Duration) -> &mut Self {
-        self.0.failed_url_cooldown = failed_url_cooldown;
+        self.0.security = Some(security);
         self
     }
 
     /// Sets the proxy configuration.
     pub fn proxy(&mut self, proxy: ProxyConfig) -> &mut Self {
-        self.0.proxy = proxy;
+        self.0.proxy = Some(proxy);
+        self
+    }
+
+    /// Sets the connect timeout.
+    pub fn connect_timeout(&mut self, connect_timeout: Duration) -> &mut Self {
+        self.0.connect_timeout = Some(connect_timeout);
+        self
+    }
+
+    /// Sets the request timeout.
+    pub fn request_timeout(&mut self, request_timeout: Duration) -> &mut Self {
+        self.0.request_timeout = Some(request_timeout);
+        self
+    }
+
+    /// Sets the backoff slot size.
+    pub fn backoff_slot_size(&mut self, backoff_slot_size: Duration) -> &mut Self {
+        self.0.backoff_slot_size = Some(backoff_slot_size);
+        self
+    }
+
+    /// Sets the failed URL cooldown.
+    pub fn failed_url_cooldown(&mut self, failed_url_cooldown: Duration) -> &mut Self {
+        self.0.failed_url_cooldown = Some(failed_url_cooldown);
+        self
+    }
+
+    /// Sets the maximum number of retries for failed RPCs.
+    pub fn max_num_retries(&mut self, max_num_retries: u32) -> &mut Self {
+        self.0.max_num_retries = Some(max_num_retries);
         self
     }
 
@@ -308,7 +333,8 @@ impl ServiceConfigBuilder {
 }
 
 /// Security configuration used to communicate with a service.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct SecurityConfig {
     ca_file: Option<PathBuf>,
 }
@@ -322,18 +348,8 @@ impl SecurityConfig {
     /// The path to a file containing PEM-formatted root certificates trusted to identify the service.
     ///
     /// These certificates are used in addition to the system's root CA list.
-    ///
-    /// Defaults to `None`.
     pub fn ca_file(&self) -> Option<&Path> {
         self.ca_file.as_deref()
-    }
-
-    fn from_raw(raw: &raw::SecurityConfig) -> SecurityConfig {
-        let mut config = SecurityConfig::builder();
-        if let Some(ref ca_file) = raw.ca_file {
-            config.ca_file(Some(ca_file.to_path_buf()));
-        }
-        config.build()
     }
 }
 
@@ -366,7 +382,8 @@ impl SecurityConfigBuilder {
 }
 
 /// Proxy configuration used to connect to a service.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "type")]
 #[non_exhaustive]
 pub enum ProxyConfig {
     /// A direct connection (i.e. no proxy).
@@ -383,33 +400,9 @@ impl Default for ProxyConfig {
     }
 }
 
-impl ProxyConfig {
-    fn from_raw(raw: &raw::ProxyConfig) -> ProxyConfig {
-        match *raw {
-            raw::ProxyConfig::Http {
-                ref host_and_port,
-                ref credentials,
-            } => {
-                let mut builder = HttpProxyConfig::builder();
-                builder.host_and_port(HostAndPort::from_raw(host_and_port));
-                if let Some(ref credentials) = *credentials {
-                    builder.credentials(Some(BasicCredentials::from_raw(credentials)));
-                }
-                ProxyConfig::Http(builder.build())
-            }
-            raw::ProxyConfig::Mesh { ref host_and_port } => {
-                let config = MeshProxyConfig::builder()
-                    .host_and_port(HostAndPort::from_raw(host_and_port))
-                    .build();
-                ProxyConfig::Mesh(config)
-            }
-            raw::ProxyConfig::Direct {} => ProxyConfig::Direct,
-        }
-    }
-}
-
 /// Configuration for an HTTP proxy.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct HttpProxyConfig {
     host_and_port: HostAndPort,
     credentials: Option<BasicCredentials>,
@@ -422,15 +415,11 @@ impl HttpProxyConfig {
     }
 
     /// The host and port of the proxy server.
-    ///
-    /// Required.
     pub fn host_and_port(&self) -> &HostAndPort {
         &self.host_and_port
     }
 
     /// The credentials used to authenticate with the proxy.
-    ///
-    /// Defaults to `None`.
     pub fn credentials(&self) -> Option<&BasicCredentials> {
         self.credentials.as_ref()
     }
@@ -474,6 +463,10 @@ impl HttpProxyConfigBuilder {
     }
 
     /// Creates a new `HttpProxyConfig`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `host_and_port` is not set.
     pub fn build(&self) -> HttpProxyConfig {
         HttpProxyConfig {
             host_and_port: self.host_and_port.clone().expect("host_and_port not set"),
@@ -495,6 +488,28 @@ impl fmt::Display for HostAndPort {
     }
 }
 
+impl<'de> Deserialize<'de> for HostAndPort {
+    fn deserialize<D>(deserializer: D) -> Result<HostAndPort, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let expected = "a host:port identifier";
+
+        let mut s = String::deserialize(deserializer)?;
+
+        match s.find(':') {
+            Some(idx) => {
+                let port = s[idx + 1..]
+                    .parse()
+                    .map_err(|_| D::Error::invalid_value(Unexpected::Str(&s), &expected))?;
+                s.truncate(idx);
+                Ok(HostAndPort { host: s, port })
+            }
+            None => Err(D::Error::invalid_value(Unexpected::Str(&s), &expected)),
+        }
+    }
+}
+
 impl HostAndPort {
     /// Creates a new `HostAndPort`.
     pub fn new(host: &str, port: u16) -> HostAndPort {
@@ -513,14 +528,10 @@ impl HostAndPort {
     pub fn port(&self) -> u16 {
         self.port
     }
-
-    fn from_raw(raw: &raw::HostAndPort) -> HostAndPort {
-        HostAndPort::new(&raw.host, raw.port)
-    }
 }
 
 /// Credentials used to authenticate with an HTTP proxy.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct BasicCredentials {
     username: String,
     password: String,
@@ -544,14 +555,11 @@ impl BasicCredentials {
     pub fn password(&self) -> &str {
         &self.password
     }
-
-    fn from_raw(raw: &raw::BasicCredentials) -> BasicCredentials {
-        BasicCredentials::new(&raw.username, &raw.password)
-    }
 }
 
 /// Configuration for a mesh proxy.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct MeshProxyConfig {
     host_and_port: HostAndPort,
 }
@@ -597,9 +605,20 @@ impl MeshProxyConfigBuilder {
     }
 
     /// Creates a new `MeshProxyBuilder`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `host_and_port` is not set.
     pub fn build(&self) -> MeshProxyConfig {
         MeshProxyConfig {
             host_and_port: self.host_and_port.clone().expect("host_and_port not set"),
         }
     }
+}
+
+fn de_opt_duration<'de, D>(d: D) -> Result<Option<Duration>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    serde_humantime::De::deserialize(d).map(serde_humantime::De::into_inner)
 }

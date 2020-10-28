@@ -24,7 +24,7 @@ pub mod uri;
 
 pub struct Node {
     url: Url,
-    host_metrics: Arc<HostMetrics>,
+    host_metrics: Option<Arc<HostMetrics>>,
 }
 
 impl Node {
@@ -32,7 +32,7 @@ impl Node {
     fn test(url: &str) -> Node {
         Node {
             url: url.parse().unwrap(),
-            host_metrics: Arc::new(HostMetrics::new("", "", 0)),
+            host_metrics: None,
         }
     }
 }

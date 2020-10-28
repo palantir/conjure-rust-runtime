@@ -18,10 +18,10 @@
 //!
 //! # Configuration
 //!
-//! While a `conjure_runtime` client's configuration can be built up programmatically, the more common approach is for
-//! the configuration to be deserialized from a service's runtime-reloadable configuration file. The `ServicesConfig`
-//! supports configuration for multiple downstream services, as well as allowing for both global and per-service
-//! configuration overrides:
+//! While a `conjure_runtime` client can be built up programmatically, the more common approach is for the configuration
+//! to be deserialized from a service's runtime-reloadable configuration file. The `ServicesConfig` supports
+//! configuration for multiple downstream services, as well as allowing for both global and per-service configuration
+//! overrides:
 //!
 //! ```yaml
 //! services:
@@ -38,41 +38,29 @@
 //!   ca-file: var/security/ca.pem
 //! ```
 //!
-//! Once a client is constructed, its configuration can be dynamically reloaded by calling `RefreshHandle::refresh`
-//! on a handle obtained via `Client::refresh_handle`. Note that the refresh process will throw away the client's
-//! TLS session cache and HTTP connection pool, so it should not be called needlessly often.
+//! Using the `refreshable` crate, a live-updating config file can be used with the `ClientFactory` type to create
+//! live-updating clients for the configured services.
 //!
 //! # Usage
 //!
 //! First construct a raw `conjure_runtime::Client`:
 //!
 //! ```
-//! use conjure_runtime::{UserAgent, Agent, HostMetricsRegistry, Client};
-//! use conjure_runtime::config::{ServiceConfig, SecurityConfig};
+//! use conjure_runtime::{UserAgent, Agent, Client};
+//! use conjure_runtime::config::SecurityConfig;
 //! use std::path::PathBuf;
-//! use std::sync::Arc;
-//! use witchcraft_metrics::MetricRegistry;
 //!
 //! # fn foo() -> Result<(), conjure_error::Error> {
-//! let user_agent = UserAgent::new(Agent::new("my-user-agent", "1.0.0"));
-//! let host_metrics = Arc::new(HostMetricsRegistry::new());
-//! let metrics = Arc::new(MetricRegistry::new());
-//! let config = ServiceConfig::builder()
-//!     .uris(vec!["https://url-to-server:1234/test-service".parse().unwrap()])
+//! let client = Client::builder()
+//!     .service("test-service")
+//!     .user_agent(UserAgent::new(Agent::new("my-user-agent", "1.0.0")))
+//!     .uri("https://url-to-server:1234/test-service".parse().unwrap())
 //!     .security(
 //!         SecurityConfig::builder()
 //!             .ca_file(Some(PathBuf::from("path/to/ca_file.pem")))
 //!             .build(),
 //!     )
-//!     .build();
-//!
-//! let client = Client::new(
-//!     "test-service",
-//!     user_agent,
-//!     &host_metrics,
-//!     &metrics,
-//!     &config,
-//! )?;
+//!     .build()?;
 //! # Ok(()) }
 //! ```
 //!
@@ -126,8 +114,8 @@
 //! # Behavior
 //!
 //! `conjure_runtime` wraps the `hyper` HTTP library with opinionated behavior designed to more effectively communicate
-//! between services in a distributed system. It is broadly designed to align with the [`conjure-java-runtime`] Java
-//! library, though it does differ in various ways.
+//! between services in a distributed system. It is broadly designed to align with the [`dialogue`] Java library, though
+//! it does differ in various ways.
 //!
 //! ## Error Propagation
 //!
@@ -166,8 +154,8 @@
 //! retried a fixed number of times, with an exponentially growing backoff in between attempts. If a 429 response
 //! contains a `Retry-After` header, its backoff will be used rather than the default. IO errors also trigger a retry.
 //!
-//! A 503 response or IO error will also cause that host to be temporarily "blacklisted" so it will not be used by other
-//! requests unless there is no other option.
+//! A 503 response or IO error will also cause that host to be temporarily put on "cooldown" so it will not be used by
+//! other requests unless there is no other option.
 //!
 //! Only some requests can be retried. By default, `conjure_runtime` will only retry requests with HTTP methods
 //! identified as idempotent - `GET`, `PUT`, `DELETE`, `HEAD`, `TRACE`, and `OPTIONS`. Non-idempotent requests cannot be
@@ -198,13 +186,15 @@
 //! `conjure_runtime` client.
 //!
 //! [Conjure]: https://github.com/palantir/conjure
-//! [`conjure-java-runtime`]: https://github.com/palantir/conjure-java-runtime
+//! [`dialogue`]: https://github.com/palantir/dialogue
 //! [`zipkin`]: https://docs.rs/zipkin
 #![doc(html_root_url = "https://docs.rs/conjure-runtime/0.2")]
 #![warn(missing_docs, clippy::all)]
 
 pub use crate::body::*;
+pub use crate::builder::*;
 pub use crate::client::*;
+pub use crate::client_factory::*;
 pub use crate::host_metrics::*;
 pub use crate::payload::*;
 pub use crate::request::*;
@@ -215,7 +205,9 @@ use once_cell::sync::Lazy;
 
 pub mod blocking;
 mod body;
+mod builder;
 mod client;
+mod client_factory;
 mod conjure;
 pub mod errors;
 mod host_metrics;

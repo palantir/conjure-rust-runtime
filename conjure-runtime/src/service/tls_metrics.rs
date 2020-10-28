@@ -11,9 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use futures::future::BoxFuture;
+use crate::Builder;
+use futures::ready;
 use http::Uri;
 use hyper_openssl::MaybeHttpsStream;
+use pin_project::pin_project;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::layer::Layer;
@@ -21,7 +25,7 @@ use tower::Service;
 use witchcraft_metrics::{MetricId, MetricRegistry};
 
 struct Shared {
-    metrics: Arc<MetricRegistry>,
+    metrics: Option<Arc<MetricRegistry>>,
     service: String,
 }
 
@@ -31,10 +35,10 @@ pub struct TlsMetricsLayer {
 }
 
 impl TlsMetricsLayer {
-    pub fn new(metrics: &Arc<MetricRegistry>, service: &str) -> TlsMetricsLayer {
+    pub fn new(service: &str, builder: &Builder) -> TlsMetricsLayer {
         TlsMetricsLayer {
             shared: Arc::new(Shared {
-                metrics: metrics.clone(),
+                metrics: builder.metrics.clone(),
                 service: service.to_string(),
             }),
         }
@@ -65,35 +69,53 @@ where
 {
     type Response = MaybeHttpsStream<T>;
     type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = TlsMetricsFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, req: Uri) -> Self::Future {
-        let shared = self.shared.clone();
-        let future = self.inner.call(req);
-        Box::pin(async move {
-            let stream = future.await?;
+        TlsMetricsFuture {
+            future: self.inner.call(req),
+            shared: self.shared.clone(),
+        }
+    }
+}
 
-            if let MaybeHttpsStream::Https(s) = &stream {
-                let cipher = s.ssl().current_cipher().expect("session is active");
-                shared
-                    .metrics
-                    .meter(
-                        MetricId::new("tls.handshake")
-                            .with_tag("context", shared.service.clone())
-                            .with_tag("protocol", s.ssl().version_str())
-                            .with_tag(
-                                "cipher",
-                                cipher.standard_name().unwrap_or_else(|| cipher.name()),
-                            ),
-                    )
-                    .mark(1);
-            }
+#[pin_project]
+pub struct TlsMetricsFuture<F> {
+    #[pin]
+    future: F,
+    shared: Arc<Shared>,
+}
 
-            Ok(stream)
-        })
+impl<F, T, E> Future for TlsMetricsFuture<F>
+where
+    F: Future<Output = Result<MaybeHttpsStream<T>, E>>,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+
+        let stream = ready!(this.future.poll(cx))?;
+
+        if let (Some(metrics), MaybeHttpsStream::Https(s)) = (&this.shared.metrics, &stream) {
+            let cipher = s.ssl().current_cipher().expect("session is active");
+            metrics
+                .meter(
+                    MetricId::new("tls.handshake")
+                        .with_tag("context", this.shared.service.clone())
+                        .with_tag("protocol", s.ssl().version_str())
+                        .with_tag(
+                            "cipher",
+                            cipher.standard_name().unwrap_or_else(|| cipher.name()),
+                        ),
+                )
+                .mark(1);
+        }
+
+        Poll::Ready(Ok(stream))
     }
 }

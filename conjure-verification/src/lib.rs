@@ -14,31 +14,30 @@
 #![cfg(test)]
 
 use conjure_error::Error;
-use conjure_runtime::config::ServiceConfig;
-use conjure_runtime::{blocking, Client};
-use conjure_runtime::{Agent, HostMetricsRegistry, UserAgent};
+use conjure_runtime::{blocking, Builder, Client};
+use conjure_runtime::{Agent, UserAgent};
 use std::future::Future;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::pin::Pin;
 use std::process;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
-use witchcraft_metrics::MetricRegistry;
 
 mod test {
     include!(concat!(env!("OUT_DIR"), "/test/mod.rs"));
 }
 
 fn main() {
-    let config = ServiceConfig::builder()
-        .uris(vec!["http://localhost:8000".parse().unwrap()])
-        .build();
+    let mut builder = Builder::new();
+    builder
+        .uri("http://localhost:8000".parse().unwrap())
+        .service("verification")
+        .user_agent(UserAgent::new(Agent::new("blocking-client", "0.0.0")));
 
     let mut passed = 0;
     let mut failed = 0;
-    test_blocking(&config, &mut passed, &mut failed);
-    test_async(&config, &mut passed, &mut failed);
+    test_blocking(builder.build_blocking().unwrap(), &mut passed, &mut failed);
+    test_async(builder.build().unwrap(), &mut passed, &mut failed);
 
     println!("{} passed, {} failed", passed, failed);
 
@@ -47,17 +46,8 @@ fn main() {
     }
 }
 
-fn test_blocking(config: &ServiceConfig, passed: &mut usize, failed: &mut usize) {
+fn test_blocking(client: blocking::Client, passed: &mut usize, failed: &mut usize) {
     let _server = VerificationServer::start();
-
-    let client = blocking::Client::new(
-        "conjure-verification",
-        UserAgent::new(Agent::new("blocking-client", "0.0.0")),
-        &Arc::new(HostMetricsRegistry::new()),
-        &Arc::new(MetricRegistry::new()),
-        config,
-    )
-    .unwrap();
 
     for test in test::BLOCKING_TESTS {
         match (test.test)(&client, test.index, test.value) {
@@ -76,17 +66,8 @@ fn test_blocking(config: &ServiceConfig, passed: &mut usize, failed: &mut usize)
 }
 
 #[tokio::main]
-async fn test_async(config: &ServiceConfig, passed: &mut usize, failed: &mut usize) {
+async fn test_async(client: Client, passed: &mut usize, failed: &mut usize) {
     let _server = VerificationServer::start();
-
-    let client = Client::new(
-        "conjure-verification",
-        UserAgent::new(Agent::new("blocking-client", "0.0.0")),
-        &Arc::new(HostMetricsRegistry::new()),
-        &Arc::new(MetricRegistry::new()),
-        config,
-    )
-    .unwrap();
 
     for test in test::ASYNC_TESTS {
         match (test.test)(&client, test.index, test.value).await {

@@ -39,7 +39,7 @@ impl<'a> RequestBuilder<'a> {
     ) -> RequestBuilder<'a> {
         RequestBuilder {
             client,
-            request: Request::new(&client.0, method, pattern),
+            request: Request::new(method, pattern),
             streamer: None,
         }
     }
@@ -95,10 +95,9 @@ impl<'a> RequestBuilder<'a> {
     ///
     /// Idempotent requests can be retried if an IO error is encountered.
     ///
-    /// This is by default derived from the HTTP method. `GET`, `HEAD`,
-    /// `OPTIONS`, `TRACE`, `PUT`, and `DELETE` are defined as idempotent.
+    /// The default value is controlled by the `Idempotency` enum.
     pub fn idempotent(mut self, idempotent: bool) -> RequestBuilder<'a> {
-        self.request.idempotent = idempotent;
+        self.request.idempotent = Some(idempotent);
         self
     }
 
