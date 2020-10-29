@@ -96,9 +96,11 @@ impl crate::Body for BodyShim {
 
         loop {
             match receiver.next().await {
-                Some(BodyPart::Data(bytes)) => {
-                    w.write_bytes(bytes).await.map_err(Error::internal_safe)?
-                }
+                Some(BodyPart::Data(bytes)) => w
+                    .as_mut()
+                    .write_bytes(bytes)
+                    .await
+                    .map_err(Error::internal_safe)?,
                 Some(BodyPart::Error(error)) => return Err(error),
                 Some(BodyPart::Done) => return Ok(()),
                 None => return Err(Error::internal_safe("body write aborted")),

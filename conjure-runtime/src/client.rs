@@ -25,7 +25,7 @@ use crate::service::timeout::TimeoutLayer;
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
-use crate::{Agent, Builder, HyperBody, Request, RequestBuilder, Response};
+use crate::{Agent, Builder, RawBody, Request, RequestBuilder, Response};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
 use conjure_runtime_config::ServiceConfig;
@@ -75,7 +75,7 @@ type BaseLayer = layers!(
 );
 
 pub(crate) struct ClientState {
-    client: hyper::Client<ConjureConnector, HyperBody>,
+    client: hyper::Client<ConjureConnector, RawBody>,
     layer: BaseLayer,
 }
 

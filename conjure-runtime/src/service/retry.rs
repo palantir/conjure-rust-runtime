@@ -13,7 +13,7 @@
 // limitations under the License.
 use crate::body::ResetTrackingBody;
 use crate::errors::{ThrottledError, UnavailableError};
-use crate::payload::{BodyError, HyperBody};
+use crate::payload::{BodyError, RawBody};
 use crate::{Body, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
 use futures::future::{self, BoxFuture};
@@ -106,11 +106,11 @@ impl<'a, L, S> Service<Request<RetryBody<'a>>> for RetryService<L, S>
 where
     L: Layer<S>,
     S: Clone,
-    <L as Layer<S>>::Service: Service<Request<HyperBody>, Error = Error> + 'a + Send,
-    <<L as Layer<S>>::Service as Service<Request<HyperBody>>>::Response: Send,
-    <<L as Layer<S>>::Service as Service<Request<HyperBody>>>::Future: Send,
+    <L as Layer<S>>::Service: Service<Request<RawBody>, Error = Error> + 'a + Send,
+    <<L as Layer<S>>::Service as Service<Request<RawBody>>>::Response: Send,
+    <<L as Layer<S>>::Service as Service<Request<RawBody>>>::Future: Send,
 {
-    type Response = <<L as Layer<S>>::Service as Service<Request<HyperBody>>>::Response;
+    type Response = <<L as Layer<S>>::Service as Service<Request<RawBody>>>::Response;
     type Error = Error;
     type Future = BoxFuture<'a, Result<Self::Response, Error>>;
 
@@ -154,7 +154,7 @@ struct State<S> {
 
 impl<S> State<S>
 where
-    S: Service<Request<HyperBody>, Error = Error>,
+    S: Service<Request<RawBody>, Error = Error>,
 {
     async fn call(mut self, mut req: Request<RetryBody<'_>>) -> Result<S::Response, Error> {
         loop {
@@ -237,7 +237,7 @@ where
             }
             parts.headers.insert(CONTENT_TYPE, body.content_type());
         }
-        let (body, writer) = HyperBody::new(body);
+        let (body, writer) = RawBody::new(body);
         let req = Request::from_parts(parts, body);
 
         let (body_result, response_result) =
@@ -332,9 +332,9 @@ enum AttemptOutcome<R> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::body::BytesBody;
-    use crate::payload::BodyWriter;
+    use crate::{BodyWriter, BytesBody, RawBodyInner};
     use async_trait::async_trait;
+    use futures::pin_mut;
     use http_body::Body as _;
     use tokio::io::AsyncWriteExt;
     use tower::layer::Identity;
@@ -343,12 +343,12 @@ mod test {
     #[tokio::test]
     async fn no_body() {
         let service = RetryLayer::new(Arc::new(Identity::new()), &Builder::new()).layer(
-            tower::service_fn(|req: Request<_>| async move {
+            tower::service_fn(|req: Request<RawBody>| async move {
                 assert_eq!(req.headers().get(CONTENT_LENGTH), None);
                 assert_eq!(req.headers().get(CONTENT_TYPE), None);
 
-                match req.body() {
-                    HyperBody::Empty => {}
+                match req.body().inner {
+                    RawBodyInner::Empty => {}
                     _ => panic!("expected empty body"),
                 }
 
@@ -365,15 +365,15 @@ mod test {
         let body = "hello world";
 
         let service = RetryLayer::new(Arc::new(Identity::new()), &Builder::new()).layer(
-            tower::service_fn(|req: Request<_>| async move {
+            tower::service_fn(|req: Request<RawBody>| async move {
                 assert_eq!(
                     req.headers().get(CONTENT_LENGTH).unwrap(),
                     &*body.len().to_string()
                 );
                 assert_eq!(req.headers().get(CONTENT_TYPE).unwrap(), "text/plain");
 
-                match req.body() {
-                    HyperBody::Single(chunk) => assert_eq!(chunk, body),
+                match &req.body().inner {
+                    RawBodyInner::Single(chunk) => assert_eq!(chunk, body),
                     _ => panic!("expected single chunk body"),
                 }
 
@@ -415,12 +415,12 @@ mod test {
     #[tokio::test]
     async fn streamed_body() {
         let service = RetryLayer::new(Arc::new(Identity::new()), &Builder::new()).layer(
-            tower::service_fn(|req: Request<_>| async move {
+            tower::service_fn(|req: Request<RawBody>| async move {
                 assert_eq!(req.headers().get(CONTENT_LENGTH), None);
                 assert_eq!(req.headers().get(CONTENT_TYPE).unwrap(), "text/plain");
 
-                match req.body() {
-                    HyperBody::Stream { .. } => {}
+                match req.body().inner {
+                    RawBodyInner::Stream { .. } => {}
                     _ => panic!("expected streaming body"),
                 }
                 let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -461,8 +461,10 @@ mod test {
     #[tokio::test]
     async fn streamed_body_hangup() {
         let service = RetryLayer::new(Arc::new(Identity::new()), &Builder::new()).layer(
-            tower::service_fn(|req: Request<HyperBody>| async move {
-                req.into_body().data().await.unwrap().unwrap();
+            tower::service_fn(|req: Request<RawBody>| async move {
+                let body = req.into_body();
+                pin_mut!(body);
+                body.data().await.unwrap().unwrap();
 
                 Err::<(), _>(Error::internal_safe("blammo"))
             }),
@@ -502,7 +504,7 @@ mod test {
     #[tokio::test]
     async fn streamed_body_error() {
         let service = RetryLayer::new(Arc::new(Identity::new()), &Builder::new()).layer(
-            tower::service_fn(|req: Request<HyperBody>| async move {
+            tower::service_fn(|req: Request<RawBody>| async move {
                 hyper::body::to_bytes(req.into_body())
                     .await
                     .map_err(Error::internal_safe)?;
@@ -573,7 +575,7 @@ mod test {
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<HyperBody>| {
+        .layer(tower::service_fn(move |req: Request<RawBody>| {
             attempt += 1;
             async move {
                 let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -605,7 +607,7 @@ mod test {
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<HyperBody>| {
+        .layer(tower::service_fn(move |req: Request<RawBody>| {
             attempt += 1;
             async move {
                 let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -634,7 +636,7 @@ mod test {
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<HyperBody>| {
+        .layer(tower::service_fn(move |req: Request<RawBody>| {
             attempt += 1;
             async move {
                 let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -663,7 +665,7 @@ mod test {
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<HyperBody>| {
+        .layer(tower::service_fn(move |req: Request<RawBody>| {
             attempt += 1;
             async move {
                 let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -720,7 +722,7 @@ mod test {
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<HyperBody>| {
+        .layer(tower::service_fn(move |req: Request<RawBody>| {
             attempt += 1;
             async move {
                 match attempt {
@@ -751,7 +753,7 @@ mod test {
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<HyperBody>| {
+        .layer(tower::service_fn(move |req: Request<RawBody>| {
             attempt += 1;
             async move {
                 let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
