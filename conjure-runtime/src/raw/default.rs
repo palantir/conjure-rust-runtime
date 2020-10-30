@@ -27,6 +27,7 @@ use hyper_openssl::{HttpsConnector, HttpsLayer};
 use openssl::ssl::{SslConnector, SslMethod};
 use pin_project::pin_project;
 use std::error;
+use std::fmt;
 use std::future::Future;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -92,11 +93,11 @@ pub struct DefaultRawClient(Client<ConjureConnector, RawBody>);
 
 impl Service<Request<RawBody>> for DefaultRawClient {
     type Response = Response<DefaultRawBody>;
-    type Error = Box<dyn error::Error + Sync + Send>;
+    type Error = DefaultRawError;
     type Future = DefaultRawFuture;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.0.poll_ready(cx).map_err(Into::into)
+        self.0.poll_ready(cx).map_err(DefaultRawError)
     }
 
     fn call(&mut self, req: Request<RawBody>) -> Self::Future {
@@ -118,7 +119,7 @@ pub struct DefaultRawBody {
 
 impl Body for DefaultRawBody {
     type Data = Bytes;
-    type Error = Box<dyn error::Error + Sync + Send>;
+    type Error = DefaultRawError;
 
     fn poll_data(
         self: Pin<&mut Self>,
@@ -127,14 +128,17 @@ impl Body for DefaultRawBody {
         self.project()
             .inner
             .poll_data(cx)
-            .map(|o| o.map(|r| r.map_err(Into::into)))
+            .map(|o| o.map(|r| r.map_err(DefaultRawError)))
     }
 
     fn poll_trailers(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
-        self.project().inner.poll_trailers(cx).map_err(Into::into)
+        self.project()
+            .inner
+            .poll_trailers(cx)
+            .map_err(DefaultRawError)
     }
 
     fn is_end_stream(&self) -> bool {
@@ -146,7 +150,7 @@ impl Body for DefaultRawBody {
     }
 }
 
-/// The future type used by `DefaultRawFuture`.
+/// The future type used by `DefaultRawClient`.
 #[pin_project]
 pub struct DefaultRawFuture {
     #[pin]
@@ -156,15 +160,31 @@ pub struct DefaultRawFuture {
 }
 
 impl Future for DefaultRawFuture {
-    type Output = Result<Response<DefaultRawBody>, Box<dyn error::Error + Sync + Send>>;
+    type Output = Result<Response<DefaultRawBody>, DefaultRawError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let response = ready!(self.project().future.poll(cx))?;
+        let response = ready!(self.project().future.poll(cx)).map_err(DefaultRawError)?;
         let response = response.map(|inner| DefaultRawBody {
             inner,
             _p: PhantomPinned,
         });
 
         Poll::Ready(Ok(response))
+    }
+}
+
+/// The error type used by `DefaultRawClient`.
+#[derive(Debug)]
+pub struct DefaultRawError(hyper::Error);
+
+impl fmt::Display for DefaultRawError {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, fmt)
+    }
+}
+
+impl error::Error for DefaultRawError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        error::Error::source(&self.0)
     }
 }
