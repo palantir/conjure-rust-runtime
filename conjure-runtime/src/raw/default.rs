@@ -43,7 +43,7 @@ const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 
 type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
 
-/// The default raw client builder used by `conjure-rust`.
+/// The default raw client builder used by `conjure_runtime`.
 #[derive(Copy, Clone)]
 pub struct DefaultRawClientBuilder;
 
@@ -85,9 +85,9 @@ impl BuildRawClient for DefaultRawClientBuilder {
     }
 }
 
-/// The default raw client implementation used by `conjure-rust`.
+/// The default raw client implementation used by `conjure_runtime`.
 ///
-/// This is currently implemented with `hyper`, but that is subject to change at any time.
+/// This is currently implemented with `hyper` and `openssl`, but that is subject to change at any time.
 #[derive(Clone)]
 pub struct DefaultRawClient(Client<ConjureConnector, RawBody>);
 
