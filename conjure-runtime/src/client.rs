@@ -11,40 +11,29 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::DefaultRawClient;
 use crate::service::gzip::GzipLayer;
 use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
 use crate::service::metrics::MetricsLayer;
 use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
-use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService, ProxyLayer};
+use crate::service::proxy::{ProxyConfig, ProxyLayer};
 use crate::service::request::RequestLayer;
 use crate::service::response::ResponseLayer;
 use crate::service::retry::RetryLayer;
 use crate::service::span::SpanLayer;
 use crate::service::timeout::TimeoutLayer;
-use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
-use crate::{Agent, Builder, RawBody, Request, RequestBuilder, Response};
+use crate::{Agent, Builder, Request, RequestBuilder, Response};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
 use conjure_runtime_config::ServiceConfig;
-use hyper::client::HttpConnector;
 use hyper::Method;
-use hyper_openssl::{HttpsConnector, HttpsLayer};
-use openssl::ssl::{SslConnector, SslMethod};
 use refreshable::Subscription;
 use std::sync::Arc;
-use std::time::Duration;
 use tower::layer::{Identity, Layer, Stack};
 use tower::{ServiceBuilder, ServiceExt};
-
-// This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
-const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
-// Most servers time out idle connections after 60 seconds, so we'll set the client timeout a bit below that.
-const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
-
-type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
 
 macro_rules! layers {
     () => { Identity };
@@ -75,7 +64,7 @@ type BaseLayer = layers!(
 );
 
 pub(crate) struct ClientState {
-    client: hyper::Client<ConjureConnector, RawBody>,
+    client: DefaultRawClient,
     layer: BaseLayer,
 }
 
@@ -86,31 +75,9 @@ impl ClientState {
         let mut user_agent = builder.user_agent.clone().expect("user agent not set");
         user_agent.push_agent(Agent::new("conjure-runtime", env!("CARGO_PKG_VERSION")));
 
-        let mut connector = HttpConnector::new();
-        connector.enforce_http(false);
-        connector.set_nodelay(true);
-        connector.set_keepalive(Some(TCP_KEEPALIVE));
-        connector.set_connect_timeout(Some(builder.connect_timeout));
-
-        let mut ssl = SslConnector::builder(SslMethod::tls()).map_err(Error::internal_safe)?;
-        ssl.set_alpn_protos(b"\x02h2\x08http/1.1")
-            .map_err(Error::internal_safe)?;
-
-        if let Some(ca_file) = builder.security.ca_file() {
-            ssl.set_ca_file(ca_file).map_err(Error::internal_safe)?;
-        }
+        let client = DefaultRawClient::new(service, builder)?;
 
         let proxy = ProxyConfig::from_config(&builder.proxy)?;
-
-        let connector = ServiceBuilder::new()
-            .layer(TlsMetricsLayer::new(&service, builder))
-            .layer(HttpsLayer::with_connector(ssl).map_err(Error::internal_safe)?)
-            .layer(ProxyConnectorLayer::new(&proxy))
-            .service(connector);
-
-        let client = hyper::Client::builder()
-            .pool_idle_timeout(HTTP_KEEPALIVE)
-            .build(connector);
 
         let attempt_layer = ServiceBuilder::new()
             .layer(HttpErrorLayer::new(builder))

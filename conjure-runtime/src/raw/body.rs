@@ -11,19 +11,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::Body;
-use bytes::{Bytes, BytesMut};
+use crate::{Body, BodyWriter};
+use bytes::Bytes;
 use conjure_error::Error;
 use futures::channel::{mpsc, oneshot};
-use futures::{pin_mut, ready, SinkExt, Stream};
+use futures::{pin_mut, Stream};
 use hyper::HeaderMap;
 use pin_project::pin_project;
 use std::io::Cursor;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::{error, fmt, io, mem};
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use std::{error, fmt, mem};
 use witchcraft_log::debug;
 
 /// The error type returned by `RawBody`.
@@ -195,84 +194,5 @@ where
                 Ok(())
             }
         }
-    }
-}
-
-/// The asynchronous writer passed to `Body::write`.
-#[pin_project]
-pub struct BodyWriter {
-    #[pin]
-    sender: mpsc::Sender<BodyPart>,
-    buf: BytesMut,
-    #[pin]
-    _p: PhantomPinned,
-}
-
-impl BodyWriter {
-    fn new(sender: mpsc::Sender<BodyPart>) -> BodyWriter {
-        BodyWriter {
-            sender,
-            buf: BytesMut::new(),
-            _p: PhantomPinned,
-        }
-    }
-
-    async fn finish(mut self: Pin<&mut Self>) -> io::Result<()> {
-        self.flush().await?;
-        self.project()
-            .sender
-            .send(BodyPart::Done)
-            .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        Ok(())
-    }
-
-    /// Writes a block of body bytes.
-    ///
-    /// Compared to the `AsyncWrite` implementation, this method avoids some copies if the caller already has the body
-    /// in `Bytes` objects.
-    pub async fn write_bytes(mut self: Pin<&mut Self>, bytes: Bytes) -> io::Result<()> {
-        self.flush().await?;
-        self.project()
-            .sender
-            .send(BodyPart::Chunk(bytes))
-            .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        Ok(())
-    }
-}
-
-impl AsyncWrite for BodyWriter {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        if self.buf.len() > 4096 {
-            ready!(self.as_mut().poll_flush(cx))?;
-        }
-
-        self.project().buf.extend_from_slice(buf);
-        Poll::Ready(Ok(buf.len()))
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        let mut this = self.project();
-
-        if this.buf.is_empty() {
-            return Poll::Ready(Ok(()));
-        }
-
-        ready!(this.sender.poll_ready(cx)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        let chunk = this.buf.split().freeze();
-        this.sender
-            .start_send(BodyPart::Chunk(chunk))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
     }
 }

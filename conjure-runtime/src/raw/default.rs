@@ -1,0 +1,159 @@
+// Copyright 2020 Palantir Technologies, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+use crate::raw::RawBody;
+use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService};
+use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
+use crate::Builder;
+use bytes::Bytes;
+use conjure_error::Error;
+use futures::ready;
+use http::{HeaderMap, Request, Response};
+use http_body::{Body, SizeHint};
+use hyper::client::{HttpConnector, ResponseFuture};
+use hyper::Client;
+use hyper_openssl::{HttpsConnector, HttpsLayer};
+use openssl::ssl::{SslConnector, SslMethod};
+use pin_project::pin_project;
+use std::error;
+use std::future::Future;
+use std::marker::PhantomPinned;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::Duration;
+use tower::Service;
+use tower::ServiceBuilder;
+
+// This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
+const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
+// Most servers time out idle connections after 60 seconds, so we'll set the client timeout a bit below that.
+const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
+
+type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
+
+/// The default raw client implementation used by `conjure-rust`.
+///
+/// This is currently implemented with `hyper`, but that is subject to change at any time.
+#[derive(Clone)]
+pub struct DefaultRawClient(Client<ConjureConnector, RawBody>);
+
+impl DefaultRawClient {
+    pub(crate) fn new(service: &str, builder: &Builder) -> Result<DefaultRawClient, Error> {
+        let mut connector = HttpConnector::new();
+        connector.enforce_http(false);
+        connector.set_nodelay(true);
+        connector.set_keepalive(Some(TCP_KEEPALIVE));
+        connector.set_connect_timeout(Some(builder.connect_timeout));
+
+        let mut ssl = SslConnector::builder(SslMethod::tls()).map_err(Error::internal_safe)?;
+        ssl.set_alpn_protos(b"\x02h2\x08http/1.1")
+            .map_err(Error::internal_safe)?;
+
+        if let Some(ca_file) = builder.security.ca_file() {
+            ssl.set_ca_file(ca_file).map_err(Error::internal_safe)?;
+        }
+
+        let proxy = ProxyConfig::from_config(&builder.proxy)?;
+
+        let connector = ServiceBuilder::new()
+            .layer(TlsMetricsLayer::new(&service, builder))
+            .layer(HttpsLayer::with_connector(ssl).map_err(Error::internal_safe)?)
+            .layer(ProxyConnectorLayer::new(&proxy))
+            .service(connector);
+
+        let client = hyper::Client::builder()
+            .pool_idle_timeout(HTTP_KEEPALIVE)
+            .build(connector);
+
+        Ok(DefaultRawClient(client))
+    }
+}
+
+impl Service<Request<RawBody>> for DefaultRawClient {
+    type Response = Response<DefaultRawBody>;
+    type Error = Box<dyn error::Error + Sync + Send>;
+    type Future = DefaultRawFuture;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx).map_err(Into::into)
+    }
+
+    fn call(&mut self, req: Request<RawBody>) -> Self::Future {
+        DefaultRawFuture {
+            future: self.0.call(req),
+            _p: PhantomPinned,
+        }
+    }
+}
+
+/// The body type used by `DefaultRawClient`.
+#[pin_project]
+pub struct DefaultRawBody {
+    #[pin]
+    inner: hyper::Body,
+    #[pin]
+    _p: PhantomPinned,
+}
+
+impl Body for DefaultRawBody {
+    type Data = Bytes;
+    type Error = Box<dyn error::Error + Sync + Send>;
+
+    fn poll_data(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+        self.project()
+            .inner
+            .poll_data(cx)
+            .map(|o| o.map(|r| r.map_err(Into::into)))
+    }
+
+    fn poll_trailers(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
+        self.project().inner.poll_trailers(cx).map_err(Into::into)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+/// The future type used by `DefaultRawFuture`.
+#[pin_project]
+pub struct DefaultRawFuture {
+    #[pin]
+    future: ResponseFuture,
+    #[pin]
+    _p: PhantomPinned,
+}
+
+impl Future for DefaultRawFuture {
+    type Output = Result<Response<DefaultRawBody>, Box<dyn error::Error + Sync + Send>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let response = ready!(self.project().future.poll(cx))?;
+        let response = response.map(|inner| DefaultRawBody {
+            inner,
+            _p: PhantomPinned,
+        });
+
+        Poll::Ready(Ok(response))
+    }
+}

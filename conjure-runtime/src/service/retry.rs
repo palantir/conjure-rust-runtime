@@ -13,7 +13,7 @@
 // limitations under the License.
 use crate::body::ResetTrackingBody;
 use crate::errors::{ThrottledError, UnavailableError};
-use crate::payload::{BodyError, RawBody};
+use crate::raw::{BodyError, RawBody};
 use crate::{Body, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
 use futures::future::{self, BoxFuture};
@@ -332,7 +332,8 @@ enum AttemptOutcome<R> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{BodyWriter, BytesBody, RawBodyInner};
+    use crate::raw::RawBodyInner;
+    use crate::{BodyWriter, BytesBody};
     use async_trait::async_trait;
     use futures::pin_mut;
     use http_body::Body as _;
