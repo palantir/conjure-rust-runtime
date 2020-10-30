@@ -47,14 +47,14 @@ pub struct GzipService<S> {
     inner: S,
 }
 
-impl<S, B1, B2, E1, E2> Service<Request<B1>> for GzipService<S>
+impl<S, B1, B2> Service<Request<B1>> for GzipService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>, Error = E1>,
-    B2: Body<Data = Bytes, Error = E2> + 'static + Sync + Send,
-    E2: Into<Box<dyn Error + Sync + Send>>,
+    S: Service<Request<B1>, Response = Response<B2>>,
+    B2: Body<Data = Bytes> + 'static + Sync + Send,
+    B2::Error: Into<Box<dyn Error + Sync + Send>>,
 {
     type Response = Response<DecodedBody>;
-    type Error = E1;
+    type Error = S::Error;
     type Future = GzipFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

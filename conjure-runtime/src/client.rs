@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::DefaultRawClient;
+use crate::raw::{DefaultRawClient, RawBody};
 use crate::service::gzip::GzipLayer;
 use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
@@ -27,13 +27,15 @@ use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
 use crate::{Agent, Builder, Request, RequestBuilder, Response};
 use arc_swap::ArcSwap;
+use bytes::Bytes;
 use conjure_error::Error;
 use conjure_runtime_config::ServiceConfig;
-use hyper::Method;
+use http::Method;
 use refreshable::Subscription;
+use std::error;
 use std::sync::Arc;
 use tower::layer::{Identity, Layer, Stack};
-use tower::{ServiceBuilder, ServiceExt};
+use tower::{Service, ServiceBuilder, ServiceExt};
 
 macro_rules! layers {
     () => { Identity };
@@ -63,13 +65,13 @@ type BaseLayer = layers!(
     MetricsLayer,
 );
 
-pub(crate) struct ClientState {
-    client: DefaultRawClient,
+pub(crate) struct ClientState<T> {
+    client: T,
     layer: BaseLayer,
 }
 
-impl ClientState {
-    pub(crate) fn new(builder: &Builder) -> Result<ClientState, Error> {
+impl ClientState<DefaultRawClient> {
+    pub(crate) fn new(builder: &Builder) -> Result<ClientState<DefaultRawClient>, Error> {
         let service = builder.service.as_ref().expect("service not set");
 
         let mut user_agent = builder.user_agent.clone().expect("user agent not set");
@@ -102,7 +104,16 @@ impl ClientState {
 
         Ok(ClientState { client, layer })
     }
+}
 
+impl<T, B> ClientState<T>
+where
+    T: Service<http::Request<RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + 'static + Sync + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     async fn send(&self, request: Request<'_>) -> Result<Response, Error> {
         self.layer.layer(self.client.clone()).oneshot(request).await
     }
@@ -113,8 +124,8 @@ impl ClientState {
 /// It implements the Conjure `AsyncClient` trait, but also offers a "raw" request interface for use with services that
 /// don't provide Conjure service definitions.
 #[derive(Clone)]
-pub struct Client {
-    state: Arc<ArcSwap<ClientState>>,
+pub struct Client<T = DefaultRawClient> {
+    state: Arc<ArcSwap<ClientState<T>>>,
     _subscription: Option<Arc<Subscription<ServiceConfig, Error>>>,
 }
 
@@ -125,7 +136,7 @@ impl Client {
     }
 
     pub(crate) fn new(
-        state: Arc<ArcSwap<ClientState>>,
+        state: Arc<ArcSwap<ClientState<DefaultRawClient>>>,
         subscription: Option<Subscription<ServiceConfig, Error>>,
     ) -> Client {
         Client {
