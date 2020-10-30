@@ -14,6 +14,7 @@
 use crate::body::ResetTrackingBody;
 use crate::errors::{ThrottledError, UnavailableError};
 use crate::raw::{BodyError, RawBody};
+use crate::service::map_error::RawClientError;
 use crate::{Body, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
 use futures::future::{self, BoxFuture};
@@ -41,7 +42,7 @@ pub struct RetryConfig {
 /// request's attempts. The service passed to the layer must be cloneable as well.
 ///
 /// A request is retried if it fails with a service error with a cause of `ThrottledError`, `UnavailableError`, or
-/// `hyper::Error`. Only idempotent requests can be retried which is configured by the `Idempotency` enum, and can be
+/// `RawClientError`. Only idempotent requests can be retried which is configured by the `Idempotency` enum, and can be
 /// overridden on a request-by-request basis by passing the `RetryConfig` type in the request's extensions map.
 ///
 /// The layer retries up to a specified maximum number of times, applying exponential backoff with full jitter in
@@ -58,12 +59,12 @@ pub struct RetryLayer<L> {
 }
 
 impl<L> RetryLayer<L> {
-    pub fn new(layer: Arc<L>, builder: &Builder) -> RetryLayer<L> {
+    pub fn new<T>(layer: Arc<L>, builder: &Builder<T>) -> RetryLayer<L> {
         RetryLayer {
             layer,
-            idempotency: builder.idempotency,
-            max_num_retries: builder.max_num_retries,
-            backoff_slot_size: builder.backoff_slot_size,
+            idempotency: builder.get_idempotency(),
+            max_num_retries: builder.get_max_num_retries(),
+            backoff_slot_size: builder.get_backoff_slot_size(),
         }
     }
 }
@@ -211,7 +212,7 @@ where
                         error,
                     })
                 } else if error.cause().is::<UnavailableError>()
-                    || error.cause().is::<hyper::Error>()
+                    || error.cause().is::<RawClientError>()
                 {
                     Ok(AttemptOutcome::Retry {
                         error,
@@ -565,6 +566,38 @@ mod test {
 
             true
         }
+    }
+
+    #[tokio::test]
+    async fn retry_after_raw_client_error() {
+        let mut attempt = 0;
+        let service = RetryLayer::new(
+            Arc::new(Identity::new()),
+            Builder::new()
+                .max_num_retries(2)
+                .backoff_slot_size(Duration::from_secs(0)),
+        )
+        .layer(tower::service_fn(move |req: Request<RawBody>| {
+            attempt += 1;
+            async move {
+                let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                assert_eq!(body, "hello world");
+
+                match attempt {
+                    1 => Err(Error::internal_safe(RawClientError("blammo".into()))),
+                    2 => Ok(()),
+                    _ => panic!(),
+                }
+            }
+        }));
+
+        let request = Request::builder()
+            .extension(RetryConfig { idempotent: true })
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
+            ))
+            .unwrap();
+        service.oneshot(request).await.unwrap();
     }
 
     #[tokio::test]

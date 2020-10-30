@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::BuildRawClient;
 use crate::raw::RawBody;
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService};
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
@@ -41,29 +42,33 @@ const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 
 type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
 
-/// The default raw client implementation used by `conjure-rust`.
-///
-/// This is currently implemented with `hyper`, but that is subject to change at any time.
-#[derive(Clone)]
-pub struct DefaultRawClient(Client<ConjureConnector, RawBody>);
+/// The default raw client builder used by `conjure-rust`.
+#[derive(Copy, Clone)]
+pub struct DefaultRawClientBuilder;
 
-impl DefaultRawClient {
-    pub(crate) fn new(service: &str, builder: &Builder) -> Result<DefaultRawClient, Error> {
+impl BuildRawClient for DefaultRawClientBuilder {
+    type RawClient = DefaultRawClient;
+
+    fn build_raw_client(&self, builder: &Builder<Self>) -> Result<Self::RawClient, Error> {
+        let service = builder
+            .get_service()
+            .ok_or_else(|| Error::internal_safe("service missing from builder"))?;
+
         let mut connector = HttpConnector::new();
         connector.enforce_http(false);
         connector.set_nodelay(true);
         connector.set_keepalive(Some(TCP_KEEPALIVE));
-        connector.set_connect_timeout(Some(builder.connect_timeout));
+        connector.set_connect_timeout(Some(builder.get_connect_timeout()));
 
         let mut ssl = SslConnector::builder(SslMethod::tls()).map_err(Error::internal_safe)?;
         ssl.set_alpn_protos(b"\x02h2\x08http/1.1")
             .map_err(Error::internal_safe)?;
 
-        if let Some(ca_file) = builder.security.ca_file() {
+        if let Some(ca_file) = builder.get_security().ca_file() {
             ssl.set_ca_file(ca_file).map_err(Error::internal_safe)?;
         }
 
-        let proxy = ProxyConfig::from_config(&builder.proxy)?;
+        let proxy = ProxyConfig::from_config(&builder.get_proxy())?;
 
         let connector = ServiceBuilder::new()
             .layer(TlsMetricsLayer::new(&service, builder))
@@ -78,6 +83,12 @@ impl DefaultRawClient {
         Ok(DefaultRawClient(client))
     }
 }
+
+/// The default raw client implementation used by `conjure-rust`.
+///
+/// This is currently implemented with `hyper`, but that is subject to change at any time.
+#[derive(Clone)]
+pub struct DefaultRawClient(Client<ConjureConnector, RawBody>);
 
 impl Service<Request<RawBody>> for DefaultRawClient {
     type Response = Response<DefaultRawBody>;

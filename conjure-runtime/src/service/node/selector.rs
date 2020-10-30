@@ -58,7 +58,7 @@ pub struct NodeSelectorLayer<T = RandShuffler> {
 }
 
 impl NodeSelectorLayer<RandShuffler> {
-    pub fn new(service: &str, builder: &Builder) -> NodeSelectorLayer<RandShuffler> {
+    pub fn new<T>(service: &str, builder: &Builder<T>) -> NodeSelectorLayer<RandShuffler> {
         Self::with_shuffler(service, builder, RandShuffler)
     }
 }
@@ -67,11 +67,15 @@ impl<T> NodeSelectorLayer<T>
 where
     T: Shuffle,
 {
-    pub fn with_shuffler(service: &str, builder: &Builder, shuffler: T) -> NodeSelectorLayer<T> {
+    pub fn with_shuffler<U>(
+        service: &str,
+        builder: &Builder<U>,
+        shuffler: T,
+    ) -> NodeSelectorLayer<T> {
         let now = Instant::now();
 
         let nodes = builder
-            .uris
+            .get_uris()
             .iter()
             .map(|url| {
                 // normalize by stripping a trailing `/` if present
@@ -80,7 +84,7 @@ where
 
                 TrackedNode {
                     node: Arc::new(Node {
-                        host_metrics: builder.host_metrics.as_ref().map(|m| {
+                        host_metrics: builder.get_host_metrics().map(|m| {
                             m.get(
                                 service,
                                 url.host_str().unwrap(),
@@ -97,7 +101,7 @@ where
         NodeSelectorLayer {
             state: Arc::new(State {
                 nodes,
-                failed_url_cooldown: builder.failed_url_cooldown,
+                failed_url_cooldown: builder.get_failed_url_cooldown(),
             }),
             shuffler,
         }

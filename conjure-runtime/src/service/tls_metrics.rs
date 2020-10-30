@@ -38,7 +38,7 @@ impl TlsMetricsLayer {
     pub fn new(service: &str, builder: &Builder) -> TlsMetricsLayer {
         TlsMetricsLayer {
             shared: Arc::new(Shared {
-                metrics: builder.metrics.clone(),
+                metrics: builder.get_metrics().cloned(),
                 service: service.to_string(),
             }),
         }

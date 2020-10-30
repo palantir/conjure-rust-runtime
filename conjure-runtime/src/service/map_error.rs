@@ -14,13 +14,30 @@
 use conjure_error::Error;
 use pin_project::pin_project;
 use std::error;
+use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::layer::Layer;
 use tower::Service;
 
-/// A layer which converts the error type of a service to an internal `conjure_error::Error`.
+#[derive(Debug)]
+pub struct RawClientError(pub Box<dyn error::Error + Sync + Send>);
+
+impl fmt::Display for RawClientError {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.write_str("raw HTTP client error")
+    }
+}
+
+impl error::Error for RawClientError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        Some(&*self.0)
+    }
+}
+
+/// A layer which sits directly on top of the raw HTTP client service, wrapping its errors in `RawClientError` and then
+/// converting them into an internal service `conjure_error::Error`.
 pub struct MapErrorLayer;
 
 impl<S> Layer<S> for MapErrorLayer {
@@ -45,7 +62,9 @@ where
     type Future = MapErrorFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        self.inner.poll_ready(cx).map_err(Error::internal)
+        self.inner
+            .poll_ready(cx)
+            .map_err(|e| Error::internal_safe(RawClientError(e.into())))
     }
 
     fn call(&mut self, req: R) -> Self::Future {
@@ -69,6 +88,9 @@ where
     type Output = Result<T, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project().future.poll(cx).map_err(Error::internal)
+        self.project()
+            .future
+            .poll(cx)
+            .map_err(|e| Error::internal_safe(RawClientError(e.into())))
     }
 }

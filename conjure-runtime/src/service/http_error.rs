@@ -46,10 +46,10 @@ pub struct HttpErrorLayer {
 }
 
 impl HttpErrorLayer {
-    pub fn new(builder: &Builder) -> HttpErrorLayer {
+    pub fn new<T>(builder: &Builder<T>) -> HttpErrorLayer {
         HttpErrorLayer {
-            server_qos: builder.server_qos,
-            service_error: builder.service_error,
+            server_qos: builder.get_server_qos(),
+            service_error: builder.get_service_error(),
         }
     }
 }

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::{DefaultRawClient, RawBody};
+use crate::raw::{BuildRawClient, DefaultRawClient, RawBody};
 use crate::service::gzip::GzipLayer;
 use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
@@ -70,16 +70,22 @@ pub(crate) struct ClientState<T> {
     layer: BaseLayer,
 }
 
-impl ClientState<DefaultRawClient> {
-    pub(crate) fn new(builder: &Builder) -> Result<ClientState<DefaultRawClient>, Error> {
-        let service = builder.service.as_ref().expect("service not set");
+impl<T> ClientState<T> {
+    pub(crate) fn new<U>(builder: &Builder<U>) -> Result<ClientState<T>, Error>
+    where
+        U: BuildRawClient<RawClient = T>,
+    {
+        let service = builder.get_service().expect("service not set");
 
-        let mut user_agent = builder.user_agent.clone().expect("user agent not set");
+        let mut user_agent = builder
+            .get_user_agent()
+            .cloned()
+            .expect("user agent not set");
         user_agent.push_agent(Agent::new("conjure-runtime", env!("CARGO_PKG_VERSION")));
 
-        let client = DefaultRawClient::new(service, builder)?;
+        let client = builder.get_raw_client_builder().build_raw_client(builder)?;
 
-        let proxy = ProxyConfig::from_config(&builder.proxy)?;
+        let proxy = ProxyConfig::from_config(builder.get_proxy())?;
 
         let attempt_layer = ServiceBuilder::new()
             .layer(HttpErrorLayer::new(builder))
@@ -98,7 +104,7 @@ impl ClientState<DefaultRawClient> {
             .layer(MetricsLayer::new(service, builder))
             .layer(RequestLayer)
             .layer(ResponseLayer)
-            .layer(TimeoutLayer::new(builder.request_timeout))
+            .layer(TimeoutLayer::new(builder.get_request_timeout()))
             .layer(RetryLayer::new(Arc::new(attempt_layer), builder))
             .into_inner();
 
@@ -134,11 +140,13 @@ impl Client {
     pub fn builder() -> Builder {
         Builder::new()
     }
+}
 
+impl<T> Client<T> {
     pub(crate) fn new(
-        state: Arc<ArcSwap<ClientState<DefaultRawClient>>>,
+        state: Arc<ArcSwap<ClientState<T>>>,
         subscription: Option<Subscription<ServiceConfig, Error>>,
-    ) -> Client {
+    ) -> Client<T> {
         Client {
             state,
             _subscription: subscription.map(Arc::new),
@@ -149,35 +157,44 @@ impl Client {
     ///
     /// The `pattern` argument is a template for the request path. The `param` method on the builder is used to fill
     /// in the parameters in the pattern with dynamic values.
-    pub fn request(&self, method: Method, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn request(&self, method: Method, pattern: &'static str) -> RequestBuilder<'_, T> {
         RequestBuilder::new(self, method, pattern)
     }
 
     /// Returns a new builder for a GET request.
-    pub fn get(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn get(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::GET, pattern)
     }
 
     /// Returns a new builder for a POST request.
-    pub fn post(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn post(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::POST, pattern)
     }
 
     /// Returns a new builder for a PUT request.
-    pub fn put(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn put(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::PUT, pattern)
     }
 
     /// Returns a new builder for a DELETE request.
-    pub fn delete(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn delete(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::DELETE, pattern)
     }
 
     /// Returns a new builder for a PATCH request.
-    pub fn patch(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn patch(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::PATCH, pattern)
     }
+}
 
+impl<T, B> Client<T>
+where
+    T: Service<http::Request<RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + 'static + Sync + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     pub(crate) async fn send(&self, request: Request<'_>) -> Result<Response, Error> {
         self.state.load().send(request).await
     }

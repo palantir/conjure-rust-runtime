@@ -14,6 +14,7 @@
 use crate::blocking;
 use crate::client::ClientState;
 use crate::config::{ProxyConfig, SecurityConfig, ServiceConfig};
+use crate::raw::{BuildRawClient, DefaultRawClientBuilder};
 use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
@@ -23,22 +24,23 @@ use url::Url;
 use witchcraft_metrics::MetricRegistry;
 
 /// A builder to construct `Client`s and `blocking::Client`s.
-pub struct Builder {
-    pub(crate) service: Option<String>,
-    pub(crate) user_agent: Option<UserAgent>,
-    pub(crate) uris: Vec<Url>,
-    pub(crate) security: SecurityConfig,
-    pub(crate) proxy: ProxyConfig,
-    pub(crate) connect_timeout: Duration,
-    pub(crate) request_timeout: Duration,
-    pub(crate) backoff_slot_size: Duration,
-    pub(crate) failed_url_cooldown: Duration,
-    pub(crate) max_num_retries: u32,
-    pub(crate) server_qos: ServerQos,
-    pub(crate) service_error: ServiceError,
-    pub(crate) idempotency: Idempotency,
-    pub(crate) metrics: Option<Arc<MetricRegistry>>,
-    pub(crate) host_metrics: Option<Arc<HostMetricsRegistry>>,
+pub struct Builder<T = DefaultRawClientBuilder> {
+    service: Option<String>,
+    user_agent: Option<UserAgent>,
+    uris: Vec<Url>,
+    security: SecurityConfig,
+    proxy: ProxyConfig,
+    connect_timeout: Duration,
+    request_timeout: Duration,
+    backoff_slot_size: Duration,
+    failed_url_cooldown: Duration,
+    max_num_retries: u32,
+    server_qos: ServerQos,
+    service_error: ServiceError,
+    idempotency: Idempotency,
+    metrics: Option<Arc<MetricRegistry>>,
+    host_metrics: Option<Arc<HostMetricsRegistry>>,
+    raw_client_builder: T,
 }
 
 impl Default for Builder {
@@ -66,9 +68,12 @@ impl Builder {
             idempotency: Idempotency::ByMethod,
             metrics: None,
             host_metrics: None,
+            raw_client_builder: DefaultRawClientBuilder,
         }
     }
+}
 
+impl<T> Builder<T> {
     /// Applies configuration settings from a `ServiceConfig` to the builder.
     pub fn from_config(&mut self, config: &ServiceConfig) -> &mut Self {
         self.uris(config.uris().to_vec());
@@ -114,12 +119,22 @@ impl Builder {
         self
     }
 
+    /// Returns the builder's configured service name.
+    pub fn get_service(&self) -> Option<&str> {
+        self.service.as_deref()
+    }
+
     /// Sets the user agent sent by this client.
     ///
     /// Required.
     pub fn user_agent(&mut self, user_agent: UserAgent) -> &mut Self {
         self.user_agent = Some(user_agent);
         self
+    }
+
+    /// Returns the builder's configured user agent.
+    pub fn get_user_agent(&self) -> Option<&UserAgent> {
+        self.user_agent.as_ref()
     }
 
     /// Appends a URI to the URIs list.
@@ -138,12 +153,22 @@ impl Builder {
         self
     }
 
+    /// Returns the builder's configured URIs list.
+    pub fn get_uris(&self) -> &[Url] {
+        &self.uris
+    }
+
     /// Sets the security configuration.
     ///
     /// Defaults to an empty configuration.
     pub fn security(&mut self, security: SecurityConfig) -> &mut Self {
         self.security = security;
         self
+    }
+
+    /// Returns the builder's configured security configuration.
+    pub fn get_security(&self) -> &SecurityConfig {
+        &self.security
     }
 
     /// Sets the proxy configuration.
@@ -154,12 +179,22 @@ impl Builder {
         self
     }
 
+    /// Returns the builder's configured proxy configuration.
+    pub fn get_proxy(&self) -> &ProxyConfig {
+        &self.proxy
+    }
+
     /// Sets the connect timeout.
     ///
     /// Defaults to 10 seconds.
     pub fn connect_timeout(&mut self, connect_timeout: Duration) -> &mut Self {
         self.connect_timeout = connect_timeout;
         self
+    }
+
+    /// Returns the builder's configured connect timeout.
+    pub fn get_connect_timeout(&self) -> Duration {
+        self.connect_timeout
     }
 
     /// Sets the request timeout.
@@ -173,6 +208,11 @@ impl Builder {
         self
     }
 
+    /// Returns the builder's configured request timeout.
+    pub fn get_request_timeout(&self) -> Duration {
+        self.request_timeout
+    }
+
     /// Sets the backoff slot size.
     ///
     /// This is the upper bound on the initial delay before retrying a request. It grows exponentially as additional
@@ -184,12 +224,22 @@ impl Builder {
         self
     }
 
+    /// Returns the builder's configured backoff slot size.
+    pub fn get_backoff_slot_size(&self) -> Duration {
+        self.backoff_slot_size
+    }
+
     /// Sets the maximum number of times a request attempt will be retried before giving up.
     ///
     /// Defaults to 3.
     pub fn max_num_retries(&mut self, max_num_retries: u32) -> &mut Self {
         self.max_num_retries = max_num_retries;
         self
+    }
+
+    /// Returns the builder's configured maximum number of retries.
+    pub fn get_max_num_retries(&self) -> u32 {
+        self.max_num_retries
     }
 
     /// Sets the cooldown applied to a node after it fails to respond successfully to a request.
@@ -202,6 +252,11 @@ impl Builder {
         self
     }
 
+    /// Returns the builder's configured failed URL cooldown.
+    pub fn get_failed_url_cooldown(&self) -> Duration {
+        self.failed_url_cooldown
+    }
+
     /// Sets the client's behavior in response to a QoS error from the server.
     ///
     /// Defaults to `ServerQos::AutomaticRetry`.
@@ -210,12 +265,22 @@ impl Builder {
         self
     }
 
+    /// Returns the builder's configured server QoS behavior.
+    pub fn get_server_qos(&self) -> ServerQos {
+        self.server_qos
+    }
+
     /// Sets the client's behavior in response to a service error from the server.
     ///
     /// Defaults to `ServiceError::WrapInNewError`.
     pub fn service_error(&mut self, service_error: ServiceError) -> &mut Self {
         self.service_error = service_error;
         self
+    }
+
+    /// Returns the builder's configured service error handling behavior.
+    pub fn get_service_error(&self) -> ServiceError {
+        self.service_error
     }
 
     /// Sets the client's behavior to determine if a request is idempotent or not.
@@ -228,12 +293,22 @@ impl Builder {
         self
     }
 
+    /// Returns the builder's configured idempotency handling behavior.
+    pub fn get_idempotency(&self) -> Idempotency {
+        self.idempotency
+    }
+
     /// Sets the metric registry used to register client metrics.
     ///
     /// Defaults to no registry.
     pub fn metrics(&mut self, metrics: Arc<MetricRegistry>) -> &mut Self {
         self.metrics = Some(metrics);
         self
+    }
+
+    /// Returns the builder's configured metric registry.
+    pub fn get_metrics(&self) -> Option<&Arc<MetricRegistry>> {
+        self.metrics.as_ref()
     }
 
     /// Sets the host metrics registry used to track host performance.
@@ -244,12 +319,51 @@ impl Builder {
         self
     }
 
+    /// Returns the builder's configured host metrics registry.
+    pub fn get_host_metrics(&self) -> Option<&Arc<HostMetricsRegistry>> {
+        self.host_metrics.as_ref()
+    }
+
+    /// Sets the raw client builder.
+    ///
+    /// Defaults to `DefaultRawClientBuilder`.
+    pub fn with_raw_client_builder<U>(self, raw_client_builder: U) -> Builder<U> {
+        Builder {
+            service: self.service,
+            user_agent: self.user_agent,
+            uris: self.uris,
+            security: self.security,
+            proxy: self.proxy,
+            connect_timeout: self.connect_timeout,
+            request_timeout: self.request_timeout,
+            backoff_slot_size: self.backoff_slot_size,
+            failed_url_cooldown: self.failed_url_cooldown,
+            max_num_retries: self.max_num_retries,
+            server_qos: self.server_qos,
+            service_error: self.service_error,
+            idempotency: self.idempotency,
+            metrics: self.metrics,
+            host_metrics: self.host_metrics,
+            raw_client_builder,
+        }
+    }
+
+    /// Returns the builder's configured raw client builder.
+    pub fn get_raw_client_builder(&self) -> &T {
+        &self.raw_client_builder
+    }
+}
+
+impl<T> Builder<T>
+where
+    T: BuildRawClient,
+{
     /// Creates a new `Client`.
     ///
     /// # Panics
     ///
     /// Panics if `service` or `user_agent` is not set.
-    pub fn build(&self) -> Result<Client, Error> {
+    pub fn build(&self) -> Result<Client<T::RawClient>, Error> {
         let state = ClientState::new(self)?;
         Ok(Client::new(Arc::new(ArcSwap::new(Arc::new(state))), None))
     }
@@ -259,7 +373,7 @@ impl Builder {
     /// # Panics
     ///
     /// Panics if `service` or `user_agent` is not set.
-    pub fn build_blocking(&self) -> Result<blocking::Client, Error> {
+    pub fn build_blocking(&self) -> Result<blocking::Client<T::RawClient>, Error> {
         self.build().map(blocking::Client)
     }
 }
