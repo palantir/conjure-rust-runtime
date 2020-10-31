@@ -22,7 +22,7 @@ use std::task::{Context, Poll};
 use tower::layer::Layer;
 use tower::Service;
 
-/// A layer which converts a hyper `Response` to a conjure-runtime `Response.
+/// A layer which converts a hyper `Response` to a conjure-runtime `Response`.
 pub struct ResponseLayer;
 
 impl<S> Layer<S> for ResponseLayer {
