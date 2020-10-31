@@ -51,9 +51,7 @@ impl BuildRawClient for DefaultRawClientBuilder {
     type RawClient = DefaultRawClient;
 
     fn build_raw_client(&self, builder: &Builder<Self>) -> Result<Self::RawClient, Error> {
-        let service = builder
-            .get_service()
-            .ok_or_else(|| Error::internal_safe("service missing from builder"))?;
+        let service = builder.get_service().expect("service not set");
 
         let mut connector = HttpConnector::new();
         connector.enforce_http(false);
