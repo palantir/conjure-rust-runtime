@@ -100,6 +100,10 @@ where
             this.body.data().await.transpose()
         }
     }
+
+    pub(crate) fn buffer(&self) -> &[u8] {
+        &self.cur
+    }
 }
 
 impl<B> AsyncRead for ResponseBody<B>

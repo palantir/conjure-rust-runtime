@@ -15,12 +15,13 @@ use crate::blocking::runtime;
 use crate::raw::DefaultRawBody;
 use bytes::Bytes;
 use futures::executor;
+use futures::future;
 use http_body::Body;
 use hyper::{HeaderMap, StatusCode};
 use std::error;
-use std::io::{self, Read};
+use std::io::{self, BufRead, Read};
 use std::pin::Pin;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufRead, AsyncReadExt};
 
 /// A blocking HTTP response.
 pub struct Response<B = DefaultRawBody>(crate::Response<B>);
@@ -73,4 +74,22 @@ where
     }
 }
 
-// FIXME implement BufRead
+impl<B> BufRead for ResponseBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        // lifetime shenanigans mean we can't return the value of poll_fill_buf directly
+        runtime()?.enter(|| {
+            executor::block_on(future::poll_fn(|cx| {
+                self.0.as_mut().poll_fill_buf(cx).map_ok(|_| ())
+            }))
+        })?;
+        Ok(self.0.buffer())
+    }
+
+    fn consume(&mut self, n: usize) {
+        self.0.as_mut().consume(n)
+    }
+}
