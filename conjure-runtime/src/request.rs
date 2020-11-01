@@ -122,7 +122,7 @@ where
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     /// Makes the request.
-    pub async fn send(self) -> Result<Response, Error> {
+    pub async fn send(self) -> Result<Response<B>, Error> {
         self.client.send(self.request).await
     }
 }

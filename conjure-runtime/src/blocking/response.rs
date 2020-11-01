@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::blocking::runtime;
+use crate::raw::DefaultRawBody;
 use bytes::Bytes;
 use futures::executor;
+use http_body::Body;
 use hyper::{HeaderMap, StatusCode};
+use std::error;
 use std::io::{self, Read};
+use std::pin::Pin;
 use tokio::io::AsyncReadExt;
 
 /// A blocking HTTP response.
-pub struct Response(crate::Response);
+pub struct Response<B = DefaultRawBody>(crate::Response<B>);
 
-impl Response {
-    pub(crate) fn new(inner: crate::Response) -> Response {
+impl<B> Response<B> {
+    pub(crate) fn new(inner: crate::Response<B>) -> Response<B> {
         Response(inner)
     }
 
@@ -37,21 +41,25 @@ impl Response {
     }
 
     /// Consumes the response, returning its body.
-    pub fn into_body(self) -> ResponseBody {
-        ResponseBody(self.0.into_body())
+    pub fn into_body(self) -> ResponseBody<B> {
+        ResponseBody(Box::pin(self.0.into_body()))
     }
 }
 
 /// A blocking streaming response body.
-pub struct ResponseBody(crate::ResponseBody);
+pub struct ResponseBody<B = DefaultRawBody>(Pin<Box<crate::ResponseBody<B>>>);
 
-impl ResponseBody {
+impl<B> ResponseBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     /// Reads the next chunk of bytes from the response.
     ///
     /// Compared to the `Read` implementation, this method avoids some copies of the body data when working with an API
     /// that already consumes `Bytes` objects.
     pub fn read_bytes(&mut self) -> io::Result<Option<Bytes>> {
-        runtime()?.enter(|| executor::block_on(self.0.read_bytes()))
+        runtime()?.enter(|| executor::block_on(self.0.as_mut().read_bytes()))
     }
 }
 

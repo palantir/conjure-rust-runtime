@@ -130,7 +130,7 @@ where
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     /// Makes the request.
-    pub fn send(self) -> Result<Response, Error> {
+    pub fn send(self) -> Result<Response<B>, Error> {
         let (sender, receiver) = oneshot::channel();
         let client = self.client.0.clone();
         let request = self.request;

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::raw::{BuildRawClient, DefaultRawClient, RawBody};
-use crate::service::gzip::GzipLayer;
+use crate::service::gzip::{DecodedBody, GzipLayer};
 use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
 use crate::service::metrics::MetricsLayer;
@@ -21,8 +21,8 @@ use crate::service::proxy::{ProxyConfig, ProxyLayer};
 use crate::service::request::RequestLayer;
 use crate::service::response::ResponseLayer;
 use crate::service::retry::RetryLayer;
-use crate::service::span::SpanLayer;
-use crate::service::timeout::TimeoutLayer;
+use crate::service::span::{SpanBody, SpanLayer};
+use crate::service::timeout::{TimeoutBody, TimeoutLayer};
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
 use crate::{Agent, Builder, Request, RequestBuilder, Response};
@@ -64,6 +64,8 @@ type BaseLayer = layers!(
     RequestLayer,
     MetricsLayer,
 );
+
+pub(crate) type BaseBody<B> = TimeoutBody<SpanBody<DecodedBody<B>>>;
 
 pub(crate) struct ClientState<T> {
     client: T,
@@ -120,7 +122,7 @@ where
     B: http_body::Body<Data = Bytes> + 'static + Sync + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
-    async fn send(&self, request: Request<'_>) -> Result<Response, Error> {
+    async fn send(&self, request: Request<'_>) -> Result<Response<B>, Error> {
         self.layer.layer(self.client.clone()).oneshot(request).await
     }
 }
@@ -195,7 +197,7 @@ where
     B: http_body::Body<Data = Bytes> + 'static + Sync + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
-    pub(crate) async fn send(&self, request: Request<'_>) -> Result<Response, Error> {
+    pub(crate) async fn send(&self, request: Request<'_>) -> Result<Response<B>, Error> {
         self.state.load().send(request).await
     }
 }
