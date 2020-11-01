@@ -32,7 +32,6 @@ pub struct Builder {
     pub(crate) connect_timeout: Duration,
     pub(crate) request_timeout: Duration,
     pub(crate) backoff_slot_size: Duration,
-    pub(crate) failed_url_cooldown: Duration,
     pub(crate) max_num_retries: u32,
     pub(crate) server_qos: ServerQos,
     pub(crate) service_error: ServiceError,
@@ -60,7 +59,6 @@ impl Builder {
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(5 * 60),
             backoff_slot_size: Duration::from_millis(250),
-            failed_url_cooldown: Duration::from_millis(250),
             max_num_retries: 3,
             server_qos: ServerQos::AutomaticRetry,
             service_error: ServiceError::WrapInNewError,
@@ -93,10 +91,6 @@ impl Builder {
 
         if let Some(backoff_slot_size) = config.backoff_slot_size() {
             self.backoff_slot_size(backoff_slot_size);
-        }
-
-        if let Some(failed_url_cooldown) = config.failed_url_cooldown() {
-            self.failed_url_cooldown(failed_url_cooldown);
         }
 
         if let Some(max_num_retries) = config.max_num_retries() {
@@ -191,16 +185,6 @@ impl Builder {
     /// Defaults to 3.
     pub fn max_num_retries(&mut self, max_num_retries: u32) -> &mut Self {
         self.max_num_retries = max_num_retries;
-        self
-    }
-
-    /// Sets the cooldown applied to a node after it fails to respond successfully to a request.
-    ///
-    /// The node will be skipped while on cooldown unless no other nodes are available.
-    ///
-    /// Defaults to 250 milliseconds.
-    pub fn failed_url_cooldown(&mut self, failed_url_cooldown: Duration) -> &mut Self {
-        self.failed_url_cooldown = failed_url_cooldown;
         self
     }
 
