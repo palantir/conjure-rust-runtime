@@ -63,7 +63,11 @@ where
     }
 }
 
-impl Read for ResponseBody {
+impl<B> Read for ResponseBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         runtime()?.enter(|| executor::block_on(self.0.read(buf)))
     }
