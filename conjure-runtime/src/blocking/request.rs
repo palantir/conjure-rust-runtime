@@ -126,7 +126,7 @@ where
         + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
-    B: http_body::Body<Data = Bytes> + 'static + Sync + Send,
+    B: http_body::Body<Data = Bytes> + 'static + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     /// Makes the request.

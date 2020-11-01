@@ -118,7 +118,7 @@ where
     T: Service<http::Request<RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
-    B: http_body::Body<Data = Bytes> + 'static + Sync + Send,
+    B: http_body::Body<Data = Bytes> + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     /// Makes the request.

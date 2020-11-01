@@ -50,7 +50,7 @@ pub struct GzipService<S> {
 impl<S, B1, B2> Service<Request<B1>> for GzipService<S>
 where
     S: Service<Request<B1>, Response = Response<B2>>,
-    B2: Body<Data = Bytes> + 'static + Sync + Send,
+    B2: Body<Data = Bytes>,
     B2::Error: Into<Box<dyn Error + Sync + Send>>,
 {
     type Response = Response<DecodedBody<B2>>;
@@ -81,7 +81,7 @@ pub struct GzipFuture<F> {
 impl<F, E, B> Future for GzipFuture<F>
 where
     F: Future<Output = Result<Response<B>, E>>,
-    B: Body<Data = Bytes> + 'static + Sync + Send,
+    B: Body<Data = Bytes>,
     B::Error: Into<Box<dyn Error + Sync + Send>>,
 {
     type Output = Result<Response<DecodedBody<B>>, E>;
