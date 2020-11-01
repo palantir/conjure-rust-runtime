@@ -14,7 +14,7 @@
 use async_compression::stream::GzipDecoder;
 use bytes::Bytes;
 use futures::{ready, Stream};
-use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
+use http::header::{Entry, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
 use http::{HeaderMap, HeaderValue, Request, Response};
 use http_body::{Body, SizeHint};
 use once_cell::sync::Lazy;
@@ -62,8 +62,8 @@ where
     }
 
     fn call(&mut self, mut req: Request<B1>) -> Self::Future {
-        if !req.headers().contains_key(ACCEPT_ENCODING) {
-            req.headers_mut().insert(ACCEPT_ENCODING, GZIP.clone());
+        if let Entry::Vacant(e) = req.headers_mut().entry(ACCEPT_ENCODING) {
+            e.insert(GZIP.clone());
         }
 
         GzipFuture {
