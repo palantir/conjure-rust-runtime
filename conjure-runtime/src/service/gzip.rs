@@ -14,7 +14,7 @@
 use async_compression::stream::GzipDecoder;
 use bytes::Bytes;
 use futures::{ready, Stream};
-use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
+use http::header::{Entry, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
 use http::{HeaderMap, HeaderValue, Request, Response};
 use http_body::{Body, SizeHint};
 use once_cell::sync::Lazy;
@@ -47,14 +47,14 @@ pub struct GzipService<S> {
     inner: S,
 }
 
-impl<S, B1, B2, E1, E2> Service<Request<B1>> for GzipService<S>
+impl<S, B1, B2> Service<Request<B1>> for GzipService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>, Error = E1>,
-    B2: Body<Data = Bytes, Error = E2> + 'static + Sync + Send,
-    E2: Into<Box<dyn Error + Sync + Send>>,
+    S: Service<Request<B1>, Response = Response<B2>>,
+    B2: Body<Data = Bytes>,
+    B2::Error: Into<Box<dyn Error + Sync + Send>>,
 {
-    type Response = Response<DecodedBody>;
-    type Error = E1;
+    type Response = Response<DecodedBody<B2>>;
+    type Error = S::Error;
     type Future = GzipFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -62,8 +62,8 @@ where
     }
 
     fn call(&mut self, mut req: Request<B1>) -> Self::Future {
-        if !req.headers().contains_key(ACCEPT_ENCODING) {
-            req.headers_mut().insert(ACCEPT_ENCODING, GZIP.clone());
+        if let Entry::Vacant(e) = req.headers_mut().entry(ACCEPT_ENCODING) {
+            e.insert(GZIP.clone());
         }
 
         GzipFuture {
@@ -78,160 +78,116 @@ pub struct GzipFuture<F> {
     future: F,
 }
 
-impl<F, E1, E2, B> Future for GzipFuture<F>
+impl<F, E, B> Future for GzipFuture<F>
 where
-    F: Future<Output = Result<Response<B>, E1>>,
-    B: Body<Data = Bytes, Error = E2> + 'static + Sync + Send,
-    E2: Into<Box<dyn Error + Sync + Send>>,
+    F: Future<Output = Result<Response<B>, E>>,
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn Error + Sync + Send>>,
 {
-    type Output = Result<Response<DecodedBody>, E1>;
+    type Output = Result<Response<DecodedBody<B>>, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let response = ready!(self.project().future.poll(cx))?;
         let (mut parts, body) = response.into_parts();
 
-        let body = IdentityBody { body };
-
-        let body: Pin<Box<dyn Body<Data = Bytes, Error = io::Error> + Sync + Send>> =
-            match parts.headers.get(CONTENT_ENCODING) {
-                Some(v) if v == *GZIP => {
-                    parts.headers.remove(CONTENT_ENCODING);
-                    parts.headers.remove(CONTENT_LENGTH);
-                    Box::pin(GzipBody {
-                        stream: GzipDecoder::new(ShimStream { body }),
-                    })
+        let body = match parts.headers.get(CONTENT_ENCODING) {
+            Some(v) if v == *GZIP => {
+                parts.headers.remove(CONTENT_ENCODING);
+                parts.headers.remove(CONTENT_LENGTH);
+                DecodedBody::Gzip {
+                    body: GzipDecoder::new(ShimStream { body }),
                 }
-                _ => Box::pin(body),
-            };
-        let body = DecodedBody { body };
+            }
+            _ => DecodedBody::Identity { body },
+        };
 
         Poll::Ready(Ok(Response::from_parts(parts, body)))
     }
 }
 
-pub struct DecodedBody {
-    body: Pin<Box<dyn Body<Data = Bytes, Error = io::Error> + Sync + Send>>,
+#[pin_project(project = Projection)]
+pub enum DecodedBody<B> {
+    Identity {
+        #[pin]
+        body: B,
+    },
+    Gzip {
+        #[pin]
+        body: GzipDecoder<ShimStream<B>>,
+    },
 }
 
-impl Body for DecodedBody {
+impl<B> Body for DecodedBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn Error + Sync + Send>>,
+{
     type Data = Bytes;
     type Error = io::Error;
 
     fn poll_data(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-        Pin::new(&mut self.body).poll_data(cx)
+        match self.project() {
+            Projection::Identity { body } => body
+                .poll_data(cx)
+                .map(|o| o.map(|r| r.map_err(|e| io::Error::new(io::ErrorKind::Other, e)))),
+            Projection::Gzip { body } => body.poll_next(cx),
+        }
     }
 
     fn poll_trailers(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<HeaderMap<HeaderValue>>, Self::Error>> {
-        Pin::new(&mut self.body).poll_trailers(cx)
+        match self.project() {
+            Projection::Identity { body } => body
+                .poll_trailers(cx)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
+            Projection::Gzip { body } => body
+                .get_pin_mut()
+                .project()
+                .body
+                .poll_trailers(cx)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
+        }
     }
 
     fn is_end_stream(&self) -> bool {
-        self.body.is_end_stream()
+        match self {
+            DecodedBody::Identity { body } => body.is_end_stream(),
+            // we can't check the inner body since we may get an error out of the decoder at eof
+            DecodedBody::Gzip { .. } => false,
+        }
     }
 
     fn size_hint(&self) -> SizeHint {
-        self.body.size_hint()
+        match self {
+            DecodedBody::Identity { body } => body.size_hint(),
+            DecodedBody::Gzip { .. } => SizeHint::new(),
+        }
     }
 }
 
 #[pin_project]
-struct IdentityBody<T> {
+pub struct ShimStream<T> {
     #[pin]
     body: T,
 }
 
-impl<T, E> Body for IdentityBody<T>
+impl<T> Stream for ShimStream<T>
 where
-    T: Body<Data = Bytes, Error = E>,
-    E: Into<Box<dyn Error + Sync + Send>>,
+    T: Body,
+    T::Error: Into<Box<dyn Error + Sync + Send>>,
 {
-    type Data = Bytes;
-    type Error = io::Error;
-
-    fn poll_data(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-        let item = ready!(self.project().body.poll_data(cx));
-        Poll::Ready(item.map(|r| r.map_err(|e| io::Error::new(io::ErrorKind::Other, e))))
-    }
-
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap<HeaderValue>>, Self::Error>> {
-        self.project()
-            .body
-            .poll_trailers(cx)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.body.is_end_stream()
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        Body::size_hint(&self.body)
-    }
-}
-
-#[pin_project]
-struct ShimStream<T> {
-    #[pin]
-    body: IdentityBody<T>,
-}
-
-impl<T, E> Stream for ShimStream<T>
-where
-    T: Body<Data = Bytes, Error = E>,
-    E: Into<Box<dyn Error + Sync + Send>>,
-{
-    type Item = io::Result<Bytes>;
+    type Item = io::Result<T::Data>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project().body.poll_data(cx)
-    }
-}
-
-#[pin_project]
-struct GzipBody<T> {
-    #[pin]
-    stream: GzipDecoder<ShimStream<T>>,
-}
-
-// NB: We can't override is_end_stream since we may get an error out of the gzip decoder at eof.
-impl<T, E> Body for GzipBody<T>
-where
-    T: Body<Data = Bytes, Error = E>,
-    E: Into<Box<dyn Error + Sync + Send>>,
-{
-    type Data = Bytes;
-    type Error = io::Error;
-
-    fn poll_data(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-        self.project().stream.poll_next(cx)
-    }
-
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap<HeaderValue>>, Self::Error>> {
         self.project()
-            .stream
-            .get_pin_mut()
-            .project()
             .body
-            .poll_trailers(cx)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+            .poll_data(cx)
+            .map(|o| o.map(|r| r.map_err(|e| io::Error::new(io::ErrorKind::Other, e))))
     }
 }
 

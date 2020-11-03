@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::blocking::RequestBuilder;
+use crate::raw::DefaultRawClient;
 use crate::Builder;
 use http::Method;
 
@@ -20,44 +21,46 @@ use http::Method;
 /// It implements the Conjure `Client` trait, but also offers a "raw" request interface for use with services that don't
 /// provide Conjure service definitions.
 #[derive(Clone)]
-pub struct Client(pub(crate) crate::Client);
+pub struct Client<T = DefaultRawClient>(pub(crate) crate::Client<T>);
 
 impl Client {
     /// Returns a new `Builder` for clients.
     pub fn builder() -> Builder {
         Builder::new()
     }
+}
 
+impl<T> Client<T> {
     /// Returns a new request builder.
     ///
     /// The `pattern` argument is a template for the request path. The `param` method on the builder is used to fill
     /// in the parameters in the pattern with dynamic values.
-    pub fn request(&self, method: Method, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn request(&self, method: Method, pattern: &'static str) -> RequestBuilder<'_, T> {
         RequestBuilder::new(self, method, pattern)
     }
 
     /// Returns a new builder for a GET request.
-    pub fn get(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn get(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::GET, pattern)
     }
 
     /// Returns a new builder for a POST request.
-    pub fn post(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn post(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::POST, pattern)
     }
 
     /// Returns a new builder for a PUT request.
-    pub fn put(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn put(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::PUT, pattern)
     }
 
     /// Returns a new builder for a DELETE request.
-    pub fn delete(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn delete(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::DELETE, pattern)
     }
 
     /// Returns a new builder for a PATCH request.
-    pub fn patch(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn patch(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::PATCH, pattern)
     }
 }

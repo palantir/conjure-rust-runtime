@@ -22,8 +22,7 @@ use conjure_error::{Error, ErrorKind};
 use conjure_runtime_config::ServiceConfig;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use futures::task::Context;
-use futures::{join, StreamExt, TryStreamExt};
+use futures::{join, pin_mut, StreamExt, TryStreamExt};
 use hyper::header::{HeaderValue, ACCEPT_ENCODING, CONTENT_ENCODING, HOST};
 use hyper::http::header::RETRY_AFTER;
 use hyper::server::conn::Http;
@@ -34,7 +33,7 @@ use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::task::Poll;
+use std::task::{Context, Poll};
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -596,13 +595,16 @@ request-timeout: 1s
         },
         |builder| async move {
             let start = Instant::now();
-            let response = builder.build().unwrap().get("/").send().await.unwrap();
-            let error = response
-                .into_body()
-                .read_to_end(&mut vec![])
+            let body = builder
+                .build()
+                .unwrap()
+                .get("/")
+                .send()
                 .await
-                .err()
-                .unwrap();
+                .unwrap()
+                .into_body();
+            pin_mut!(body);
+            let error = body.read_to_end(&mut vec![]).await.err().unwrap();
             assert!(start.elapsed() < Duration::from_secs(2));
             assert!(error.get_ref().unwrap().is::<TimeoutError>());
         },
@@ -728,10 +730,18 @@ async fn gzip_body() {
                 .unwrap())
         },
         |builder| async move {
-            let response = builder.build().unwrap().get("/").send().await.unwrap();
-            let mut body = vec![];
-            response.into_body().read_to_end(&mut body).await.unwrap();
-            assert_eq!(body, b"hello world");
+            let body = builder
+                .build()
+                .unwrap()
+                .get("/")
+                .send()
+                .await
+                .unwrap()
+                .into_body();
+            pin_mut!(body);
+            let mut buf = vec![];
+            body.read_to_end(&mut buf).await.unwrap();
+            assert_eq!(buf, b"hello world");
         },
     )
     .await;
@@ -801,7 +811,7 @@ async fn read_past_eof() {
             Ok(Response::new(rx))
         },
         |builder| async move {
-            let mut body = builder
+            let body = builder
                 .build()
                 .unwrap()
                 .get("/")
@@ -809,6 +819,7 @@ async fn read_past_eof() {
                 .await
                 .unwrap()
                 .into_body();
+            pin_mut!(body);
             let mut buf = vec![];
             body.read_to_end(&mut buf).await.unwrap();
             assert_eq!(buf, b"hello world");

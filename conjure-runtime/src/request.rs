@@ -11,7 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::{DefaultRawClient, RawBody};
 use crate::{Body, Client, ResetTrackingBody, Response};
+use bytes::Bytes;
 use conjure_error::Error;
 use conjure_object::BearerToken;
 use hyper::header::{HeaderValue, ACCEPT};
@@ -20,18 +22,24 @@ use hyper::{HeaderMap, Method};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::error;
 use std::pin::Pin;
+use tower::Service;
 
 static DEFAULT_ACCEPT: Lazy<HeaderValue> = Lazy::new(|| HeaderValue::from_static("*/*"));
 
 /// A builder for an asynchronous HTTP request.
-pub struct RequestBuilder<'a> {
-    pub(crate) client: &'a Client,
+pub struct RequestBuilder<'a, T = DefaultRawClient> {
+    pub(crate) client: &'a Client<T>,
     pub(crate) request: Request<'a>,
 }
 
-impl<'a> RequestBuilder<'a> {
-    pub(crate) fn new(client: &'a Client, method: Method, pattern: &'a str) -> RequestBuilder<'a> {
+impl<'a, T> RequestBuilder<'a, T> {
+    pub(crate) fn new(
+        client: &'a Client<T>,
+        method: Method,
+        pattern: &'a str,
+    ) -> RequestBuilder<'a, T> {
         RequestBuilder {
             client,
             request: Request::new(method, pattern),
@@ -65,7 +73,7 @@ impl<'a> RequestBuilder<'a> {
     /// Sets the `Authorization` request header to a bearer token.
     ///
     /// This is a simple convenience wrapper.
-    pub fn bearer_token(mut self, token: &BearerToken) -> RequestBuilder<'a> {
+    pub fn bearer_token(mut self, token: &BearerToken) -> Self {
         self.request.bearer_token(token);
         self
     }
@@ -76,10 +84,10 @@ impl<'a> RequestBuilder<'a> {
     /// path parameters, and other parameters will be treated as query
     /// parameters. Only one instance of path parameters may be provided, but
     /// multiple instances of query parameters may be provided.
-    #[allow(clippy::needless_pass_by_value)] // we intentionally take T by value here
-    pub fn param<T>(mut self, name: &str, value: T) -> RequestBuilder<'a>
+    #[allow(clippy::needless_pass_by_value)] // we intentionally take U by value here
+    pub fn param<U>(mut self, name: &str, value: U) -> Self
     where
-        T: ToString,
+        U: ToString,
     {
         self.request.param(name, value);
         self
@@ -90,22 +98,31 @@ impl<'a> RequestBuilder<'a> {
     /// Idempotent requests can be retried if an IO error is encountered.
     ///
     /// The default value is controlled by the `Idempotency` enum.
-    pub fn idempotent(mut self, idempotent: bool) -> RequestBuilder<'a> {
+    pub fn idempotent(mut self, idempotent: bool) -> Self {
         self.request.idempotent = Some(idempotent);
         self
     }
 
     /// Sets the request body.
-    pub fn body<T>(mut self, body: T) -> RequestBuilder<'a>
+    pub fn body<U>(mut self, body: U) -> Self
     where
-        T: Body + Sync + Send + 'a,
+        U: Body + Sync + Send + 'a,
     {
         self.request.body(body);
         self
     }
+}
 
+impl<'a, T, B> RequestBuilder<'a, T>
+where
+    T: Service<http::Request<RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     /// Makes the request.
-    pub async fn send(self) -> Result<Response, Error> {
+    pub async fn send(self) -> Result<Response<B>, Error> {
         self.client.send(self.request).await
     }
 }

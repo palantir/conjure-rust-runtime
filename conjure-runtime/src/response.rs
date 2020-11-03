@@ -11,30 +11,30 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::client::BaseBody;
+use crate::raw::DefaultRawBody;
 use bytes::{Buf, Bytes};
 use futures::ready;
 use http::{HeaderMap, StatusCode};
 use http_body::Body;
 use pin_project::pin_project;
+use std::error;
 use std::io;
-use std::mem;
-use std::mem::MaybeUninit;
+use std::marker::PhantomPinned;
+use std::mem::{self, MaybeUninit};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncBufRead, AsyncRead};
 
 /// An asynchronous HTTP response.
-pub struct Response {
+pub struct Response<B = DefaultRawBody> {
     status: StatusCode,
     headers: HeaderMap,
-    body: ResponseBody,
+    body: ResponseBody<B>,
 }
 
-impl Response {
-    pub(crate) fn new<B>(response: hyper::Response<B>) -> Response
-    where
-        B: Body<Data = Bytes, Error = io::Error> + 'static + Sync + Send,
-    {
+impl<B> Response<B> {
+    pub(crate) fn new(response: hyper::Response<BaseBody<B>>) -> Response<B> {
         let (parts, body) = response.into_parts();
         let body = ResponseBody::new(body);
 
@@ -56,42 +56,61 @@ impl Response {
     }
 
     /// Consumes the response, returning its body.
-    pub fn into_body(self) -> ResponseBody {
+    pub fn into_body(self) -> ResponseBody<B> {
         self.body
     }
 }
 
 /// An asynchronous streaming response body.
-pub struct ResponseBody {
-    body: Pin<Box<dyn Body<Data = Bytes, Error = io::Error> + Sync + Send>>,
+#[pin_project]
+pub struct ResponseBody<B = DefaultRawBody> {
+    #[pin]
+    body: FuseBody<BaseBody<B>>,
     cur: Bytes,
+    // Make sure we can make our internal BaseBody !Unpin in the future if we want
+    #[pin]
+    _p: PhantomPinned,
 }
 
-impl ResponseBody {
-    fn new<B>(body: B) -> ResponseBody
-    where
-        B: Body<Data = Bytes, Error = io::Error> + 'static + Sync + Send,
-    {
+impl<B> ResponseBody<B> {
+    fn new(body: BaseBody<B>) -> ResponseBody<B> {
         ResponseBody {
-            body: Box::pin(FuseBody::new(body)),
+            body: FuseBody::new(body),
             cur: Bytes::new(),
+            _p: PhantomPinned,
         }
     }
+}
 
+impl<B> ResponseBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     /// Reads the next chunk of bytes from the response.
     ///
     /// Compared to the `AsyncRead` implementation, this method avoids some copies of the body data when working with
     /// an API that already consumes `Bytes` objects.
-    pub async fn read_bytes(&mut self) -> io::Result<Option<Bytes>> {
-        if self.cur.has_remaining() {
-            Ok(Some(mem::replace(&mut self.cur, Bytes::new())))
+    pub async fn read_bytes(self: Pin<&mut Self>) -> io::Result<Option<Bytes>> {
+        let mut this = self.project();
+
+        if this.cur.has_remaining() {
+            Ok(Some(mem::replace(this.cur, Bytes::new())))
         } else {
-            self.body.data().await.transpose()
+            this.body.data().await.transpose()
         }
+    }
+
+    pub(crate) fn buffer(&self) -> &[u8] {
+        &self.cur
     }
 }
 
-impl AsyncRead for ResponseBody {
+impl<B> AsyncRead for ResponseBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     unsafe fn prepare_uninitialized_buffer(&self, _: &mut [MaybeUninit<u8>]) -> bool {
         false
     }
@@ -109,20 +128,24 @@ impl AsyncRead for ResponseBody {
     }
 }
 
-impl AsyncBufRead for ResponseBody {
+impl<B> AsyncBufRead for ResponseBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
         while !self.cur.has_remaining() {
-            match ready!(Pin::new(&mut self.body).poll_data(cx)).transpose()? {
-                Some(bytes) => self.cur = bytes,
+            match ready!(self.as_mut().project().body.poll_data(cx)).transpose()? {
+                Some(bytes) => *self.as_mut().project().cur = bytes,
                 None => break,
             }
         }
 
-        Poll::Ready(Ok(&self.get_mut().cur))
+        Poll::Ready(Ok(self.project().cur))
     }
 
-    fn consume(mut self: Pin<&mut Self>, amt: usize) {
-        self.cur.advance(amt);
+    fn consume(self: Pin<&mut Self>, amt: usize) {
+        self.project().cur.advance(amt);
     }
 }
 

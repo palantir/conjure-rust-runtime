@@ -38,7 +38,7 @@ impl TlsMetricsLayer {
     pub fn new(service: &str, builder: &Builder) -> TlsMetricsLayer {
         TlsMetricsLayer {
             shared: Arc::new(Shared {
-                metrics: builder.metrics.clone(),
+                metrics: builder.get_metrics().cloned(),
                 service: service.to_string(),
             }),
         }
@@ -65,7 +65,6 @@ pub struct TlsMetricsService<S> {
 impl<S, T> Service<Uri> for TlsMetricsService<S>
 where
     S: Service<Uri, Response = MaybeHttpsStream<T>>,
-    S::Future: 'static + Send,
 {
     type Response = MaybeHttpsStream<T>;
     type Error = S::Error;
