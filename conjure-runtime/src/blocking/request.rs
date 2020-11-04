@@ -12,31 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::blocking::{runtime, Body, BodyShim, BodyStreamer, Client, Response};
+use crate::raw::{DefaultRawClient, RawBody};
 use crate::Request;
+use bytes::Bytes;
 use conjure_error::Error;
 use conjure_object::BearerToken;
 use futures::channel::oneshot;
 use futures::executor;
 use hyper::{HeaderMap, Method};
 use pin_project::pin_project;
+use std::error;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use tower::Service;
 use zipkin::TraceContext;
 
 /// A builder for a blocking HTTP request.
-pub struct RequestBuilder<'a> {
-    client: &'a Client,
+pub struct RequestBuilder<'a, T = DefaultRawClient> {
+    client: &'a Client<T>,
     request: Request<'static>,
     streamer: Option<BodyStreamer<Box<dyn Body + 'a>>>,
 }
 
-impl<'a> RequestBuilder<'a> {
+impl<'a, T> RequestBuilder<'a, T> {
     pub(crate) fn new(
-        client: &'a Client,
+        client: &'a Client<T>,
         method: Method,
         pattern: &'static str,
-    ) -> RequestBuilder<'a> {
+    ) -> RequestBuilder<'a, T> {
         RequestBuilder {
             client,
             request: Request::new(method, pattern),
@@ -71,7 +75,7 @@ impl<'a> RequestBuilder<'a> {
     /// Sets the `Authorization` request header to a bearer token.
     ///
     /// This is a simple convenience wrapper.
-    pub fn bearer_token(mut self, token: &BearerToken) -> RequestBuilder<'a> {
+    pub fn bearer_token(mut self, token: &BearerToken) -> Self {
         self.request.bearer_token(token);
         self
     }
@@ -82,10 +86,10 @@ impl<'a> RequestBuilder<'a> {
     /// path parameters, and other parameters will be treated as query
     /// parameters. Only one instance of path parameters may be provided, but
     /// multiple instances of query parameters may be provided.
-    #[allow(clippy::needless_pass_by_value)] // we intentionally take T by value here
-    pub fn param<T>(mut self, name: &str, value: T) -> RequestBuilder<'a>
+    #[allow(clippy::needless_pass_by_value)] // we intentionally take U by value here
+    pub fn param<U>(mut self, name: &str, value: U) -> Self
     where
-        T: ToString,
+        U: ToString,
     {
         self.request.param(name, value);
         self
@@ -96,24 +100,37 @@ impl<'a> RequestBuilder<'a> {
     /// Idempotent requests can be retried if an IO error is encountered.
     ///
     /// The default value is controlled by the `Idempotency` enum.
-    pub fn idempotent(mut self, idempotent: bool) -> RequestBuilder<'a> {
+    pub fn idempotent(mut self, idempotent: bool) -> Self {
         self.request.idempotent = Some(idempotent);
         self
     }
 
     /// Sets the request body.
-    pub fn body<T>(mut self, body: T) -> RequestBuilder<'a>
+    pub fn body<U>(mut self, body: U) -> Self
     where
-        T: Body + 'a,
+        U: Body + 'a,
     {
         let (body, streamer) = BodyShim::new(Box::new(body) as _);
         self.request.body(body);
         self.streamer = Some(streamer);
         self
     }
+}
 
+impl<'a, T, B> RequestBuilder<'a, T>
+where
+    T: Service<http::Request<RawBody>, Response = http::Response<B>>
+        + Clone
+        + 'static
+        + Sync
+        + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + 'static + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     /// Makes the request.
-    pub fn send(self) -> Result<Response, Error> {
+    pub fn send(self) -> Result<Response<B>, Error> {
         let (sender, receiver) = oneshot::channel();
         let client = self.client.0.clone();
         let request = self.request;

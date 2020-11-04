@@ -11,21 +11,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::Body;
-use bytes::{Bytes, BytesMut};
+use crate::{Body, BodyWriter};
+use bytes::Bytes;
 use conjure_error::Error;
 use futures::channel::{mpsc, oneshot};
-use futures::{ready, SinkExt, Stream};
+use futures::{pin_mut, Stream};
 use hyper::HeaderMap;
+use pin_project::pin_project;
 use std::io::Cursor;
+use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::{error, fmt, io, mem};
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use std::{error, fmt, mem};
 use witchcraft_log::debug;
 
+/// The error type returned by `RawBody`.
 #[derive(Debug)]
-pub(crate) struct BodyError;
+pub struct BodyError(());
 
 impl fmt::Display for BodyError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -40,7 +42,7 @@ pub(crate) enum BodyPart {
     Done,
 }
 
-pub(crate) enum HyperBody {
+pub(crate) enum RawBodyInner {
     Empty,
     Single(Bytes),
     Stream {
@@ -49,25 +51,50 @@ pub(crate) enum HyperBody {
     },
 }
 
-impl HyperBody {
-    pub(crate) fn new<T>(body: Option<Pin<&mut T>>) -> (HyperBody, Writer<'_, T>)
+/// The request body type passed to the raw HTTP client.
+#[pin_project]
+pub struct RawBody {
+    pub(crate) inner: RawBodyInner,
+    #[pin]
+    _p: PhantomPinned,
+}
+
+impl RawBody {
+    pub(crate) fn new<T>(body: Option<Pin<&mut T>>) -> (RawBody, Writer<'_, T>)
     where
         T: ?Sized + Body,
     {
         let body = match body {
             Some(body) => body,
-            None => return (HyperBody::Empty, Writer::Nop),
+            None => {
+                return (
+                    RawBody {
+                        inner: RawBodyInner::Empty,
+                        _p: PhantomPinned,
+                    },
+                    Writer::Nop,
+                )
+            }
         };
 
         match body.full_body() {
-            Some(body) => (HyperBody::Single(body), Writer::Nop),
+            Some(body) => (
+                RawBody {
+                    inner: RawBodyInner::Single(body),
+                    _p: PhantomPinned,
+                },
+                Writer::Nop,
+            ),
             None => {
                 let (body_sender, body_receiver) = mpsc::channel(1);
                 let (polled_sender, polled_receiver) = oneshot::channel();
                 (
-                    HyperBody::Stream {
-                        receiver: body_receiver,
-                        polled: Some(polled_sender),
+                    RawBody {
+                        inner: RawBodyInner::Stream {
+                            receiver: body_receiver,
+                            polled: Some(polled_sender),
+                        },
+                        _p: PhantomPinned,
                     },
                     Writer::Streaming {
                         polled: polled_receiver,
@@ -80,18 +107,20 @@ impl HyperBody {
     }
 }
 
-impl http_body::Body for HyperBody {
+impl http_body::Body for RawBody {
     type Data = Cursor<Bytes>;
     type Error = BodyError;
 
     fn poll_data(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-        match mem::replace(&mut *self, HyperBody::Empty) {
-            HyperBody::Empty => Poll::Ready(None),
-            HyperBody::Single(chunk) => Poll::Ready(Some(Ok(Cursor::new(chunk)))),
-            HyperBody::Stream {
+        let this = self.project();
+
+        match mem::replace(this.inner, RawBodyInner::Empty) {
+            RawBodyInner::Empty => Poll::Ready(None),
+            RawBodyInner::Single(chunk) => Poll::Ready(Some(Ok(Cursor::new(chunk)))),
+            RawBodyInner::Stream {
                 mut receiver,
                 mut polled,
             } => {
@@ -101,13 +130,13 @@ impl http_body::Body for HyperBody {
 
                 match Pin::new(&mut receiver).poll_next(cx) {
                     Poll::Ready(Some(BodyPart::Chunk(bytes))) => {
-                        *self = HyperBody::Stream { receiver, polled };
+                        *this.inner = RawBodyInner::Stream { receiver, polled };
                         Poll::Ready(Some(Ok(Cursor::new(bytes))))
                     }
                     Poll::Ready(Some(BodyPart::Done)) => Poll::Ready(None),
-                    Poll::Ready(None) => Poll::Ready(Some(Err(BodyError))),
+                    Poll::Ready(None) => Poll::Ready(Some(Err(BodyError(())))),
                     Poll::Pending => {
-                        *self = HyperBody::Stream { receiver, polled };
+                        *this.inner = RawBodyInner::Stream { receiver, polled };
                         Poll::Pending
                     }
                 }
@@ -123,7 +152,7 @@ impl http_body::Body for HyperBody {
     }
 
     fn is_end_stream(&self) -> bool {
-        matches!(self, HyperBody::Empty)
+        matches!(self.inner, RawBodyInner::Empty)
     }
 }
 
@@ -157,82 +186,13 @@ where
                     return Ok(());
                 }
 
-                let mut writer = BodyWriter::new(sender);
-                body.write(Pin::new(&mut writer)).await?;
+                let writer = BodyWriter::new(sender);
+                pin_mut!(writer);
+                body.write(writer.as_mut()).await?;
                 writer.finish().await.map_err(Error::internal_safe)?;
 
                 Ok(())
             }
         }
-    }
-}
-
-/// The asynchronous writer passed to `Body::write`.
-pub struct BodyWriter {
-    sender: mpsc::Sender<BodyPart>,
-    buf: BytesMut,
-}
-
-impl BodyWriter {
-    fn new(sender: mpsc::Sender<BodyPart>) -> BodyWriter {
-        BodyWriter {
-            sender,
-            buf: BytesMut::new(),
-        }
-    }
-
-    async fn finish(mut self) -> io::Result<()> {
-        self.flush().await?;
-        self.sender
-            .send(BodyPart::Done)
-            .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        Ok(())
-    }
-
-    /// Writes a block of body bytes.
-    ///
-    /// Compared to the `AsyncWrite` implementation, this method avoids some copies if the caller already has the body
-    /// in `Bytes` objects.
-    pub async fn write_bytes(&mut self, bytes: Bytes) -> io::Result<()> {
-        self.flush().await?;
-        self.sender
-            .send(BodyPart::Chunk(bytes))
-            .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        Ok(())
-    }
-}
-
-impl AsyncWrite for BodyWriter {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        if self.buf.len() > 4096 {
-            ready!(self.as_mut().poll_flush(cx))?;
-        }
-
-        self.buf.extend_from_slice(buf);
-        Poll::Ready(Ok(buf.len()))
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if self.buf.is_empty() {
-            return Poll::Ready(Ok(()));
-        }
-
-        ready!(self.sender.poll_ready(cx)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        let chunk = self.buf.split().freeze();
-        self.sender
-            .start_send(BodyPart::Chunk(chunk))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
     }
 }

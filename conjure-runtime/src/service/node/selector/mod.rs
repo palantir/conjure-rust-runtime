@@ -49,9 +49,9 @@ pub enum NodeSelectorLayer {
 }
 
 impl NodeSelectorLayer {
-    pub fn new(service: &str, builder: &Builder) -> NodeSelectorLayer {
+    pub fn new<T>(service: &str, builder: &Builder<T>) -> NodeSelectorLayer {
         let mut nodes = builder
-            .uris
+            .get_uris()
             .iter()
             .map(|url| {
                 // normalize by stripping a trailing `/` if present
@@ -59,7 +59,7 @@ impl NodeSelectorLayer {
                 url.path_segments_mut().unwrap().pop_if_empty();
 
                 Arc::new(Node {
-                    host_metrics: builder.host_metrics.as_ref().map(|m| {
+                    host_metrics: builder.get_host_metrics().map(|m| {
                         m.get(
                             service,
                             url.host_str().unwrap(),
@@ -76,7 +76,7 @@ impl NodeSelectorLayer {
         } else if nodes.len() == 1 {
             NodeSelectorLayer::Single(SingleNodeSelectorLayer::new(nodes.pop().unwrap()))
         } else {
-            match builder.node_selection_strategy {
+            match builder.get_node_selection_strategy() {
                 NodeSelectionStrategy::PinUntilError => NodeSelectorLayer::PinUntilError(
                     PinUntilErrorNodeSelectorLayer::new(ReshufflingNodes::new(nodes)),
                 ),

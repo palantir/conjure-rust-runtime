@@ -1,0 +1,5 @@
+type: feature
+feature:
+  description: The raw HTTP client can now be configured.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/48

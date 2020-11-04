@@ -98,7 +98,7 @@ fn build_url(pattern: &str, mut params: HashMap<String, Vec<String>>) -> Uri {
     assert!(pattern.starts_with('/'), "pattern must start with `/`");
 
     let mut uri = String::new();
-    // make sure to skip the leading `/` to avoid an empty path segmetn
+    // make sure to skip the leading `/` to avoid an empty path segment
     for segment in pattern[1..].split('/') {
         match parse_param(segment) {
             Some(name) => match params.remove(name) {

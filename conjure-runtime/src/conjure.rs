@@ -23,6 +23,7 @@ use conjure_http::client::{
 };
 use conjure_http::{PathParams, QueryParams};
 use conjure_serde::json;
+use futures::pin_mut;
 use hyper::header::{HeaderValue, ACCEPT, CONTENT_TYPE};
 use hyper::{HeaderMap, Method, StatusCode};
 use serde::Serialize;
@@ -107,13 +108,13 @@ impl AsyncClient for Client {
 
             if let Some(header) = response.headers().get(CONTENT_TYPE) {
                 if header == *APPLICATION_JSON {
-                    let mut body = vec![];
-                    response
-                        .into_body()
-                        .read_to_end(&mut body)
+                    let mut buf = vec![];
+                    let body = response.into_body();
+                    pin_mut!(body);
+                    body.read_to_end(&mut buf)
                         .await
                         .map_err(Error::internal_safe)?;
-                    let mut deserializer = json::ClientDeserializer::from_slice(&body);
+                    let mut deserializer = json::ClientDeserializer::from_slice(&buf);
                     let r = response_visitor.visit_serializable(&mut deserializer)?;
                     deserializer.end().map_err(Error::internal_safe)?;
                     return Ok(r);

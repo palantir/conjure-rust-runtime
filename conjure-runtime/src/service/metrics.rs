@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::service::map_error::RawClientError;
 use crate::Builder;
 use conjure_error::Error;
 use futures::ready;
@@ -31,15 +32,15 @@ struct Metrics {
 
 /// A layer which updates the `client.response` and `client.response.error` metrics.
 ///
-/// Only errors with a cause of `hyper::Error` will be treated as IO errors.
+/// Only errors with a cause of `RawClientError` will be treated as IO errors.
 pub struct MetricsLayer {
     metrics: Option<Arc<Metrics>>,
 }
 
 impl MetricsLayer {
-    pub fn new(service: &str, builder: &Builder) -> MetricsLayer {
+    pub fn new<T>(service: &str, builder: &Builder<T>) -> MetricsLayer {
         MetricsLayer {
-            metrics: builder.metrics.as_ref().map(|m| {
+            metrics: builder.get_metrics().map(|m| {
                 Arc::new(Metrics {
                     response_timer: m.timer(
                         MetricId::new("client.response")
@@ -115,7 +116,7 @@ where
         if let Some(metrics) = this.metrics {
             match &result {
                 Ok(_) => metrics.response_timer.update(this.start.elapsed()),
-                Err(e) if e.cause().is::<hyper::Error>() => metrics.io_error_meter.mark(1),
+                Err(e) if e.cause().is::<RawClientError>() => metrics.io_error_meter.mark(1),
                 _ => {}
             }
         }

@@ -11,40 +11,31 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::service::gzip::GzipLayer;
+use crate::raw::{BuildRawClient, DefaultRawClient, RawBody};
+use crate::service::gzip::{DecodedBody, GzipLayer};
 use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
 use crate::service::metrics::MetricsLayer;
 use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
-use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService, ProxyLayer};
+use crate::service::proxy::{ProxyConfig, ProxyLayer};
 use crate::service::request::RequestLayer;
 use crate::service::response::ResponseLayer;
 use crate::service::retry::RetryLayer;
-use crate::service::span::SpanLayer;
-use crate::service::timeout::TimeoutLayer;
-use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
+use crate::service::span::{SpanBody, SpanLayer};
+use crate::service::timeout::{TimeoutBody, TimeoutLayer};
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
-use crate::{Agent, Builder, HyperBody, Request, RequestBuilder, Response};
+use crate::{Agent, Builder, Request, RequestBuilder, Response};
 use arc_swap::ArcSwap;
+use bytes::Bytes;
 use conjure_error::Error;
 use conjure_runtime_config::ServiceConfig;
-use hyper::client::HttpConnector;
-use hyper::Method;
-use hyper_openssl::{HttpsConnector, HttpsLayer};
-use openssl::ssl::{SslConnector, SslMethod};
+use http::Method;
 use refreshable::Subscription;
+use std::error;
 use std::sync::Arc;
-use std::time::Duration;
 use tower::layer::{Identity, Layer, Stack};
-use tower::{ServiceBuilder, ServiceExt};
-
-// This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
-const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
-// Most servers time out idle connections after 60 seconds, so we'll set the client timeout a bit below that.
-const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
-
-type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
+use tower::{Service, ServiceBuilder, ServiceExt};
 
 macro_rules! layers {
     () => { Identity };
@@ -74,43 +65,29 @@ type BaseLayer = layers!(
     MetricsLayer,
 );
 
-pub(crate) struct ClientState {
-    client: hyper::Client<ConjureConnector, HyperBody>,
+pub(crate) type BaseBody<B> = TimeoutBody<SpanBody<DecodedBody<B>>>;
+
+pub(crate) struct ClientState<T> {
+    client: T,
     layer: BaseLayer,
 }
 
-impl ClientState {
-    pub(crate) fn new(builder: &Builder) -> Result<ClientState, Error> {
-        let service = builder.service.as_ref().expect("service not set");
+impl<T> ClientState<T> {
+    pub(crate) fn new<U>(builder: &Builder<U>) -> Result<ClientState<T>, Error>
+    where
+        U: BuildRawClient<RawClient = T>,
+    {
+        let service = builder.get_service().expect("service not set");
 
-        let mut user_agent = builder.user_agent.clone().expect("user agent not set");
+        let mut user_agent = builder
+            .get_user_agent()
+            .cloned()
+            .expect("user agent not set");
         user_agent.push_agent(Agent::new("conjure-runtime", env!("CARGO_PKG_VERSION")));
 
-        let mut connector = HttpConnector::new();
-        connector.enforce_http(false);
-        connector.set_nodelay(true);
-        connector.set_keepalive(Some(TCP_KEEPALIVE));
-        connector.set_connect_timeout(Some(builder.connect_timeout));
+        let client = builder.get_raw_client_builder().build_raw_client(builder)?;
 
-        let mut ssl = SslConnector::builder(SslMethod::tls()).map_err(Error::internal_safe)?;
-        ssl.set_alpn_protos(b"\x02h2\x08http/1.1")
-            .map_err(Error::internal_safe)?;
-
-        if let Some(ca_file) = builder.security.ca_file() {
-            ssl.set_ca_file(ca_file).map_err(Error::internal_safe)?;
-        }
-
-        let proxy = ProxyConfig::from_config(&builder.proxy)?;
-
-        let connector = ServiceBuilder::new()
-            .layer(TlsMetricsLayer::new(&service, builder))
-            .layer(HttpsLayer::with_connector(ssl).map_err(Error::internal_safe)?)
-            .layer(ProxyConnectorLayer::new(&proxy))
-            .service(connector);
-
-        let client = hyper::Client::builder()
-            .pool_idle_timeout(HTTP_KEEPALIVE)
-            .build(connector);
+        let proxy = ProxyConfig::from_config(builder.get_proxy())?;
 
         let attempt_layer = ServiceBuilder::new()
             .layer(HttpErrorLayer::new(builder))
@@ -129,14 +106,23 @@ impl ClientState {
             .layer(MetricsLayer::new(service, builder))
             .layer(RequestLayer)
             .layer(ResponseLayer)
-            .layer(TimeoutLayer::new(builder.request_timeout))
+            .layer(TimeoutLayer::new(builder.get_request_timeout()))
             .layer(RetryLayer::new(Arc::new(attempt_layer), builder))
             .into_inner();
 
         Ok(ClientState { client, layer })
     }
+}
 
-    async fn send(&self, request: Request<'_>) -> Result<Response, Error> {
+impl<T, B> ClientState<T>
+where
+    T: Service<http::Request<RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
+    async fn send(&self, request: Request<'_>) -> Result<Response<B>, Error> {
         self.layer.layer(self.client.clone()).oneshot(request).await
     }
 }
@@ -146,8 +132,8 @@ impl ClientState {
 /// It implements the Conjure `AsyncClient` trait, but also offers a "raw" request interface for use with services that
 /// don't provide Conjure service definitions.
 #[derive(Clone)]
-pub struct Client {
-    state: Arc<ArcSwap<ClientState>>,
+pub struct Client<T = DefaultRawClient> {
+    state: Arc<ArcSwap<ClientState<T>>>,
     _subscription: Option<Arc<Subscription<ServiceConfig, Error>>>,
 }
 
@@ -156,11 +142,13 @@ impl Client {
     pub fn builder() -> Builder {
         Builder::new()
     }
+}
 
+impl<T> Client<T> {
     pub(crate) fn new(
-        state: Arc<ArcSwap<ClientState>>,
+        state: Arc<ArcSwap<ClientState<T>>>,
         subscription: Option<Subscription<ServiceConfig, Error>>,
-    ) -> Client {
+    ) -> Client<T> {
         Client {
             state,
             _subscription: subscription.map(Arc::new),
@@ -171,36 +159,45 @@ impl Client {
     ///
     /// The `pattern` argument is a template for the request path. The `param` method on the builder is used to fill
     /// in the parameters in the pattern with dynamic values.
-    pub fn request(&self, method: Method, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn request(&self, method: Method, pattern: &'static str) -> RequestBuilder<'_, T> {
         RequestBuilder::new(self, method, pattern)
     }
 
     /// Returns a new builder for a GET request.
-    pub fn get(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn get(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::GET, pattern)
     }
 
     /// Returns a new builder for a POST request.
-    pub fn post(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn post(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::POST, pattern)
     }
 
     /// Returns a new builder for a PUT request.
-    pub fn put(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn put(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::PUT, pattern)
     }
 
     /// Returns a new builder for a DELETE request.
-    pub fn delete(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn delete(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::DELETE, pattern)
     }
 
     /// Returns a new builder for a PATCH request.
-    pub fn patch(&self, pattern: &'static str) -> RequestBuilder<'_> {
+    pub fn patch(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
         self.request(Method::PATCH, pattern)
     }
+}
 
-    pub(crate) async fn send(&self, request: Request<'_>) -> Result<Response, Error> {
+impl<T, B> Client<T>
+where
+    T: Service<http::Request<RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
+    pub(crate) async fn send(&self, request: Request<'_>) -> Result<Response<B>, Error> {
         self.state.load().send(request).await
     }
 }
