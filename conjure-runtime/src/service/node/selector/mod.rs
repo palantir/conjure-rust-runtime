@@ -11,6 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::service::node::selector::balanced::{
+    BalancedNodeSelectorFuture, BalancedNodeSelectorLayer, BalancedNodeSelectorService,
+};
 use crate::service::node::selector::empty::{
     EmptyNodeSelectorFuture, EmptyNodeSelectorLayer, EmptyNodeSelectorService,
 };
@@ -33,6 +36,7 @@ use std::task::{Context, Poll};
 use tower::layer::Layer;
 use tower::Service;
 
+mod balanced;
 mod empty;
 mod pin_until_error;
 mod single;
@@ -46,6 +50,7 @@ pub enum NodeSelectorLayer {
     Single(SingleNodeSelectorLayer),
     PinUntilError(PinUntilErrorNodeSelectorLayer<ReshufflingNodes>),
     PinUntilErrorWithoutReshuffle(PinUntilErrorNodeSelectorLayer<FixedNodes>),
+    Balanced(BalancedNodeSelectorLayer),
 }
 
 impl NodeSelectorLayer {
@@ -85,6 +90,9 @@ impl NodeSelectorLayer {
                         PinUntilErrorNodeSelectorLayer::new(FixedNodes::new(nodes)),
                     )
                 }
+                NodeSelectionStrategy::Balanced => {
+                    NodeSelectorLayer::Balanced(BalancedNodeSelectorLayer::new(nodes))
+                }
             }
         }
     }
@@ -103,6 +111,7 @@ impl<S> Layer<S> for NodeSelectorLayer {
             NodeSelectorLayer::PinUntilErrorWithoutReshuffle(l) => {
                 NodeSelectorService::PinUntilErrorWithoutReshuffle(l.layer(inner))
             }
+            NodeSelectorLayer::Balanced(l) => NodeSelectorService::Balanced(l.layer(inner)),
         }
     }
 }
@@ -112,6 +121,7 @@ pub enum NodeSelectorService<S> {
     Single(SingleNodeSelectorService<S>),
     PinUntilError(PinUntilErrorNodeSelectorService<ReshufflingNodes, S>),
     PinUntilErrorWithoutReshuffle(PinUntilErrorNodeSelectorService<FixedNodes, S>),
+    Balanced(BalancedNodeSelectorService<S>),
 }
 
 impl<S, B1, B2> Service<Request<B1>> for NodeSelectorService<S>
@@ -128,6 +138,7 @@ where
             NodeSelectorService::Single(s) => s.poll_ready(cx),
             NodeSelectorService::PinUntilError(s) => s.poll_ready(cx),
             NodeSelectorService::PinUntilErrorWithoutReshuffle(s) => s.poll_ready(cx),
+            NodeSelectorService::Balanced(s) => s.poll_ready(cx),
         }
     }
 
@@ -139,6 +150,7 @@ where
             NodeSelectorService::PinUntilErrorWithoutReshuffle(s) => {
                 NodeSelectorFuture::PinUntilErrorWithoutReshuffle(s.call(req))
             }
+            NodeSelectorService::Balanced(s) => NodeSelectorFuture::Balanced(s.call(req)),
         }
     }
 }
@@ -149,6 +161,7 @@ pub enum NodeSelectorFuture<F> {
     Single(#[pin] SingleNodeSelectorFuture<F>),
     PinUntilError(#[pin] PinUntilErrorNodeSelectorFuture<ReshufflingNodes, F>),
     PinUntilErrorWithoutReshuffle(#[pin] PinUntilErrorNodeSelectorFuture<FixedNodes, F>),
+    Balanced(#[pin] BalancedNodeSelectorFuture<F>),
 }
 
 impl<F, B> Future for NodeSelectorFuture<F>
@@ -163,6 +176,7 @@ where
             Projection::Single(f) => f.poll(cx),
             Projection::PinUntilError(f) => f.poll(cx),
             Projection::PinUntilErrorWithoutReshuffle(f) => f.poll(cx),
+            Projection::Balanced(f) => f.poll(cx),
         }
     }
 }

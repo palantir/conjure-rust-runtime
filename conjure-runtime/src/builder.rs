@@ -446,4 +446,7 @@ pub enum NodeSelectionStrategy {
 
     /// Like `PinUntilError` except that the pinned node is never randomly shuffled.
     PinUntilErrorWithoutReshuffle,
+
+    /// For each new request, select the "next" node (in some unspecified order).
+    Balanced,
 }
