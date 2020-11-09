@@ -11,14 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
+use crate::service::Layer;
 use conjure_error::Error;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 
 /// A node selector that always returns an error.
 pub struct EmptyNodeSelectorLayer {
@@ -36,9 +36,9 @@ impl EmptyNodeSelectorLayer {
 impl<S> Layer<S> for EmptyNodeSelectorLayer {
     type Service = EmptyNodeSelectorService<S>;
 
-    fn layer(&self, _: S) -> Self::Service {
+    fn layer(self, _: S) -> Self::Service {
         EmptyNodeSelectorService {
-            service: self.service.clone(),
+            service: self.service,
             _p: PhantomData,
         }
     }
@@ -57,11 +57,7 @@ where
     type Error = Error;
     type Future = EmptyNodeSelectorFuture<S::Future>;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, _: R) -> Self::Future {
+    fn call(&self, _: R) -> Self::Future {
         EmptyNodeSelectorFuture {
             service: self.service.clone(),
             _p: PhantomData,

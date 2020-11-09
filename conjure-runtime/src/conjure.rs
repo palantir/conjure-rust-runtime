@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw;
+use crate::raw::{self, Service};
 use crate::{
     Body, BodyWriter, Client, RequestBuilder, Response, ResponseBody, APPLICATION_JSON,
     APPLICATION_OCTET_STREAM,
@@ -32,11 +32,10 @@ use std::error;
 use std::future::Future;
 use std::pin::Pin;
 use tokio::io::AsyncReadExt;
-use tower::Service;
 
 impl<T, B> Client<T>
 where
-    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
+    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
     B: http_body::Body<Data = Bytes> + Send,
@@ -80,11 +79,7 @@ where
 
 impl<T, B> AsyncClient for Client<T>
 where
-    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>>
-        + Clone
-        + 'static
-        + Sync
-        + Send,
+    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
     B: http_body::Body<Data = Bytes> + Sync + Send,

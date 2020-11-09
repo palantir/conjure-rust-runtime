@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::body::ResetTrackingBody;
+use crate::raw::Service;
 use crate::request::Request;
 use crate::service::retry::RetryConfig;
+use crate::service::Layer;
 use crate::Body;
 use http::Uri;
 use percent_encoding::AsciiSet;
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 use zipkin::Bind;
 
 // https://url.spec.whatwg.org/#query-percent-encode-set
@@ -56,7 +55,7 @@ pub struct RequestLayer;
 impl<S> Layer<S> for RequestLayer {
     type Service = RequestService<S>;
 
-    fn layer(&self, inner: S) -> Self::Service {
+    fn layer(self, inner: S) -> Self::Service {
         RequestService { inner }
     }
 }
@@ -73,11 +72,7 @@ where
     type Error = S::Error;
     type Future = Bind<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: Request<'a>) -> Self::Future {
+    fn call(&self, req: Request<'a>) -> Self::Future {
         let span = zipkin::next_span()
             .with_name(&format!("conjure-runtime: {} {}", req.method, req.pattern))
             .detach();
@@ -148,28 +143,30 @@ fn parse_param(segment: &str) -> Option<&str> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::service;
     use http::Method;
-    use tower::ServiceExt;
 
     #[tokio::test]
     async fn literal_pattern() {
-        let service = RequestLayer.layer(tower::service_fn(|req| async move { Ok::<_, ()>(req) }));
+        let service =
+            RequestLayer.layer(service::service_fn(|req| async move { Ok::<_, ()>(req) }));
 
         let req = Request::new(Method::GET, "/foo/bar");
-        let out = service.oneshot(req).await.unwrap();
+        let out = service.call(req).await.unwrap();
 
         assert_eq!(out.uri(), "/foo/bar");
     }
 
     #[tokio::test]
     async fn expanded_pattern() {
-        let service = RequestLayer.layer(tower::service_fn(|req| async move { Ok::<_, ()>(req) }));
+        let service =
+            RequestLayer.layer(service::service_fn(|req| async move { Ok::<_, ()>(req) }));
 
         let mut req = Request::new(Method::GET, "/foo/{bar}");
         req.param("bar", "hello/ world");
         req.param("bazes", "one?");
         req.param("bazes", "two!");
-        let out = service.oneshot(req).await.unwrap();
+        let out = service.call(req).await.unwrap();
 
         assert_eq!(out.uri(), "/foo/hello%2F%20world?bazes=one%3F&bazes=two!");
     }

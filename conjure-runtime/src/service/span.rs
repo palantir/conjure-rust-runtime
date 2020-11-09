@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
+use crate::service::Layer;
 use futures::ready;
 use http::{HeaderMap, Response};
 use http_body::{Body, SizeHint};
@@ -18,8 +20,6 @@ use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 use zipkin::{Bind, Detached, OpenSpan};
 
 /// A layer which wraps the request future in a `conjure-runtime: wait-for-headers` span, and the response's body in a
@@ -29,7 +29,7 @@ pub struct SpanLayer;
 impl<S> Layer<S> for SpanLayer {
     type Service = SpanService<S>;
 
-    fn layer(&self, inner: S) -> SpanService<S> {
+    fn layer(self, inner: S) -> SpanService<S> {
         SpanService { inner }
     }
 }
@@ -46,11 +46,7 @@ where
     type Error = S::Error;
     type Future = SpanFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: R) -> Self::Future {
+    fn call(&self, req: R) -> Self::Future {
         SpanFuture {
             future: zipkin::next_span()
                 .with_name("conjure-runtime: wait-for-headers")

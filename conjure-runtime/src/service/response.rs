@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::client::BaseBody;
+use crate::raw::Service;
+use crate::service::Layer;
 use crate::Response;
 use bytes::Bytes;
 use http_body::Body;
@@ -20,8 +22,6 @@ use std::error;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 
 /// A layer which converts a hyper `Response` to a conjure-runtime `Response`.
 pub struct ResponseLayer;
@@ -29,7 +29,7 @@ pub struct ResponseLayer;
 impl<S> Layer<S> for ResponseLayer {
     type Service = ResponseService<S>;
 
-    fn layer(&self, inner: S) -> ResponseService<S> {
+    fn layer(self, inner: S) -> ResponseService<S> {
         ResponseService { inner }
     }
 }
@@ -48,11 +48,7 @@ where
     type Error = S::Error;
     type Future = ResponseFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: R) -> Self::Future {
+    fn call(&self, req: R) -> Self::Future {
         ResponseFuture {
             future: self.inner.call(req),
         }

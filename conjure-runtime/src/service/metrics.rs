@@ -11,7 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
 use crate::service::map_error::RawClientError;
+use crate::service::Layer;
 use crate::Builder;
 use conjure_error::Error;
 use futures::ready;
@@ -21,8 +23,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::time::Instant;
-use tower::layer::Layer;
-use tower::Service;
 use witchcraft_metrics::{Meter, MetricId, Timer};
 
 struct Metrics {
@@ -60,10 +60,10 @@ impl MetricsLayer {
 impl<S> Layer<S> for MetricsLayer {
     type Service = MetricsService<S>;
 
-    fn layer(&self, inner: S) -> Self::Service {
+    fn layer(self, inner: S) -> Self::Service {
         MetricsService {
             inner,
-            metrics: self.metrics.clone(),
+            metrics: self.metrics,
         }
     }
 }
@@ -81,11 +81,7 @@ where
     type Error = S::Error;
     type Future = MetricsFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: R) -> Self::Future {
+    fn call(&self, req: R) -> Self::Future {
         MetricsFuture {
             future: self.inner.call(req),
             start: Instant::now(),

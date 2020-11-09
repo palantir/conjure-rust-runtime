@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::{BuildRawClient, DefaultRawClient, RawBody};
+use crate::raw::{BuildRawClient, DefaultRawClient, RawBody, Service};
 use crate::service::gzip::{DecodedBody, GzipLayer};
 use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
@@ -25,6 +25,7 @@ use crate::service::span::{SpanBody, SpanLayer};
 use crate::service::timeout::{TimeoutBody, TimeoutLayer};
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
+use crate::service::{Identity, Layer, ServiceBuilder, Stack};
 use crate::{Agent, Builder, Request, RequestBuilder, Response};
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -34,42 +35,36 @@ use http::Method;
 use refreshable::Subscription;
 use std::error;
 use std::sync::Arc;
-use tower::layer::{Identity, Layer, Stack};
-use tower::{Service, ServiceBuilder, ServiceExt};
 
 macro_rules! layers {
     () => { Identity };
     ($layer:ty, $($rem:tt)*) => { Stack<$layer, layers!($($rem)*)> };
 }
 
-// NB: The types here are declared in reverse order compared to the ServiceBuilder declarations below since it was
-// easier to define the macro that way.
-type AttemptLayer = layers!(
-    MapErrorLayer,
-    GzipLayer,
-    UserAgentLayer,
-    TracePropagationLayer,
-    ProxyLayer,
-    NodeMetricsLayer,
-    NodeUriLayer,
-    NodeSelectorLayer,
-    SpanLayer,
+type BaseLayer = layers!(
+    MetricsLayer,
+    RequestLayer,
+    ResponseLayer,
+    TimeoutLayer,
+    RetryLayer,
     HttpErrorLayer,
+    SpanLayer,
+    NodeSelectorLayer,
+    NodeUriLayer,
+    NodeMetricsLayer,
+    ProxyLayer,
+    TracePropagationLayer,
+    UserAgentLayer,
+    GzipLayer,
+    MapErrorLayer,
 );
 
-type BaseLayer = layers!(
-    RetryLayer<AttemptLayer>,
-    TimeoutLayer,
-    ResponseLayer,
-    RequestLayer,
-    MetricsLayer,
-);
+type BaseService<T> = <BaseLayer as Layer<T>>::Service;
 
 pub(crate) type BaseBody<B> = TimeoutBody<SpanBody<DecodedBody<B>>>;
 
 pub(crate) struct ClientState<T> {
-    client: T,
-    layer: BaseLayer,
+    service: BaseService<T>,
 }
 
 impl<T> ClientState<T> {
@@ -89,7 +84,12 @@ impl<T> ClientState<T> {
 
         let proxy = ProxyConfig::from_config(builder.get_proxy())?;
 
-        let attempt_layer = ServiceBuilder::new()
+        let service = ServiceBuilder::new()
+            .layer(MetricsLayer::new(service, builder))
+            .layer(RequestLayer)
+            .layer(ResponseLayer)
+            .layer(TimeoutLayer::new(builder.get_request_timeout()))
+            .layer(RetryLayer::new(builder))
             .layer(HttpErrorLayer::new(builder))
             .layer(SpanLayer)
             .layer(NodeSelectorLayer::new(service, builder))
@@ -100,30 +100,9 @@ impl<T> ClientState<T> {
             .layer(UserAgentLayer::new(&user_agent))
             .layer(GzipLayer)
             .layer(MapErrorLayer)
-            .into_inner();
+            .service(client);
 
-        let layer = ServiceBuilder::new()
-            .layer(MetricsLayer::new(service, builder))
-            .layer(RequestLayer)
-            .layer(ResponseLayer)
-            .layer(TimeoutLayer::new(builder.get_request_timeout()))
-            .layer(RetryLayer::new(Arc::new(attempt_layer), builder))
-            .into_inner();
-
-        Ok(ClientState { client, layer })
-    }
-}
-
-impl<T, B> ClientState<T>
-where
-    T: Service<http::Request<RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
-    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
-    T::Future: Send,
-    B: http_body::Body<Data = Bytes> + Send,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
-    async fn send(&self, request: Request<'_>) -> Result<Response<B>, Error> {
-        self.layer.layer(self.client.clone()).oneshot(request).await
+        Ok(ClientState { service })
     }
 }
 
@@ -131,10 +110,18 @@ where
 ///
 /// It implements the Conjure `AsyncClient` trait, but also offers a "raw" request interface for use with services that
 /// don't provide Conjure service definitions.
-#[derive(Clone)]
 pub struct Client<T = DefaultRawClient> {
     state: Arc<ArcSwap<ClientState<T>>>,
-    _subscription: Option<Arc<Subscription<ServiceConfig, Error>>>,
+    subscription: Option<Arc<Subscription<ServiceConfig, Error>>>,
+}
+
+impl<T> Clone for Client<T> {
+    fn clone(&self) -> Self {
+        Client {
+            state: self.state.clone(),
+            subscription: self.subscription.clone(),
+        }
+    }
 }
 
 impl Client {
@@ -151,7 +138,7 @@ impl<T> Client<T> {
     ) -> Client<T> {
         Client {
             state,
-            _subscription: subscription.map(Arc::new),
+            subscription: subscription.map(Arc::new),
         }
     }
 
@@ -191,13 +178,15 @@ impl<T> Client<T> {
 
 impl<T, B> Client<T>
 where
-    T: Service<http::Request<RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
+    T: Service<http::Request<RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
     B: http_body::Body<Data = Bytes> + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     pub(crate) async fn send(&self, request: Request<'_>) -> Result<Response<B>, Error> {
-        self.state.load().send(request).await
+        // split into 2 statements to avoid holding onto the state while awaiting the future
+        let future = self.state.load().service.call(request);
+        future.await
     }
 }

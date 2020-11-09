@@ -13,8 +13,10 @@
 // limitations under the License.
 use crate::body::ResetTrackingBody;
 use crate::errors::{ThrottledError, UnavailableError};
+use crate::raw::Service;
 use crate::raw::{BodyError, RawBody};
 use crate::service::map_error::RawClientError;
+use crate::service::Layer;
 use crate::{Body, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
 use futures::future::{self, BoxFuture};
@@ -24,11 +26,8 @@ use rand::Rng;
 use std::error;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::time;
-use tower::layer::Layer;
-use tower::Service;
 use witchcraft_log::info;
 
 #[derive(Copy, Clone)]
@@ -37,9 +36,6 @@ pub struct RetryConfig {
 }
 
 /// A layer which retries failed requests in certain cases.
-///
-/// The `RetryLayer` wraps another layer which is used to create a new service for each request that handles all of that
-/// request's attempts. The service passed to the layer must be cloneable as well.
 ///
 /// A request is retried if it fails with a service error with a cause of `ThrottledError`, `UnavailableError`, or
 /// `RawClientError`. Only idempotent requests can be retried which is configured by the `Idempotency` enum, and can be
@@ -51,17 +47,15 @@ pub struct RetryConfig {
 /// Due to https://github.com/rust-lang/rust/issues/71462, this layer also converts the Conjure `Body` into an
 /// `http_body::Body` and sets the `Content-Length` and `Content-Type` headers based off the `Body` implementation, but
 /// this should be factored out to a separate layer when the compiler bug has been fixed.
-pub struct RetryLayer<L> {
-    layer: Arc<L>,
+pub struct RetryLayer {
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
 }
 
-impl<L> RetryLayer<L> {
-    pub fn new<T>(layer: Arc<L>, builder: &Builder<T>) -> RetryLayer<L> {
+impl RetryLayer {
+    pub fn new<T>(builder: &Builder<T>) -> RetryLayer {
         RetryLayer {
-            layer,
             idempotency: builder.get_idempotency(),
             max_num_retries: builder.get_max_num_retries(),
             backoff_slot_size: builder.get_backoff_slot_size(),
@@ -69,18 +63,12 @@ impl<L> RetryLayer<L> {
     }
 }
 
-impl<L, S> Layer<S> for RetryLayer<L>
-where
-    L: Layer<S>,
-    S: Clone,
-{
-    type Service = RetryService<L, S>;
+impl<S> Layer<S> for RetryLayer {
+    type Service = RetryService<S>;
 
-    fn layer(&self, base: S) -> Self::Service {
+    fn layer(self, inner: S) -> Self::Service {
         RetryService {
-            layer: self.layer.clone(),
-            base,
-            inner: None,
+            inner: Arc::new(inner),
             idempotency: self.idempotency,
             max_num_retries: self.max_num_retries,
             backoff_slot_size: self.backoff_slot_size,
@@ -91,39 +79,24 @@ where
 type RetryBody<'a> = Option<Pin<Box<ResetTrackingBody<dyn Body + 'a + Sync + Send>>>>;
 type RetryBodyRef<'a, 'b> = Option<Pin<&'a mut ResetTrackingBody<dyn Body + 'b + Sync + Send>>>;
 
-pub struct RetryService<L, S>
-where
-    L: Layer<S>,
-{
-    layer: Arc<L>,
-    base: S,
-    inner: Option<L::Service>,
+pub struct RetryService<S> {
+    inner: Arc<S>,
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
 }
 
-impl<'a, L, S> Service<Request<RetryBody<'a>>> for RetryService<L, S>
+impl<'a, S> Service<Request<RetryBody<'a>>> for RetryService<S>
 where
-    L: Layer<S>,
-    S: Clone,
-    <L as Layer<S>>::Service: Service<Request<RawBody>, Error = Error> + 'a + Send,
-    <<L as Layer<S>>::Service as Service<Request<RawBody>>>::Response: Send,
-    <<L as Layer<S>>::Service as Service<Request<RawBody>>>::Future: Send,
+    S: Service<Request<RawBody>, Error = Error> + 'a + Sync + Send,
+    S::Response: Send,
+    S::Future: Send,
 {
-    type Response = <<L as Layer<S>>::Service as Service<Request<RawBody>>>::Response;
+    type Response = S::Response;
     type Error = Error;
     type Future = BoxFuture<'a, Result<Self::Response, Error>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let layer = &self.layer;
-        let base = &self.base;
-        self.inner
-            .get_or_insert_with(|| layer.layer(base.clone()))
-            .poll_ready(cx)
-    }
-
-    fn call(&mut self, req: Request<RetryBody<'a>>) -> Self::Future {
+    fn call(&self, req: Request<RetryBody<'a>>) -> Self::Future {
         let idempotent = match req.extensions().get::<RetryConfig>() {
             Some(config) => config.idempotent,
             None => match self.idempotency {
@@ -134,7 +107,7 @@ where
         };
 
         let state = State {
-            inner: self.inner.take().expect("call invoked before poll_ready"),
+            inner: self.inner.clone(),
             idempotent,
             max_num_retries: self.max_num_retries,
             backoff_slot_size: self.backoff_slot_size,
@@ -146,7 +119,7 @@ where
 }
 
 struct State<S> {
-    inner: S,
+    inner: Arc<S>,
     idempotent: bool,
     max_num_retries: u32,
     backoff_slot_size: Duration,
@@ -227,8 +200,6 @@ where
 
     // As noted above, this should be a separate layer!
     async fn send_raw(&mut self, req: Request<RetryBodyRef<'_, '_>>) -> Result<S::Response, Error> {
-        future::poll_fn(|cx| self.inner.poll_ready(cx)).await?;
-
         let (mut parts, body) = req.into_parts();
         if let Some(body) = &body {
             if let Some(length) = body.content_length() {
@@ -334,18 +305,18 @@ enum AttemptOutcome<R> {
 mod test {
     use super::*;
     use crate::raw::RawBodyInner;
+    use crate::service;
     use crate::{BodyWriter, BytesBody};
     use async_trait::async_trait;
     use futures::pin_mut;
     use http_body::Body as _;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::AsyncWriteExt;
-    use tower::layer::Identity;
-    use tower::ServiceExt;
 
     #[tokio::test]
     async fn no_body() {
-        let service = RetryLayer::new(Arc::new(Identity::new()), &Builder::new()).layer(
-            tower::service_fn(|req: Request<RawBody>| async move {
+        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+            |req: Request<RawBody>| async move {
                 assert_eq!(req.headers().get(CONTENT_LENGTH), None);
                 assert_eq!(req.headers().get(CONTENT_TYPE), None);
 
@@ -355,19 +326,19 @@ mod test {
                 }
 
                 Ok(())
-            }),
-        );
+            },
+        ));
 
         let request = Request::new(None);
-        service.oneshot(request).await.unwrap();
+        service.call(request).await.unwrap();
     }
 
     #[tokio::test]
     async fn fixed_size_body() {
         let body = "hello world";
 
-        let service = RetryLayer::new(Arc::new(Identity::new()), &Builder::new()).layer(
-            tower::service_fn(|req: Request<RawBody>| async move {
+        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+            |req: Request<RawBody>| async move {
                 assert_eq!(
                     req.headers().get(CONTENT_LENGTH).unwrap(),
                     &*body.len().to_string()
@@ -380,14 +351,14 @@ mod test {
                 }
 
                 Ok(())
-            }),
-        );
+            },
+        ));
 
         let request = Request::new(Some(Box::pin(ResetTrackingBody::new(BytesBody::new(
             body,
             HeaderValue::from_static("text/plain"),
         ))) as _));
-        service.oneshot(request).await.unwrap();
+        service.call(request).await.unwrap();
     }
 
     struct StreamedBody;
@@ -416,8 +387,8 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body() {
-        let service = RetryLayer::new(Arc::new(Identity::new()), &Builder::new()).layer(
-            tower::service_fn(|req: Request<RawBody>| async move {
+        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+            |req: Request<RawBody>| async move {
                 assert_eq!(req.headers().get(CONTENT_LENGTH), None);
                 assert_eq!(req.headers().get(CONTENT_TYPE).unwrap(), "text/plain");
 
@@ -429,11 +400,11 @@ mod test {
                 assert_eq!(body, "hello world");
 
                 Ok(())
-            }),
-        );
+            },
+        ));
 
         let request = Request::new(Some(Box::pin(ResetTrackingBody::new(StreamedBody)) as _));
-        service.oneshot(request).await.unwrap();
+        service.call(request).await.unwrap();
     }
 
     struct StreamedInfiniteBody;
@@ -462,20 +433,20 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body_hangup() {
-        let service = RetryLayer::new(Arc::new(Identity::new()), &Builder::new()).layer(
-            tower::service_fn(|req: Request<RawBody>| async move {
+        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+            |req: Request<RawBody>| async move {
                 let body = req.into_body();
                 pin_mut!(body);
                 body.data().await.unwrap().unwrap();
 
                 Err::<(), _>(Error::internal_safe("blammo"))
-            }),
-        );
+            },
+        ));
 
         let request = Request::new(Some(
             Box::pin(ResetTrackingBody::new(StreamedInfiniteBody)) as _
         ));
-        let err = service.oneshot(request).await.err().unwrap();
+        let err = service.call(request).await.err().unwrap();
 
         assert_eq!(err.cause().to_string(), "blammo");
     }
@@ -505,20 +476,20 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body_error() {
-        let service = RetryLayer::new(Arc::new(Identity::new()), &Builder::new()).layer(
-            tower::service_fn(|req: Request<RawBody>| async move {
+        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+            |req: Request<RawBody>| async move {
                 hyper::body::to_bytes(req.into_body())
                     .await
                     .map_err(Error::internal_safe)?;
 
                 Ok(())
-            }),
-        );
+            },
+        ));
 
         let request = Request::new(Some(
             Box::pin(ResetTrackingBody::new(StreamedErrorBody)) as _
         ));
-        let err = service.oneshot(request).await.err().unwrap();
+        let err = service.call(request).await.err().unwrap();
 
         assert_eq!(err.cause().to_string(), "uh oh");
     }
@@ -570,23 +541,24 @@ mod test {
 
     #[tokio::test]
     async fn retry_after_raw_client_error() {
-        let mut attempt = 0;
         let service = RetryLayer::new(
-            Arc::new(Identity::new()),
             Builder::new()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<RawBody>| {
-            attempt += 1;
-            async move {
-                let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                assert_eq!(body, "hello world");
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |req: Request<RawBody>| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                    assert_eq!(body, "hello world");
 
-                match attempt {
-                    1 => Err(Error::internal_safe(RawClientError("blammo".into()))),
-                    2 => Ok(()),
-                    _ => panic!(),
+                    match attempt {
+                        0 => Err(Error::internal_safe(RawClientError("blammo".into()))),
+                        1 => Ok(()),
+                        _ => panic!(),
+                    }
                 }
             }
         }));
@@ -597,28 +569,29 @@ mod test {
                 Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
             ))
             .unwrap();
-        service.oneshot(request).await.unwrap();
+        service.call(request).await.unwrap();
     }
 
     #[tokio::test]
     async fn retry_after_unavailable() {
-        let mut attempt = 0;
         let service = RetryLayer::new(
-            Arc::new(Identity::new()),
             Builder::new()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<RawBody>| {
-            attempt += 1;
-            async move {
-                let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                assert_eq!(body, "hello world");
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |req: Request<RawBody>| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                    assert_eq!(body, "hello world");
 
-                match attempt {
-                    1 => Err(Error::internal_safe(UnavailableError(()))),
-                    2 => Ok(()),
-                    _ => panic!(),
+                    match attempt {
+                        0 => Err(Error::internal_safe(UnavailableError(()))),
+                        1 => Ok(()),
+                        _ => panic!(),
+                    }
                 }
             }
         }));
@@ -629,28 +602,29 @@ mod test {
                 Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
             ))
             .unwrap();
-        service.oneshot(request).await.unwrap();
+        service.call(request).await.unwrap();
     }
 
     #[tokio::test]
     async fn retry_after_throttled() {
-        let mut attempt = 0;
         let service = RetryLayer::new(
-            Arc::new(Identity::new()),
             Builder::new()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<RawBody>| {
-            attempt += 1;
-            async move {
-                let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                assert_eq!(body, "hello world");
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |req: Request<RawBody>| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                    assert_eq!(body, "hello world");
 
-                match attempt {
-                    1 => Err(Error::internal_safe(ThrottledError { retry_after: None })),
-                    2 => Ok(()),
-                    _ => panic!(),
+                    match attempt {
+                        0 => Err(Error::internal_safe(ThrottledError { retry_after: None })),
+                        1 => Ok(()),
+                        _ => panic!(),
+                    }
                 }
             }
         }));
@@ -658,28 +632,29 @@ mod test {
         let request = Request::new(Some(
             Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
         ));
-        service.oneshot(request).await.unwrap();
+        service.call(request).await.unwrap();
     }
 
     #[tokio::test]
     async fn no_retry_after_propagated_unavailable() {
-        let mut attempt = 0;
         let service = RetryLayer::new(
-            Arc::new(Identity::new()),
             Builder::new()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<RawBody>| {
-            attempt += 1;
-            async move {
-                let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                assert_eq!(body, "hello world");
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |req: Request<RawBody>| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                    assert_eq!(body, "hello world");
 
-                match attempt {
-                    1 => Err(Error::throttle_safe(UnavailableError(()))),
-                    2 => Ok(()),
-                    _ => panic!(),
+                    match attempt {
+                        0 => Err(Error::throttle_safe(UnavailableError(()))),
+                        1 => Ok(()),
+                        _ => panic!(),
+                    }
                 }
             }
         }));
@@ -687,28 +662,29 @@ mod test {
         let request = Request::new(Some(
             Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
         ));
-        service.oneshot(request).await.err().unwrap();
+        service.call(request).await.err().unwrap();
     }
 
     #[tokio::test]
     async fn no_retry_after_propagated_throttled() {
-        let mut attempt = 0;
         let service = RetryLayer::new(
-            Arc::new(Identity::new()),
             Builder::new()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<RawBody>| {
-            attempt += 1;
-            async move {
-                let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                assert_eq!(body, "hello world");
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |req: Request<RawBody>| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                    assert_eq!(body, "hello world");
 
-                match attempt {
-                    1 => Err(Error::throttle_safe(ThrottledError { retry_after: None })),
-                    2 => Ok(()),
-                    _ => panic!(),
+                    match attempt {
+                        0 => Err(Error::throttle_safe(ThrottledError { retry_after: None })),
+                        1 => Ok(()),
+                        _ => panic!(),
+                    }
                 }
             }
         }));
@@ -716,25 +692,26 @@ mod test {
         let request = Request::new(Some(
             Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
         ));
-        service.oneshot(request).await.err().unwrap();
+        service.call(request).await.err().unwrap();
     }
 
     #[tokio::test]
     async fn no_retry_non_idempotent() {
-        let mut attempt = 0;
         let service = RetryLayer::new(
-            Arc::new(Identity::new()),
             Builder::new()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |_| {
-            attempt += 1;
-            async move {
-                match attempt {
-                    1 => Err(Error::internal_safe(UnavailableError(()))),
-                    2 => Ok(()),
-                    _ => panic!(),
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |_| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    match attempt {
+                        0 => Err(Error::internal_safe(UnavailableError(()))),
+                        1 => Ok(()),
+                        _ => panic!(),
+                    }
                 }
             }
         }));
@@ -743,31 +720,32 @@ mod test {
             .extension(RetryConfig { idempotent: false })
             .body(None)
             .unwrap();
-        let err = service.oneshot(request).await.err().unwrap();
+        let err = service.call(request).await.err().unwrap();
         assert!(err.cause().is::<UnavailableError>());
     }
 
     #[tokio::test]
     async fn no_reset_unread_body() {
-        let mut attempt = 0;
         let service = RetryLayer::new(
-            Arc::new(Identity::new()),
             Builder::new()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<RawBody>| {
-            attempt += 1;
-            async move {
-                match attempt {
-                    1 => Err(Error::internal_safe(UnavailableError(()))),
-                    2 => {
-                        let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                        assert_eq!(body, "hello world");
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |req: Request<RawBody>| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    match attempt {
+                        0 => Err(Error::internal_safe(UnavailableError(()))),
+                        1 => {
+                            let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                            assert_eq!(body, "hello world");
 
-                        Ok(())
+                            Ok(())
+                        }
+                        _ => panic!(),
                     }
-                    _ => panic!(),
                 }
             }
         }));
@@ -775,27 +753,28 @@ mod test {
         let request = Request::new(Some(
             Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
         ));
-        service.oneshot(request).await.unwrap();
+        service.call(request).await.unwrap();
     }
 
     #[tokio::test]
     async fn give_up_after_limit() {
-        let mut attempt = 0;
         let service = RetryLayer::new(
-            Arc::new(Identity::new()),
             Builder::new()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
-        .layer(tower::service_fn(move |req: Request<RawBody>| {
-            attempt += 1;
-            async move {
-                let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                assert_eq!(body, "hello world");
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |req: Request<RawBody>| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+                    assert_eq!(body, "hello world");
 
-                match attempt {
-                    1 | 2 => Err::<(), _>(Error::internal_safe(UnavailableError(()))),
-                    _ => panic!(),
+                    match attempt {
+                        0 | 1 => Err::<(), _>(Error::internal_safe(UnavailableError(()))),
+                        _ => panic!(),
+                    }
                 }
             }
         }));
@@ -803,6 +782,6 @@ mod test {
         let request = Request::new(Some(
             Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
         ));
-        service.oneshot(request).await.err().unwrap();
+        service.call(request).await.err().unwrap();
     }
 }

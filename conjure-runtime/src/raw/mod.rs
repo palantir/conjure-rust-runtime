@@ -34,9 +34,27 @@ pub use crate::raw::body::*;
 pub use crate::raw::default::*;
 use crate::Builder;
 use conjure_error::Error;
+use std::future::Future;
 
 mod body;
 mod default;
+
+/// An asynchronous function from request to response.
+///
+/// This trait is based on the `tower::Service` trait, but differs in two ways. It does not have a `poll_ready` method
+/// as our client-side backpressure depends on the request, and the `call` method takes `&self` rather than `&mut self`
+/// as our client is designed to be used through a shared reference.
+pub trait Service<R> {
+    /// The response type returned by the service.
+    type Response;
+    /// The error type returned by the service.
+    type Error;
+    /// The future type returned by the service.
+    type Future: Future<Output = Result<Self::Response, Self::Error>>;
+
+    /// Asynchronously perform the request.
+    fn call(&self, req: R) -> Self::Future;
+}
 
 /// A factory of raw HTTP clients.
 pub trait BuildRawClient {

@@ -11,10 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
+use crate::service::Layer;
 use http::Request;
-use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 
 /// A request layer which injects Zipkin tracing information into an outgoing request's headers.
 ///
@@ -24,7 +23,7 @@ pub struct TracePropagationLayer;
 impl<S> Layer<S> for TracePropagationLayer {
     type Service = TracePropagationService<S>;
 
-    fn layer(&self, inner: S) -> TracePropagationService<S> {
+    fn layer(self, inner: S) -> TracePropagationService<S> {
         TracePropagationService { inner }
     }
 }
@@ -41,11 +40,7 @@ where
     type Error = S::Error;
     type Future = S::Future;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: Request<B>) -> Self::Future {
+    fn call(&self, mut req: Request<B>) -> Self::Future {
         if let Some(context) = zipkin::current() {
             http_zipkin::set_trace_context(context, req.headers_mut());
         }
@@ -57,14 +52,14 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use tower::ServiceExt;
+    use crate::service;
 
     #[tokio::test]
     async fn no_span() {
         let service =
-            TracePropagationLayer.layer(tower::service_fn(|req| async { Ok::<_, ()>(req) }));
+            TracePropagationLayer.layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
-        let out = service.oneshot(Request::new(())).await.unwrap();
+        let out = service.call(Request::new(())).await.unwrap();
         let out_context = http_zipkin::get_trace_context(out.headers());
 
         assert_eq!(out_context, None);
@@ -76,9 +71,12 @@ mod test {
         let context = span.context();
 
         let service =
-            TracePropagationLayer.layer(tower::service_fn(|req| async { Ok::<_, ()>(req) }));
+            TracePropagationLayer.layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
-        let out = span.bind(service.oneshot(Request::new(()))).await.unwrap();
+        let out = span
+            .bind(async { service.call(Request::new(())).await })
+            .await
+            .unwrap();
         let out_context = http_zipkin::get_trace_context(out.headers());
 
         assert_eq!(out_context, Some(context));

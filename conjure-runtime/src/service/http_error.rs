@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{RemoteError, ThrottledError, UnavailableError};
+use crate::raw::Service;
+use crate::service::Layer;
 use crate::{Builder, ServerQos, ServiceError};
 use bytes::BufMut;
 use conjure_error::Error;
@@ -26,8 +28,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tower::layer::Layer;
-use tower::Service;
 use witchcraft_log::info;
 
 /// A layer which maps raw HTTP responses into Conjure `Error`s.
@@ -57,7 +57,7 @@ impl HttpErrorLayer {
 impl<S> Layer<S> for HttpErrorLayer {
     type Service = HttpErrorService<S>;
 
-    fn layer(&self, inner: S) -> Self::Service {
+    fn layer(self, inner: S) -> Self::Service {
         HttpErrorService {
             inner,
             server_qos: self.server_qos,
@@ -82,11 +82,7 @@ where
     type Error = Error;
     type Future = HttpErrorFuture<S::Future, B2>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: Request<B1>) -> Self::Future {
+    fn call(&self, req: Request<B1>) -> Self::Future {
         HttpErrorFuture::Call {
             future: self.inner.call(req),
             server_qos: self.server_qos,
@@ -229,15 +225,15 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::service;
     use conjure_error::{ErrorCode, ErrorKind, SerializableError};
     use conjure_object::Uuid;
     use http::header::CONTENT_TYPE;
-    use tower::ServiceExt;
 
     #[tokio::test]
     async fn success_is_ok() {
         let service =
-            HttpErrorLayer::new(&Builder::new()).layer(tower::service_fn(|_| async move {
+            HttpErrorLayer::new(&Builder::new()).layer(service::service_fn(|_| async move {
                 Ok(Response::builder()
                     .status(StatusCode::OK)
                     .body(hyper::Body::empty())
@@ -245,14 +241,14 @@ mod test {
             }));
 
         let request = Request::new(());
-        let out = service.oneshot(request).await.unwrap();
+        let out = service.call(request).await.unwrap();
         assert_eq!(out.status(), StatusCode::OK);
     }
 
     #[tokio::test]
     async fn default_throttle_handling() {
         let service =
-            HttpErrorLayer::new(&Builder::new()).layer(tower::service_fn(|_| async move {
+            HttpErrorLayer::new(&Builder::new()).layer(service::service_fn(|_| async move {
                 Ok(Response::builder()
                     .status(StatusCode::TOO_MANY_REQUESTS)
                     .header(RETRY_AFTER, "100")
@@ -261,7 +257,7 @@ mod test {
             }));
 
         let request = Request::new(());
-        let error = service.oneshot(request).await.err().unwrap();
+        let error = service.call(request).await.err().unwrap();
         match error.kind() {
             ErrorKind::Service(_) => {}
             _ => panic!("expected a service error"),
@@ -274,7 +270,7 @@ mod test {
     async fn propagated_throttle_handling() {
         let service =
             HttpErrorLayer::new(Builder::new().server_qos(ServerQos::Propagate429And503ToCaller))
-                .layer(tower::service_fn(|_| async move {
+                .layer(service::service_fn(|_| async move {
                     Ok(Response::builder()
                         .status(StatusCode::TOO_MANY_REQUESTS)
                         .header(RETRY_AFTER, "100")
@@ -283,7 +279,7 @@ mod test {
                 }));
 
         let request = Request::new(());
-        let error = service.oneshot(request).await.err().unwrap();
+        let error = service.call(request).await.err().unwrap();
         let throttle = match error.kind() {
             ErrorKind::Throttle(throttle) => throttle,
             _ => panic!("expected a service error"),
@@ -294,7 +290,7 @@ mod test {
     #[tokio::test]
     async fn default_unavailable_handling() {
         let service =
-            HttpErrorLayer::new(&Builder::new()).layer(tower::service_fn(|_| async move {
+            HttpErrorLayer::new(&Builder::new()).layer(service::service_fn(|_| async move {
                 Ok(Response::builder()
                     .status(StatusCode::SERVICE_UNAVAILABLE)
                     .body(hyper::Body::empty())
@@ -302,7 +298,7 @@ mod test {
             }));
 
         let request = Request::new(());
-        let error = service.oneshot(request).await.err().unwrap();
+        let error = service.call(request).await.err().unwrap();
         match error.kind() {
             ErrorKind::Service(_) => {}
             _ => panic!("expected a service error"),
@@ -314,7 +310,7 @@ mod test {
     async fn propagated_unavailable_handling() {
         let service =
             HttpErrorLayer::new(Builder::new().server_qos(ServerQos::Propagate429And503ToCaller))
-                .layer(tower::service_fn(|_| async move {
+                .layer(service::service_fn(|_| async move {
                     Ok(Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
                         .body(hyper::Body::empty())
@@ -322,7 +318,7 @@ mod test {
                 }));
 
         let request = Request::new(());
-        let error = service.oneshot(request).await.err().unwrap();
+        let error = service.call(request).await.err().unwrap();
         match error.kind() {
             ErrorKind::Unavailable(_) => {}
             _ => panic!("expected a service error"),
@@ -339,7 +335,7 @@ mod test {
 
         let service = HttpErrorLayer::new(&Builder::new()).layer({
             let service_error = service_error.clone();
-            tower::service_fn(move |_| {
+            service::service_fn(move |_| {
                 let json = json::to_vec(&service_error).unwrap();
                 async move {
                     Ok(Response::builder()
@@ -352,7 +348,7 @@ mod test {
         });
 
         let request = Request::new(());
-        let error = service.oneshot(request).await.err().unwrap();
+        let error = service.call(request).await.err().unwrap();
         let service = match error.kind() {
             ErrorKind::Service(service) => service,
             _ => panic!("expected a service error"),
@@ -379,7 +375,7 @@ mod test {
             HttpErrorLayer::new(Builder::new().service_error(ServiceError::PropagateToCaller))
                 .layer({
                     let service_error = service_error.clone();
-                    tower::service_fn(move |_| {
+                    service::service_fn(move |_| {
                         let json = json::to_vec(&service_error).unwrap();
                         async move {
                             Ok(Response::builder()
@@ -392,7 +388,7 @@ mod test {
                 });
 
         let request = Request::new(());
-        let error = service.oneshot(request).await.err().unwrap();
+        let error = service.call(request).await.err().unwrap();
         let service = match error.kind() {
             ErrorKind::Service(service) => service,
             _ => panic!("expected a service error"),

@@ -11,8 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::BuildRawClient;
-use crate::raw::RawBody;
+use crate::raw::{BuildRawClient, RawBody, Service};
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService};
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::Builder;
@@ -33,7 +32,6 @@ use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tower::Service;
 use tower::ServiceBuilder;
 
 // This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
@@ -86,7 +84,6 @@ impl BuildRawClient for DefaultRawClientBuilder {
 /// The default raw client implementation used by `conjure_runtime`.
 ///
 /// This is currently implemented with `hyper` and `openssl`, but that is subject to change at any time.
-#[derive(Clone)]
 pub struct DefaultRawClient(Client<ConjureConnector, RawBody>);
 
 impl Service<Request<RawBody>> for DefaultRawClient {
@@ -94,13 +91,9 @@ impl Service<Request<RawBody>> for DefaultRawClient {
     type Error = DefaultRawError;
     type Future = DefaultRawFuture;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.0.poll_ready(cx).map_err(DefaultRawError)
-    }
-
-    fn call(&mut self, req: Request<RawBody>) -> Self::Future {
+    fn call(&self, req: Request<RawBody>) -> Self::Future {
         DefaultRawFuture {
-            future: self.0.call(req),
+            future: self.0.request(req),
             _p: PhantomPinned,
         }
     }

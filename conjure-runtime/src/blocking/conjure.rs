@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::blocking::{Body, BodyWriter, Client, Response, ResponseBody};
-use crate::raw;
+use crate::raw::{self, Service};
 use crate::{APPLICATION_JSON, APPLICATION_OCTET_STREAM};
 use bytes::Bytes;
 use conjure_error::Error;
@@ -24,15 +24,10 @@ use hyper::{HeaderMap, Method, StatusCode};
 use serde::Serialize;
 use std::error;
 use std::io::Read;
-use tower::Service;
 
 impl<T, B> Client<T>
 where
-    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>>
-        + Clone
-        + 'static
-        + Sync
-        + Send,
+    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
     B: http_body::Body<Data = Bytes> + 'static + Send,
@@ -83,11 +78,7 @@ where
 
 impl<T, B> conjure_http::client::Client for Client<T>
 where
-    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>>
-        + Clone
-        + 'static
-        + Sync
-        + Send,
+    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
     B: http_body::Body<Data = Bytes> + 'static + Send,

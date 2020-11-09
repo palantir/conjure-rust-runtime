@@ -11,12 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
 use crate::service::node::Node;
+use crate::service::Layer;
 use http::Request;
 use std::sync::Arc;
-use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 
 /// A node selector layer which always selects a single node.
 ///
@@ -35,10 +34,10 @@ impl SingleNodeSelectorLayer {
 impl<S> Layer<S> for SingleNodeSelectorLayer {
     type Service = SingleNodeSelectorService<S>;
 
-    fn layer(&self, inner: S) -> SingleNodeSelectorService<S> {
+    fn layer(self, inner: S) -> SingleNodeSelectorService<S> {
         SingleNodeSelectorService {
             inner,
-            node: self.node.clone(),
+            node: self.node,
         }
     }
 }
@@ -56,11 +55,7 @@ where
     type Error = S::Error;
     type Future = SingleNodeSelectorFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), S::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: Request<B>) -> Self::Future {
+    fn call(&self, mut req: Request<B>) -> Self::Future {
         req.extensions_mut().insert(self.node.clone());
         self.inner.call(req)
     }

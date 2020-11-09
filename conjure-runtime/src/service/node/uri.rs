@@ -11,12 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
 use crate::service::node::Node;
+use crate::service::Layer;
 use http::Request;
 use std::sync::Arc;
-use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 
 /// A layer which converts an origin-form URI to an absolute-form by joining with a node's base URI stored in the
 /// request's extension map.
@@ -25,7 +24,7 @@ pub struct NodeUriLayer;
 impl<S> Layer<S> for NodeUriLayer {
     type Service = NodeUriService<S>;
 
-    fn layer(&self, inner: S) -> NodeUriService<S> {
+    fn layer(self, inner: S) -> NodeUriService<S> {
         NodeUriService { inner }
     }
 }
@@ -42,11 +41,7 @@ where
     type Response = S::Response;
     type Future = S::Future;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: Request<B>) -> Self::Future {
+    fn call(&self, mut req: Request<B>) -> Self::Future {
         // we expect the request's URI to be in origin-form
         debug_assert!(req.uri().scheme().is_none());
         debug_assert!(req.uri().authority().is_none());
@@ -72,32 +67,32 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use tower::ServiceExt;
+    use crate::service;
 
     #[tokio::test]
     async fn with_trailing_slash() {
-        let service = NodeUriLayer.layer(tower::service_fn(|req| async { Ok::<_, ()>(req) }));
+        let service = NodeUriLayer.layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
         let req = Request::builder()
             .uri("/fizz/buzz?hello=true")
             .extension(Arc::new(Node::test("https://foobar.fizz:1234/")))
             .body(())
             .unwrap();
-        let out = service.oneshot(req).await.unwrap();
+        let out = service.call(req).await.unwrap();
 
         assert_eq!(out.uri(), "https://foobar.fizz:1234/fizz/buzz?hello=true");
     }
 
     #[tokio::test]
     async fn without_trailing_slash() {
-        let service = NodeUriLayer.layer(tower::service_fn(|req| async { Ok::<_, ()>(req) }));
+        let service = NodeUriLayer.layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
         let req = Request::builder()
             .uri("/fizz/buzz?hello=true")
             .extension(Arc::new(Node::test("https://foobar.fizz:1234/foo/bar")))
             .body(())
             .unwrap();
-        let out = service.oneshot(req).await.unwrap();
+        let out = service.call(req).await.unwrap();
 
         assert_eq!(
             out.uri(),
