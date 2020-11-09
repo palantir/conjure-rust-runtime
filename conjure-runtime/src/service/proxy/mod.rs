@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::config::{self, HostAndPort};
+use crate::config;
 pub use crate::service::proxy::connector::{ProxyConnectorLayer, ProxyConnectorService};
 pub use crate::service::proxy::request::{ProxyLayer, ProxyService};
 use conjure_error::Error;
@@ -24,7 +24,6 @@ pub mod request;
 #[derive(Clone)]
 pub enum ProxyConfig {
     Http(HttpProxyConfig),
-    Mesh(MeshProxyConfig),
     Direct,
 }
 
@@ -32,11 +31,6 @@ pub enum ProxyConfig {
 pub struct HttpProxyConfig {
     uri: Uri,
     credentials: Option<HeaderValue>,
-}
-
-#[derive(Clone)]
-pub struct MeshProxyConfig {
-    host_and_port: HostAndPort,
 }
 
 impl ProxyConfig {
@@ -61,9 +55,6 @@ impl ProxyConfig {
 
                 Ok(ProxyConfig::Http(HttpProxyConfig { uri, credentials }))
             }
-            config::ProxyConfig::Mesh(config) => Ok(ProxyConfig::Mesh(MeshProxyConfig {
-                host_and_port: config.host_and_port().clone(),
-            })),
             _ => Err(Error::internal_safe("unknown proxy type")),
         }
     }
