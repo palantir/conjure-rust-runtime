@@ -1,0 +1,5 @@
+type: break
+break:
+  description: Removed support for mesh proxies.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/50
