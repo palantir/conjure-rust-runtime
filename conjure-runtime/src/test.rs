@@ -23,7 +23,7 @@ use conjure_runtime_config::ServiceConfig;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures::{join, pin_mut, StreamExt, TryStreamExt};
-use hyper::header::{HeaderValue, ACCEPT_ENCODING, CONTENT_ENCODING, HOST};
+use hyper::header::{HeaderValue, ACCEPT_ENCODING, CONTENT_ENCODING};
 use hyper::http::header::RETRY_AFTER;
 use hyper::server::conn::Http;
 use hyper::service::Service;
@@ -168,39 +168,6 @@ where
     fn call(&mut self, req: Request<hyper::Body>) -> Self::Future {
         (self.0)(req)
     }
-}
-
-#[tokio::test]
-async fn mesh_proxy() {
-    test(
-        r#"
-uris: ["https://www.google.com:1234"]
-security:
-  ca-file: "{{ca_file}}"
-proxy:
-  type: mesh
-  host-and-port: "localhost:{{port}}"
-"#,
-        1,
-        |req| async move {
-            let host = req.headers().get(HOST).unwrap();
-            assert_eq!(host, "www.google.com:1234");
-            assert_eq!(req.uri(), &"/foo/bar?fizz=buzz");
-
-            Ok(Response::new(hyper::Body::empty()))
-        },
-        |builder| async move {
-            builder
-                .build()
-                .unwrap()
-                .get("/foo/bar")
-                .param("fizz", "buzz")
-                .send()
-                .await
-                .unwrap();
-        },
-    )
-    .await;
 }
 
 #[tokio::test]
