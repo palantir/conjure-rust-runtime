@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::blocking::{Body, BodyWriter, Client, Response, ResponseBody};
+use crate::raw;
 use crate::{APPLICATION_JSON, APPLICATION_OCTET_STREAM};
 use bytes::Bytes;
 use conjure_error::Error;
@@ -21,9 +22,22 @@ use conjure_serde::json;
 use hyper::header::{HeaderValue, ACCEPT, CONTENT_TYPE};
 use hyper::{HeaderMap, Method, StatusCode};
 use serde::Serialize;
+use std::error;
 use std::io::Read;
+use tower::Service;
 
-impl Client {
+impl<T, B> Client<T>
+where
+    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>>
+        + Clone
+        + 'static
+        + Sync
+        + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + 'static + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     #[allow(clippy::too_many_arguments)]
     fn conjure_inner(
         &self,
@@ -34,7 +48,7 @@ impl Client {
         headers: HeaderMap,
         body: Option<RawBody<'_>>,
         accept: Accept,
-    ) -> Result<Response, Error> {
+    ) -> Result<Response<B>, Error> {
         let mut request = self.request(method, path);
         for (key, value) in &path_params {
             request = request.param(key, value);
@@ -67,22 +81,33 @@ impl Client {
     }
 }
 
-impl conjure_http::client::Client for Client {
+impl<T, B> conjure_http::client::Client for Client<T>
+where
+    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>>
+        + Clone
+        + 'static
+        + Sync
+        + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + 'static + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     type BinaryWriter = BodyWriter;
-    type BinaryBody = ResponseBody;
+    type BinaryBody = ResponseBody<B>;
 
-    fn request<'a, T, U>(
+    fn request<'a, R, U>(
         &self,
         method: Method,
         path: &'static str,
         path_params: PathParams,
         query_params: QueryParams,
         headers: HeaderMap<HeaderValue>,
-        body: T,
+        body: R,
         response_visitor: U,
     ) -> Result<<U as VisitResponse<Self::BinaryBody>>::Output, Error>
     where
-        T: RequestBody<'a, Self::BinaryWriter>,
+        R: RequestBody<'a, Self::BinaryWriter>,
         U: VisitResponse<Self::BinaryBody>,
     {
         let body = body.accept(RawBodyVisitor)?;
