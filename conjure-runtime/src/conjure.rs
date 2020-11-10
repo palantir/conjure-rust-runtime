@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw;
 use crate::{
     Body, BodyWriter, Client, RequestBuilder, Response, ResponseBody, APPLICATION_JSON,
     APPLICATION_OCTET_STREAM,
@@ -27,11 +28,20 @@ use futures::pin_mut;
 use hyper::header::{HeaderValue, ACCEPT, CONTENT_TYPE};
 use hyper::{HeaderMap, Method, StatusCode};
 use serde::Serialize;
+use std::error;
 use std::future::Future;
 use std::pin::Pin;
 use tokio::io::AsyncReadExt;
+use tower::Service;
 
-impl Client {
+impl<T, B> Client<T>
+where
+    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     #[allow(clippy::too_many_arguments)]
     async fn conjure_inner(
         &self,
@@ -42,7 +52,7 @@ impl Client {
         headers: HeaderMap,
         body: Option<RawBody<'_>>,
         accept: Accept,
-    ) -> Result<Response, Error> {
+    ) -> Result<Response<B>, Error> {
         let mut request = RequestBuilder::new(self, method, path);
         for (key, value) in &path_params {
             request = request.param(key, value);
@@ -68,22 +78,33 @@ impl Client {
     }
 }
 
-impl AsyncClient for Client {
+impl<T, B> AsyncClient for Client<T>
+where
+    T: Service<http::Request<raw::RawBody>, Response = http::Response<B>>
+        + Clone
+        + 'static
+        + Sync
+        + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + Sync + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
     type BinaryWriter = BodyWriter;
-    type BinaryBody = ResponseBody;
+    type BinaryBody = ResponseBody<B>;
 
-    fn request<'a, T, U>(
+    fn request<'a, R, U>(
         &'a self,
         method: Method,
         path: &'static str,
         path_params: PathParams,
         query_params: QueryParams,
         headers: HeaderMap<HeaderValue>,
-        body: T,
+        body: R,
         response_visitor: U,
     ) -> Pin<Box<dyn Future<Output = Result<U::Output, Error>> + Send + 'a>>
     where
-        T: AsyncRequestBody<'a, Self::BinaryWriter> + Send + 'a,
+        R: AsyncRequestBody<'a, Self::BinaryWriter> + Send + 'a,
         U: VisitResponse<Self::BinaryBody> + Send + 'a,
     {
         Box::pin(async move {
