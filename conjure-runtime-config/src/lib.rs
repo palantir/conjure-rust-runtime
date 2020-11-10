@@ -360,8 +360,6 @@ pub enum ProxyConfig {
     Direct,
     /// An HTTP proxy.
     Http(HttpProxyConfig),
-    /// A mesh proxy.
-    Mesh(MeshProxyConfig),
 }
 
 impl Default for ProxyConfig {
@@ -524,65 +522,6 @@ impl BasicCredentials {
     /// Returns the password.
     pub fn password(&self) -> &str {
         &self.password
-    }
-}
-
-/// Configuration for a mesh proxy.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct MeshProxyConfig {
-    host_and_port: HostAndPort,
-}
-
-impl MeshProxyConfig {
-    /// Creates a new builder.
-    pub fn builder() -> MeshProxyConfigBuilder {
-        MeshProxyConfigBuilder::default()
-    }
-
-    /// Returns the host and port of the proxy server.
-    pub fn host_and_port(&self) -> &HostAndPort {
-        &self.host_and_port
-    }
-}
-
-/// A builder type for `MeshProxyConfig`s.
-pub struct MeshProxyConfigBuilder {
-    host_and_port: Option<HostAndPort>,
-}
-
-impl Default for MeshProxyConfigBuilder {
-    fn default() -> MeshProxyConfigBuilder {
-        MeshProxyConfigBuilder {
-            host_and_port: None,
-        }
-    }
-}
-
-impl From<MeshProxyConfig> for MeshProxyConfigBuilder {
-    fn from(config: MeshProxyConfig) -> MeshProxyConfigBuilder {
-        MeshProxyConfigBuilder {
-            host_and_port: Some(config.host_and_port),
-        }
-    }
-}
-
-impl MeshProxyConfigBuilder {
-    /// Sets the host and port.
-    pub fn host_and_port(&mut self, host_and_port: HostAndPort) -> &mut Self {
-        self.host_and_port = Some(host_and_port);
-        self
-    }
-
-    /// Creates a new `MeshProxyBuilder`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `host_and_port` is not set.
-    pub fn build(&self) -> MeshProxyConfig {
-        MeshProxyConfig {
-            host_and_port: self.host_and_port.clone().expect("host_and_port not set"),
-        }
     }
 }
 

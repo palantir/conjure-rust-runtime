@@ -100,8 +100,7 @@ fn service_overrides() {
                         "ca-file": "/fizz/buzz"
                     },
                     "proxy": {
-                        "type": "mesh",
-                        "host-and-port": "localhost:5678"
+                        "type": "direct"
                     },
                     "connect-timeout": "13 seconds",
                     "request-timeout": "2 minutes"
@@ -130,11 +129,7 @@ fn service_overrides() {
                 .ca_file(Some("/fizz/buzz".into()))
                 .build(),
         )
-        .proxy(ProxyConfig::Mesh(
-            MeshProxyConfig::builder()
-                .host_and_port(HostAndPort::new("localhost", 5678))
-                .build(),
-        ))
+        .proxy(ProxyConfig::Direct)
         .connect_timeout(Duration::from_secs(13))
         .request_timeout(Duration::from_secs(2 * 60))
         .build();
