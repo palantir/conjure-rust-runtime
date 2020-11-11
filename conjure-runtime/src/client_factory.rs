@@ -14,7 +14,10 @@
 use crate::blocking;
 use crate::client::ClientState;
 use crate::config::{ServiceConfig, ServicesConfig};
-use crate::{Client, HostMetricsRegistry, Idempotency, ServerQos, ServiceError, UserAgent};
+use crate::{
+    Client, HostMetricsRegistry, Idempotency, NodeSelectionStrategy, ServerQos, ServiceError,
+    UserAgent,
+};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
 use refreshable::Refreshable;
@@ -31,6 +34,7 @@ pub struct ClientFactory {
     server_qos: Option<ServerQos>,
     service_error: Option<ServiceError>,
     idempotency: Option<Idempotency>,
+    node_selection_strategy: Option<NodeSelectionStrategy>,
 }
 
 impl ClientFactory {
@@ -44,6 +48,7 @@ impl ClientFactory {
             server_qos: None,
             service_error: None,
             idempotency: None,
+            node_selection_strategy: None,
         }
     }
 
@@ -81,6 +86,17 @@ impl ClientFactory {
         self
     }
 
+    /// Sets the clients' strategy for selecting a node for a request.
+    ///
+    /// Defaults to `NodeSelectionStrategy::PinUntilError`.
+    pub fn node_selection_strategy(
+        &mut self,
+        node_selection_strategy: NodeSelectionStrategy,
+    ) -> &mut Self {
+        self.node_selection_strategy = Some(node_selection_strategy);
+        self
+    }
+
     /// Sets the metric registry used to register client metrics.
     ///
     /// Defaults to no registry.
@@ -99,9 +115,9 @@ impl ClientFactory {
 
     /// Creates a new client for the specified service.
     ///
-    /// The client's configuration will automatically refresh to track changes in the factory's `ServicesConfiguration`.
+    /// The client's configuration will automatically refresh to track changes in the factory's `ServicesConfig`.
     ///
-    /// If no configuration is present for the specified service in the `ServicesConfiguration`, the client will
+    /// If no configuration is present for the specified service in the `ServicesConfig`, the client will
     /// immediately return an error for all requests.
     pub fn client(&self, service: &str) -> Result<Client, Error> {
         let service_config = self.config.map({
@@ -115,6 +131,7 @@ impl ClientFactory {
         let server_qos = self.server_qos;
         let service_error = self.service_error;
         let idempotency = self.idempotency;
+        let node_selection_strategy = self.node_selection_strategy;
 
         let make_state = move |config: &ServiceConfig| {
             let mut builder = Client::builder();
@@ -137,6 +154,9 @@ impl ClientFactory {
             if let Some(idempotency) = idempotency {
                 builder.idempotency(idempotency);
             }
+            if let Some(node_selection_strategy) = node_selection_strategy {
+                builder.node_selection_strategy(node_selection_strategy);
+            }
 
             ClientState::new(&builder)
         };
@@ -158,9 +178,9 @@ impl ClientFactory {
 
     /// Creates a new blocking client for the specified service.
     ///
-    /// The client's configuration will automatically refresh to track changes in the factory's `ServicesConfiguration`.
+    /// The client's configuration will automatically refresh to track changes in the factory's `ServicesConfig`.
     ///
-    /// If no configuration is present for the specified service in the `ServicesConfiguration`, the client will
+    /// If no configuration is present for the specified service in the `ServicesConfig`, the client will
     /// immediately return an error for all requests.
     pub fn blocking_client(&self, service: &str) -> Result<blocking::Client, Error> {
         self.client(service).map(blocking::Client)

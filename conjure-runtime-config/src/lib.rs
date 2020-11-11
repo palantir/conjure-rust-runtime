@@ -60,8 +60,6 @@ pub struct ServicesConfig {
     request_timeout: Option<Duration>,
     #[serde(deserialize_with = "de_opt_duration")]
     backoff_slot_size: Option<Duration>,
-    #[serde(deserialize_with = "de_opt_duration")]
-    failed_url_cooldown: Option<Duration>,
 }
 
 impl ServicesConfig {
@@ -94,10 +92,6 @@ impl ServicesConfig {
             service.backoff_slot_size = self.backoff_slot_size;
         }
 
-        if service.failed_url_cooldown.is_none() {
-            service.failed_url_cooldown = self.failed_url_cooldown;
-        }
-
         Some(service)
     }
 
@@ -124,11 +118,6 @@ impl ServicesConfig {
     /// Returns the backoff slot size.
     pub fn backoff_slot_size(&self) -> Option<Duration> {
         self.backoff_slot_size
-    }
-
-    /// Returns the failed URL cooldown.
-    pub fn failed_url_cooldown(&self) -> Option<Duration> {
-        self.failed_url_cooldown
     }
 }
 
@@ -184,12 +173,6 @@ impl ServicesConfigBuilder {
         self
     }
 
-    /// Sets the failed URL cooldown.
-    pub fn failed_url_cooldown(&mut self, failed_url_cooldown: Duration) -> &mut Self {
-        self.0.failed_url_cooldown = Some(failed_url_cooldown);
-        self
-    }
-
     /// Creates a new `ServicesConfig`.
     pub fn build(&self) -> ServicesConfig {
         self.0.clone()
@@ -209,8 +192,6 @@ pub struct ServiceConfig {
     request_timeout: Option<Duration>,
     #[serde(deserialize_with = "de_opt_duration")]
     backoff_slot_size: Option<Duration>,
-    #[serde(deserialize_with = "de_opt_duration")]
-    failed_url_cooldown: Option<Duration>,
     max_num_retries: Option<u32>,
 }
 
@@ -248,11 +229,6 @@ impl ServiceConfig {
     /// Returns the backoff slot size.
     pub fn backoff_slot_size(&self) -> Option<Duration> {
         self.backoff_slot_size
-    }
-
-    /// Returns the failed URL cooldown.
-    pub fn failed_url_cooldown(&self) -> Option<Duration> {
-        self.failed_url_cooldown
     }
 
     /// Returns the maximum number of retries for failed RPCs.
@@ -311,12 +287,6 @@ impl ServiceConfigBuilder {
     /// Sets the backoff slot size.
     pub fn backoff_slot_size(&mut self, backoff_slot_size: Duration) -> &mut Self {
         self.0.backoff_slot_size = Some(backoff_slot_size);
-        self
-    }
-
-    /// Sets the failed URL cooldown.
-    pub fn failed_url_cooldown(&mut self, failed_url_cooldown: Duration) -> &mut Self {
-        self.0.failed_url_cooldown = Some(failed_url_cooldown);
         self
     }
 

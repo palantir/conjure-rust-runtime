@@ -33,11 +33,11 @@ pub struct Builder<T = DefaultRawClientBuilder> {
     connect_timeout: Duration,
     request_timeout: Duration,
     backoff_slot_size: Duration,
-    failed_url_cooldown: Duration,
     max_num_retries: u32,
     server_qos: ServerQos,
     service_error: ServiceError,
     idempotency: Idempotency,
+    node_selection_strategy: NodeSelectionStrategy,
     metrics: Option<Arc<MetricRegistry>>,
     host_metrics: Option<Arc<HostMetricsRegistry>>,
     raw_client_builder: T,
@@ -61,11 +61,11 @@ impl Builder {
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(5 * 60),
             backoff_slot_size: Duration::from_millis(250),
-            failed_url_cooldown: Duration::from_millis(250),
             max_num_retries: 3,
             server_qos: ServerQos::AutomaticRetry,
             service_error: ServiceError::WrapInNewError,
             idempotency: Idempotency::ByMethod,
+            node_selection_strategy: NodeSelectionStrategy::PinUntilError,
             metrics: None,
             host_metrics: None,
             raw_client_builder: DefaultRawClientBuilder,
@@ -96,10 +96,6 @@ impl<T> Builder<T> {
 
         if let Some(backoff_slot_size) = config.backoff_slot_size() {
             self.backoff_slot_size(backoff_slot_size);
-        }
-
-        if let Some(failed_url_cooldown) = config.failed_url_cooldown() {
-            self.failed_url_cooldown(failed_url_cooldown);
         }
 
         if let Some(max_num_retries) = config.max_num_retries() {
@@ -242,21 +238,6 @@ impl<T> Builder<T> {
         self.max_num_retries
     }
 
-    /// Sets the cooldown applied to a node after it fails to respond successfully to a request.
-    ///
-    /// The node will be skipped while on cooldown unless no other nodes are available.
-    ///
-    /// Defaults to 250 milliseconds.
-    pub fn failed_url_cooldown(&mut self, failed_url_cooldown: Duration) -> &mut Self {
-        self.failed_url_cooldown = failed_url_cooldown;
-        self
-    }
-
-    /// Returns the builder's configured failed URL cooldown.
-    pub fn get_failed_url_cooldown(&self) -> Duration {
-        self.failed_url_cooldown
-    }
-
     /// Sets the client's behavior in response to a QoS error from the server.
     ///
     /// Defaults to `ServerQos::AutomaticRetry`.
@@ -298,6 +279,22 @@ impl<T> Builder<T> {
         self.idempotency
     }
 
+    /// Sets the client's strategy for selecting a node for a request.
+    ///
+    /// Defaults to `NodeSelectionStrategy::PinUntilError`.
+    pub fn node_selection_strategy(
+        &mut self,
+        node_selection_strategy: NodeSelectionStrategy,
+    ) -> &mut Self {
+        self.node_selection_strategy = node_selection_strategy;
+        self
+    }
+
+    /// Returns the builder's configured node selection strategy.
+    pub fn get_node_selection_strategy(&self) -> NodeSelectionStrategy {
+        self.node_selection_strategy
+    }
+
     /// Sets the metric registry used to register client metrics.
     ///
     /// Defaults to no registry.
@@ -337,11 +334,11 @@ impl<T> Builder<T> {
             connect_timeout: self.connect_timeout,
             request_timeout: self.request_timeout,
             backoff_slot_size: self.backoff_slot_size,
-            failed_url_cooldown: self.failed_url_cooldown,
             max_num_retries: self.max_num_retries,
             server_qos: self.server_qos,
             service_error: self.service_error,
             idempotency: self.idempotency,
+            node_selection_strategy: self.node_selection_strategy,
             metrics: self.metrics,
             host_metrics: self.host_metrics,
             raw_client_builder,
@@ -432,4 +429,24 @@ pub enum Idempotency {
 
     /// No requests are assumed to be idempotent.
     Never,
+}
+
+/// Specifies the strategy used to select a node of a service to use for a request attempt.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NodeSelectionStrategy {
+    /// Pin to a single host as long as it continues to successfully respond to requests.
+    ///
+    /// If the pinned node fails to successfully respond, the client will rotate through the other nodes until it finds
+    /// one that can successfully respond and then pin to that new node. The pinned node will also be randomly rotated
+    /// periodically to help spread load across the cluster.
+    ///
+    /// This is the default behavior.
+    PinUntilError,
+
+    /// Like `PinUntilError` except that the pinned node is never randomly shuffled.
+    PinUntilErrorWithoutReshuffle,
+
+    /// For each new request, select the "next" node (in some unspecified order).
+    Balanced,
 }
