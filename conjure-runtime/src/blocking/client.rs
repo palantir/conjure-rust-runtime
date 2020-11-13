@@ -20,8 +20,13 @@ use http::Method;
 ///
 /// It implements the Conjure `Client` trait, but also offers a "raw" request interface for use with services that don't
 /// provide Conjure service definitions.
-#[derive(Clone)]
 pub struct Client<T = DefaultRawClient>(pub(crate) crate::Client<T>);
+
+impl<T> Clone for Client<T> {
+    fn clone(&self) -> Self {
+        Client(self.0.clone())
+    }
+}
 
 impl Client {
     /// Returns a new `Builder` for clients.

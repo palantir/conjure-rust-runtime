@@ -11,13 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
+use crate::service::Layer;
 use crate::UserAgent;
 use http::header::USER_AGENT;
 use http::{HeaderValue, Request};
 use std::convert::TryFrom;
-use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 
 /// A layer which injects a `User-Agent` header into requests.
 pub struct UserAgentLayer {
@@ -37,10 +36,10 @@ impl UserAgentLayer {
 impl<S> Layer<S> for UserAgentLayer {
     type Service = UserAgentService<S>;
 
-    fn layer(&self, inner: S) -> Self::Service {
+    fn layer(self, inner: S) -> Self::Service {
         UserAgentService {
             inner,
-            user_agent: self.user_agent.clone(),
+            user_agent: self.user_agent,
         }
     }
 }
@@ -58,11 +57,7 @@ where
     type Error = S::Error;
     type Future = S::Future;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: Request<B>) -> Self::Future {
+    fn call(&self, mut req: Request<B>) -> Self::Future {
         req.headers_mut()
             .insert(USER_AGENT, self.user_agent.clone());
 
@@ -73,17 +68,17 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::service;
     use crate::user_agent::Agent;
     use http::HeaderMap;
-    use tower::ServiceExt;
 
     #[tokio::test]
     async fn basic() {
         let user_agent = UserAgent::new(Agent::new("foobar", "1.0.0"));
         let layer = UserAgentLayer::new(&user_agent);
-        let service = layer.layer(tower::service_fn(|req| async { Ok::<_, ()>(req) }));
+        let service = layer.layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
-        let out = service.oneshot(Request::new(())).await.unwrap();
+        let out = service.call(Request::new(())).await.unwrap();
 
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("foobar/1.0.0"));

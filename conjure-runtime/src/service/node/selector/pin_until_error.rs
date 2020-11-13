@@ -11,7 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
 use crate::service::node::Node;
+use crate::service::Layer;
 use arc_swap::ArcSwap;
 use futures::ready;
 use http::{Request, Response};
@@ -25,8 +27,6 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::time::{Duration, Instant};
-use tower::layer::Layer;
-use tower::Service;
 
 // we reshuffle nodes every 10 minutes on average, with 30 seconds of jitter to either side
 const RESHUFFLE_EVERY: Duration = Duration::from_secs(10 * 60 - 30);
@@ -196,9 +196,9 @@ where
 impl<T, S> Layer<S> for PinUntilErrorNodeSelectorLayer<T> {
     type Service = PinUntilErrorNodeSelectorService<T, S>;
 
-    fn layer(&self, inner: S) -> Self::Service {
+    fn layer(self, inner: S) -> Self::Service {
         PinUntilErrorNodeSelectorService {
-            state: self.state.clone(),
+            state: self.state,
             inner,
         }
     }
@@ -218,11 +218,7 @@ where
     type Error = S::Error;
     type Future = PinUntilErrorNodeSelectorFuture<T, S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: Request<B1>) -> Self::Future {
+    fn call(&self, mut req: Request<B1>) -> Self::Future {
         let pin = self.state.current_pin.load(Ordering::SeqCst);
         let node = self.state.nodes.get(pin);
         req.extensions_mut().insert(node);
@@ -277,6 +273,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::service;
     use http::StatusCode;
     use tokio::time;
 
@@ -342,13 +339,13 @@ mod test {
 
     #[tokio::test]
     async fn pin_on_success() {
-        let mut service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
+        let service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
             nodes: vec![
                 Arc::new(Node::test("http://a/")),
                 Arc::new(Node::test("http://a/")),
             ],
         })
-        .layer(tower::service_fn(|req: Request<()>| async move {
+        .layer(service::service_fn(|req: Request<()>| async move {
             assert_eq!(
                 req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
                 "http://a/"
@@ -363,13 +360,13 @@ mod test {
 
     #[tokio::test]
     async fn pin_on_4xx() {
-        let mut service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
+        let service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
             nodes: vec![
                 Arc::new(Node::test("http://a/")),
                 Arc::new(Node::test("http://b/")),
             ],
         })
-        .layer(tower::service_fn(|req: Request<()>| async move {
+        .layer(service::service_fn(|req: Request<()>| async move {
             assert_eq!(
                 req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
                 "http://a/"
@@ -389,32 +386,34 @@ mod test {
 
     #[tokio::test]
     async fn rotate_on_io_error() {
-        let mut attempt = 0;
-        let mut service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
+        let service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
             nodes: vec![
                 Arc::new(Node::test("http://a/")),
                 Arc::new(Node::test("http://b/")),
             ],
         })
-        .layer(tower::service_fn(move |req: Request<()>| {
-            attempt += 1;
-            async move {
-                match attempt {
-                    1 => {
-                        assert_eq!(
-                            req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
-                            "http://a/"
-                        );
-                        Err(())
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |req: Request<()>| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    match attempt {
+                        0 => {
+                            assert_eq!(
+                                req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
+                                "http://a/"
+                            );
+                            Err(())
+                        }
+                        1 => {
+                            assert_eq!(
+                                req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
+                                "http://b/"
+                            );
+                            Ok(Response::new(()))
+                        }
+                        _ => unreachable!(),
                     }
-                    2 => {
-                        assert_eq!(
-                            req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
-                            "http://b/"
-                        );
-                        Ok(Response::new(()))
-                    }
-                    _ => unreachable!(),
                 }
             }
         }));
@@ -425,37 +424,39 @@ mod test {
 
     #[tokio::test]
     async fn rotate_on_5xx() {
-        let mut attempt = 0;
-        let mut service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
+        let service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
             nodes: vec![
                 Arc::new(Node::test("http://a/")),
                 Arc::new(Node::test("http://b/")),
             ],
         })
-        .layer(tower::service_fn(move |req: Request<()>| {
-            attempt += 1;
-            async move {
-                match attempt {
-                    1 => {
-                        assert_eq!(
-                            req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
-                            "http://a/"
-                        );
-                        Ok::<_, ()>(
-                            Response::builder()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .body(())
-                                .unwrap(),
-                        )
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |req: Request<()>| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    match attempt {
+                        0 => {
+                            assert_eq!(
+                                req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
+                                "http://a/"
+                            );
+                            Ok::<_, ()>(
+                                Response::builder()
+                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                    .body(())
+                                    .unwrap(),
+                            )
+                        }
+                        1 => {
+                            assert_eq!(
+                                req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
+                                "http://b/"
+                            );
+                            Ok(Response::new(()))
+                        }
+                        _ => unreachable!(),
                     }
-                    2 => {
-                        assert_eq!(
-                            req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
-                            "http://b/"
-                        );
-                        Ok(Response::new(()))
-                    }
-                    _ => unreachable!(),
                 }
             }
         }));

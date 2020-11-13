@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
+use crate::service::Layer;
 use async_compression::stream::GzipDecoder;
 use bytes::Bytes;
 use futures::{ready, Stream};
@@ -24,8 +26,6 @@ use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 
 static GZIP: Lazy<HeaderValue> = Lazy::new(|| HeaderValue::from_static("gzip"));
 
@@ -38,7 +38,7 @@ pub struct GzipLayer;
 impl<S> Layer<S> for GzipLayer {
     type Service = GzipService<S>;
 
-    fn layer(&self, inner: S) -> GzipService<S> {
+    fn layer(self, inner: S) -> GzipService<S> {
         GzipService { inner }
     }
 }
@@ -57,11 +57,7 @@ where
     type Error = S::Error;
     type Future = GzipFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: Request<B1>) -> Self::Future {
+    fn call(&self, mut req: Request<B1>) -> Self::Future {
         if let Entry::Vacant(e) = req.headers_mut().entry(ACCEPT_ENCODING) {
             e.insert(GZIP.clone());
         }
@@ -194,17 +190,17 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::service;
     use flate2::write::GzEncoder;
     use flate2::Compression;
     use hyper::body;
     use std::io::Write;
-    use tower::ServiceExt;
 
     #[tokio::test]
     async fn uncompressed() {
         let body = "hello world";
 
-        let service = GzipLayer.layer(tower::service_fn(|req: Request<()>| async move {
+        let service = GzipLayer.layer(service::service_fn(|req: Request<()>| async move {
             assert_eq!(req.headers().get(ACCEPT_ENCODING).unwrap(), "gzip");
 
             let response = Response::builder()
@@ -214,7 +210,7 @@ mod test {
             Ok::<_, hyper::Error>(response)
         }));
 
-        let response = service.oneshot(Request::new(())).await.unwrap();
+        let response = service.call(Request::new(())).await.unwrap();
 
         assert_eq!(
             response.headers().get(CONTENT_LENGTH).unwrap(),
@@ -230,7 +226,7 @@ mod test {
     async fn compressed() {
         let body = "hello world";
 
-        let service = GzipLayer.layer(tower::service_fn(|req: Request<()>| async move {
+        let service = GzipLayer.layer(service::service_fn(|req: Request<()>| async move {
             assert_eq!(req.headers().get(ACCEPT_ENCODING).unwrap(), "gzip");
 
             let mut writer = GzEncoder::new(vec![], Compression::default());
@@ -245,7 +241,7 @@ mod test {
             Ok::<_, hyper::Error>(response)
         }));
 
-        let response = service.oneshot(Request::new(())).await.unwrap();
+        let response = service.call(Request::new(())).await.unwrap();
 
         assert_eq!(response.headers().get(CONTENT_LENGTH), None);
         assert_eq!(response.headers().get(CONTENT_ENCODING), None);
@@ -259,7 +255,7 @@ mod test {
         let body = "hello world";
         let encoding = "br";
 
-        let service = GzipLayer.layer(tower::service_fn(|req: Request<()>| async move {
+        let service = GzipLayer.layer(service::service_fn(|req: Request<()>| async move {
             assert_eq!(req.headers().get(ACCEPT_ENCODING).unwrap(), encoding);
 
             let response = Response::builder()
@@ -274,7 +270,7 @@ mod test {
             .header(ACCEPT_ENCODING, encoding)
             .body(())
             .unwrap();
-        let response = service.oneshot(request).await.unwrap();
+        let response = service.call(request).await.unwrap();
 
         assert_eq!(
             response.headers().get(CONTENT_LENGTH).unwrap(),

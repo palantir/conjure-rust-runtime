@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
 use crate::raw::{DefaultRawClient, RawBody};
 use crate::{Body, Client, ResetTrackingBody, Response};
 use bytes::Bytes;
@@ -24,7 +25,6 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::error;
 use std::pin::Pin;
-use tower::Service;
 
 static DEFAULT_ACCEPT: Lazy<HeaderValue> = Lazy::new(|| HeaderValue::from_static("*/*"));
 
@@ -115,7 +115,7 @@ impl<'a, T> RequestBuilder<'a, T> {
 
 impl<'a, T, B> RequestBuilder<'a, T>
 where
-    T: Service<http::Request<RawBody>, Response = http::Response<B>> + Clone + 'static + Send,
+    T: Service<http::Request<RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
     B: http_body::Body<Data = Bytes> + Send,

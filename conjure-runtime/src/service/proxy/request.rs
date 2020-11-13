@@ -11,13 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
 use crate::service::proxy::ProxyConfig;
+use crate::service::Layer;
 use http::header::PROXY_AUTHORIZATION;
 use http::uri::Scheme;
 use http::Request;
-use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 
 /// A layer which adjusts an HTTP request as necessary to respect proxy settings.
 ///
@@ -40,10 +39,10 @@ impl ProxyLayer {
 impl<S> Layer<S> for ProxyLayer {
     type Service = ProxyService<S>;
 
-    fn layer(&self, inner: S) -> Self::Service {
+    fn layer(self, inner: S) -> Self::Service {
         ProxyService {
             inner,
-            config: self.config.clone(),
+            config: self.config,
         }
     }
 }
@@ -61,11 +60,7 @@ where
     type Error = S::Error;
     type Future = S::Future;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: Request<B>) -> Self::Future {
+    fn call(&self, mut req: Request<B>) -> Self::Future {
         match &self.config {
             ProxyConfig::Http(config) => {
                 if req.uri().scheme() == Some(&Scheme::HTTP) {
@@ -86,8 +81,8 @@ where
 mod test {
     use super::*;
     use crate::config::{self, BasicCredentials, HostAndPort, HttpProxyConfig};
+    use crate::service;
     use http::{HeaderMap, HeaderValue};
-    use tower::ServiceExt;
 
     #[tokio::test]
     async fn http_proxied_http() {
@@ -100,13 +95,13 @@ mod test {
         .unwrap();
 
         let service =
-            ProxyLayer::new(&config).layer(tower::service_fn(|req| async { Ok::<_, ()>(req) }));
+            ProxyLayer::new(&config).layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
         let req = Request::builder()
             .uri("http://foobar.com/fizz/buzz")
             .body(())
             .unwrap();
-        let out = service.oneshot(req).await.unwrap();
+        let out = service.call(req).await.unwrap();
 
         assert_eq!(out.uri(), "http://foobar.com/fizz/buzz");
 
@@ -129,13 +124,13 @@ mod test {
         .unwrap();
 
         let service =
-            ProxyLayer::new(&config).layer(tower::service_fn(|req| async { Ok::<_, ()>(req) }));
+            ProxyLayer::new(&config).layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
         let req = Request::builder()
             .uri("https://foobar.com/fizz/buzz")
             .body(())
             .unwrap();
-        let out = service.oneshot(req).await.unwrap();
+        let out = service.call(req).await.unwrap();
 
         assert_eq!(out.uri(), "https://foobar.com/fizz/buzz");
 
@@ -148,13 +143,13 @@ mod test {
         let config = ProxyConfig::from_config(&config::ProxyConfig::Direct).unwrap();
 
         let service =
-            ProxyLayer::new(&config).layer(tower::service_fn(|req| async { Ok::<_, ()>(req) }));
+            ProxyLayer::new(&config).layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
         let req = Request::builder()
             .uri("https://foobar.com/fizz/buzz")
             .body(())
             .unwrap();
-        let out = service.oneshot(req).await.unwrap();
+        let out = service.call(req).await.unwrap();
 
         assert_eq!(out.uri(), "https://foobar.com/fizz/buzz");
 

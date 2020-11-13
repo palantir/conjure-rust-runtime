@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
 use crate::service::node::selector::balanced::{
     BalancedNodeSelectorFuture, BalancedNodeSelectorLayer, BalancedNodeSelectorService,
 };
@@ -25,6 +26,7 @@ use crate::service::node::selector::single::{
     SingleNodeSelectorFuture, SingleNodeSelectorLayer, SingleNodeSelectorService,
 };
 use crate::service::node::Node;
+use crate::service::Layer;
 use crate::{Builder, NodeSelectionStrategy};
 use conjure_error::Error;
 use http::{Request, Response};
@@ -33,8 +35,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 
 mod balanced;
 mod empty;
@@ -101,7 +101,7 @@ impl NodeSelectorLayer {
 impl<S> Layer<S> for NodeSelectorLayer {
     type Service = NodeSelectorService<S>;
 
-    fn layer(&self, inner: S) -> Self::Service {
+    fn layer(self, inner: S) -> Self::Service {
         match self {
             NodeSelectorLayer::Empty(l) => NodeSelectorService::Empty(l.layer(inner)),
             NodeSelectorLayer::Single(l) => NodeSelectorService::Single(l.layer(inner)),
@@ -132,17 +132,7 @@ where
     type Error = S::Error;
     type Future = NodeSelectorFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        match self {
-            NodeSelectorService::Empty(s) => s.poll_ready(cx),
-            NodeSelectorService::Single(s) => s.poll_ready(cx),
-            NodeSelectorService::PinUntilError(s) => s.poll_ready(cx),
-            NodeSelectorService::PinUntilErrorWithoutReshuffle(s) => s.poll_ready(cx),
-            NodeSelectorService::Balanced(s) => s.poll_ready(cx),
-        }
-    }
-
-    fn call(&mut self, req: Request<B1>) -> Self::Future {
+    fn call(&self, req: Request<B1>) -> Self::Future {
         match self {
             NodeSelectorService::Empty(s) => NodeSelectorFuture::Empty(s.call(req)),
             NodeSelectorService::Single(s) => NodeSelectorFuture::Single(s.call(req)),

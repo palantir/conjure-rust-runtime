@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::blocking::{runtime, Body, BodyShim, BodyStreamer, Client, Response};
+use crate::raw::Service;
 use crate::raw::{DefaultRawClient, RawBody};
 use crate::Request;
 use bytes::Bytes;
@@ -25,7 +26,6 @@ use std::error;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::Service;
 use zipkin::TraceContext;
 
 /// A builder for a blocking HTTP request.
@@ -119,11 +119,7 @@ impl<'a, T> RequestBuilder<'a, T> {
 
 impl<'a, T, B> RequestBuilder<'a, T>
 where
-    T: Service<http::Request<RawBody>, Response = http::Response<B>>
-        + Clone
-        + 'static
-        + Sync
-        + Send,
+    T: Service<http::Request<RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
     B: http_body::Body<Data = Bytes> + 'static + Send,

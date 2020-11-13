@@ -11,8 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
 use crate::service::node::selector::balanced::reservoir::CoarseExponentialDecayReservoir;
 use crate::service::node::Node;
+use crate::service::Layer;
 use futures::ready;
 use http::{Request, Response};
 use pin_project::{pin_project, pinned_drop};
@@ -23,8 +25,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tower::layer::Layer;
-use tower::Service;
 
 mod reservoir;
 
@@ -106,9 +106,9 @@ where
 impl<T, S> Layer<S> for BalancedNodeSelectorLayer<T> {
     type Service = BalancedNodeSelectorService<S, T>;
 
-    fn layer(&self, inner: S) -> Self::Service {
+    fn layer(self, inner: S) -> Self::Service {
         BalancedNodeSelectorService {
-            state: self.state.clone(),
+            state: self.state,
             inner,
         }
     }
@@ -128,11 +128,7 @@ where
     type Error = S::Error;
     type Future = BalancedNodeSelectorFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: Request<B1>) -> Self::Future {
+    fn call(&self, mut req: Request<B1>) -> Self::Future {
         let mut nodes = self
             .state
             .nodes
@@ -199,6 +195,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::service;
     use futures::future;
     use http::StatusCode;
     use std::collections::HashMap;
@@ -222,14 +219,14 @@ mod test {
 
     #[tokio::test]
     async fn when_one_channel_is_in_use_prefer_the_other() {
-        let mut service = BalancedNodeSelectorLayer::with_entropy(
+        let service = BalancedNodeSelectorLayer::with_entropy(
             vec![
                 Arc::new(Node::test("http://a/")),
                 Arc::new(Node::test("http://b/")),
             ],
             TestEntropy::new(),
         )
-        .layer(tower::service_fn(|req: Request<()>| async move {
+        .layer(service::service_fn(|req: Request<()>| async move {
             match req.extensions().get::<Arc<Node>>().unwrap().url.as_str() {
                 "http://a/" => future::pending().await,
                 "http://b/" => Ok::<_, ()>(Response::new(())),
@@ -246,14 +243,14 @@ mod test {
 
     #[tokio::test]
     async fn when_both_channels_are_free_we_get_roughly_fair_tiebreaking() {
-        let mut service = BalancedNodeSelectorLayer::with_entropy(
+        let service = BalancedNodeSelectorLayer::with_entropy(
             vec![
                 Arc::new(Node::test("http://a/")),
                 Arc::new(Node::test("http://b/")),
             ],
             TestEntropy::new(),
         )
-        .layer(tower::service_fn(|req: Request<()>| async move {
+        .layer(service::service_fn(|req: Request<()>| async move {
             Ok::<_, ()>(Response::new(
                 req.extensions()
                     .get::<Arc<Node>>()
@@ -279,15 +276,15 @@ mod test {
 
     #[tokio::test]
     async fn a_single_4xx_doesnt_move_the_needle() {
-        let mut service = BalancedNodeSelectorLayer::with_entropy(
+        let service = BalancedNodeSelectorLayer::with_entropy(
             vec![
                 Arc::new(Node::test("http://a/")),
                 Arc::new(Node::test("http://b/")),
             ],
             TestEntropy::new(),
         )
-        .layer(tower::service_fn({
-            let mut i = 0;
+        .layer(service::service_fn({
+            let i = AtomicUsize::new(0);
             move |req: Request<()>| {
                 let mut response = Response::new(
                     req.extensions()
@@ -297,10 +294,9 @@ mod test {
                         .as_str()
                         .to_string(),
                 );
-                if i == 0 {
+                if i.fetch_add(1, Ordering::SeqCst) == 0 {
                     *response.status_mut() = StatusCode::BAD_REQUEST;
                 }
-                i += 1;
 
                 async move { Ok::<_, ()>(response) }
             }
@@ -334,14 +330,14 @@ mod test {
 
     #[tokio::test]
     async fn constant_4xxs_do_eventually_move_the_needle_but_we_go_back_to_fair_distribution() {
-        let mut service = BalancedNodeSelectorLayer::with_entropy(
+        let service = BalancedNodeSelectorLayer::with_entropy(
             vec![
                 Arc::new(Node::test("http://a/")),
                 Arc::new(Node::test("http://b/")),
             ],
             TestEntropy::new(),
         )
-        .layer(tower::service_fn(|req: Request<()>| async move {
+        .layer(service::service_fn(|req: Request<()>| async move {
             let status = match req.extensions().get::<Arc<Node>>().unwrap().url.as_str() {
                 "http://a/" => StatusCode::BAD_REQUEST,
                 "http://b/" => StatusCode::OK,

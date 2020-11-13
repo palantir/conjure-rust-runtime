@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
+use crate::service::Layer;
 use conjure_error::Error;
 use pin_project::pin_project;
 use std::error;
@@ -18,8 +20,6 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
 
 #[derive(Debug)]
 pub struct RawClientError(pub Box<dyn error::Error + Sync + Send>);
@@ -43,7 +43,7 @@ pub struct MapErrorLayer;
 impl<S> Layer<S> for MapErrorLayer {
     type Service = MapErrorService<S>;
 
-    fn layer(&self, inner: S) -> MapErrorService<S> {
+    fn layer(self, inner: S) -> MapErrorService<S> {
         MapErrorService { inner }
     }
 }
@@ -61,13 +61,7 @@ where
     type Response = S::Response;
     type Future = MapErrorFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        self.inner
-            .poll_ready(cx)
-            .map_err(|e| Error::internal_safe(RawClientError(e.into())))
-    }
-
-    fn call(&mut self, req: R) -> Self::Future {
+    fn call(&self, req: R) -> Self::Future {
         MapErrorFuture {
             future: self.inner.call(req),
         }

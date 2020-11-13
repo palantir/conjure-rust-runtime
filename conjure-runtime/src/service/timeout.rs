@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::TimeoutError;
+use crate::raw::Service;
+use crate::service::Layer;
 use conjure_error::Error;
 use futures::ready;
 use http::{HeaderMap, Response};
@@ -23,8 +25,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::time::{self, Delay};
-use tower::layer::Layer;
-use tower::Service;
 
 /// A layer which applies a timeout to an inner service's request, including the time waiting for ready.
 pub struct TimeoutLayer {
@@ -40,11 +40,10 @@ impl TimeoutLayer {
 impl<S> Layer<S> for TimeoutLayer {
     type Service = TimeoutService<S>;
 
-    fn layer(&self, inner: S) -> Self::Service {
+    fn layer(self, inner: S) -> Self::Service {
         TimeoutService {
             inner,
             timeout: self.timeout,
-            delay: None,
         }
     }
 }
@@ -52,7 +51,6 @@ impl<S> Layer<S> for TimeoutLayer {
 pub struct TimeoutService<S> {
     inner: S,
     timeout: Duration,
-    delay: Option<Delay>,
 }
 
 impl<S, R, B> Service<R> for TimeoutService<S>
@@ -64,20 +62,10 @@ where
     type Error = Error;
     type Future = TimeoutFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        let timeout = self.timeout;
-        let delay = self.delay.get_or_insert_with(|| time::delay_for(timeout));
-        if Pin::new(delay).poll(cx).is_ready() {
-            return Poll::Ready(Err(Error::internal_safe(TimeoutError(()))));
-        }
-
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: R) -> Self::Future {
+    fn call(&self, req: R) -> Self::Future {
         TimeoutFuture {
             future: self.inner.call(req),
-            delay: self.delay.take().expect("call invoked before poll_ready"),
+            delay: time::delay_for(self.timeout),
         }
     }
 }
@@ -172,7 +160,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use tower::ServiceExt;
+    use crate::service;
 
     struct TestBody;
 
@@ -200,11 +188,11 @@ mod test {
         time::pause();
 
         let service =
-            TimeoutLayer::new(Duration::from_secs(1)).layer(tower::service_fn(|_| async move {
+            TimeoutLayer::new(Duration::from_secs(1)).layer(service::service_fn(|_| async move {
                 Ok(Response::new(TestBody))
             }));
 
-        service.oneshot(()).await.unwrap();
+        service.call(()).await.unwrap();
     }
 
     #[tokio::test]
@@ -212,13 +200,13 @@ mod test {
         time::pause();
 
         let service =
-            TimeoutLayer::new(Duration::from_secs(1)).layer(tower::service_fn(|_| async move {
+            TimeoutLayer::new(Duration::from_secs(1)).layer(service::service_fn(|_| async move {
                 time::advance(Duration::from_secs(2)).await;
 
                 Ok(Response::new(TestBody))
             }));
 
-        service.oneshot(()).await.err().unwrap();
+        service.call(()).await.err().unwrap();
     }
 
     #[tokio::test]
@@ -226,11 +214,11 @@ mod test {
         time::pause();
 
         let service =
-            TimeoutLayer::new(Duration::from_secs(1)).layer(tower::service_fn(|_| async move {
+            TimeoutLayer::new(Duration::from_secs(1)).layer(service::service_fn(|_| async move {
                 Ok(Response::new(TestBody))
             }));
 
-        let mut response = service.oneshot(()).await.unwrap();
+        let mut response = service.call(()).await.unwrap();
         assert_eq!(response.data().await.unwrap().unwrap(), b"hello world");
 
         time::advance(Duration::from_secs(2)).await;

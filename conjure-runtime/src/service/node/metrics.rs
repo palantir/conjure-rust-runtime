@@ -11,7 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::raw::Service;
 use crate::service::node::Node;
+use crate::service::Layer;
 use futures::ready;
 use http::{Request, Response};
 use pin_project::pin_project;
@@ -20,8 +22,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
-use tower::layer::Layer;
-use tower::Service;
 
 /// A layer which updates the host metrics for the node stored in the request's extensions map.
 pub struct NodeMetricsLayer;
@@ -29,7 +29,7 @@ pub struct NodeMetricsLayer;
 impl<S> Layer<S> for NodeMetricsLayer {
     type Service = NodeMetricsService<S>;
 
-    fn layer(&self, inner: S) -> NodeMetricsService<S> {
+    fn layer(self, inner: S) -> NodeMetricsService<S> {
         NodeMetricsService { inner }
     }
 }
@@ -46,11 +46,7 @@ where
     type Response = S::Response;
     type Future = NodeMetricsFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: Request<B1>) -> Self::Future {
+    fn call(&self, req: Request<B1>) -> Self::Future {
         let node = req
             .extensions()
             .get::<Arc<Node>>()
