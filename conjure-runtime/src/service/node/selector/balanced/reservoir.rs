@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::util::atomic_f64::AtomicF64;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::time::{Duration, Instant};
 
@@ -79,40 +80,5 @@ impl CoarseExponentialDecayReservoir {
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
                 Some(old * decay_factor().powi(decays))
             });
-    }
-}
-
-struct AtomicF64(AtomicU64);
-
-impl AtomicF64 {
-    fn new(value: f64) -> AtomicF64 {
-        AtomicF64(AtomicU64::new(value.to_bits()))
-    }
-
-    fn load(&self, ordering: Ordering) -> f64 {
-        let v = self.0.load(ordering);
-        f64::from_bits(v)
-    }
-
-    fn fetch_update<F>(
-        &self,
-        set_order: Ordering,
-        fetch_order: Ordering,
-        mut f: F,
-    ) -> Result<f64, f64>
-    where
-        F: FnMut(f64) -> Option<f64>,
-    {
-        self.0
-            .fetch_update(set_order, fetch_order, |v| {
-                f(f64::from_bits(v)).map(f64::to_bits)
-            })
-            .map(f64::from_bits)
-            .map_err(f64::from_bits)
-    }
-
-    fn fetch_add(&self, n: f64, ordering: Ordering) -> f64 {
-        self.fetch_update(ordering, ordering, |old| Some(old + n))
-            .unwrap()
     }
 }

@@ -217,6 +217,7 @@ mod service;
 #[cfg(test)]
 mod test;
 mod user_agent;
+mod util;
 
 /// Client configuration.
 ///
