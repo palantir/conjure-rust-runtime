@@ -9,7 +9,7 @@ repository = "https://github.com/palantir/conjure-rust-runtime"
 readme = "../README.md"
 
 [dependencies]
-arc-swap = "0.4"
+arc-swap = "1.0"
 async-compression = { version = "0.3", default-features = false, features = ["zlib", "gzip", "stream"] }
 async-trait = "0.1"
 base64 = "0.13"
