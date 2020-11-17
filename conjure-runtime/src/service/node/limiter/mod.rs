@@ -11,11 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::service::map_error::RawClientError;
 use crate::service::node::limiter::deficit_semaphore::DeficitSemaphore;
 use crate::util::atomic_f64::AtomicF64;
+use conjure_error::Error;
 use futures::ready;
+use http::{Response, StatusCode};
 use pin_project::pin_project;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -28,22 +32,27 @@ const BACKOFF_RATIO: f64 = 0.9;
 const MIN_LIMIT: usize = 1;
 const MAX_LIMIT: usize = 1_000_000;
 
-pub struct ConcurrencyLimiter {
+/// An asynchronous concurrency limiter.
+///
+/// The limiter is tagged with a "behavior" which controls how a response from the server affects the limit.
+pub struct ConcurrencyLimiter<B> {
     semaphore: Arc<DeficitSemaphore>,
     limit: AtomicF64,
     in_flight: AtomicUsize,
+    _p: PhantomData<B>,
 }
 
-impl ConcurrencyLimiter {
+impl<B> ConcurrencyLimiter<B> {
     pub fn new() -> Arc<Self> {
         Arc::new(ConcurrencyLimiter {
             semaphore: DeficitSemaphore::new(INITIAL_LIMIT),
             limit: AtomicF64::new(INITIAL_LIMIT as f64),
             in_flight: AtomicUsize::new(0),
+            _p: PhantomData,
         })
     }
 
-    pub fn acquire(self: Arc<Self>) -> Acquire {
+    pub fn acquire(self: Arc<Self>) -> Acquire<B> {
         Acquire {
             future: self.semaphore.clone().acquire(),
             limiter: self,
@@ -78,6 +87,8 @@ impl ConcurrencyLimiter {
                     } else if old_limit > new_limit {
                         self.semaphore.remove_permits(old_limit - new_limit);
                     }
+
+                    return;
                 }
                 Err(limit) => old_limit = limit,
             }
@@ -85,15 +96,60 @@ impl ConcurrencyLimiter {
     }
 }
 
-#[pin_project]
-pub struct Acquire {
-    #[pin]
-    future: deficit_semaphore::Acquire,
-    limiter: Arc<ConcurrencyLimiter>,
+pub trait Behavior {
+    fn on_success<B>(response: &Response<B>) -> Mode;
+
+    fn on_failure(error: &Error) -> Mode;
 }
 
-impl Future for Acquire {
-    type Output = Permit;
+pub enum HostLevel {}
+
+impl Behavior for HostLevel {
+    fn on_success<B>(response: &Response<B>) -> Mode {
+        match response.status() {
+            StatusCode::INTERNAL_SERVER_ERROR | StatusCode::TOO_MANY_REQUESTS => Mode::Ignore,
+            code if code.is_server_error() => Mode::Dropped,
+            _ => Mode::Success,
+        }
+    }
+
+    fn on_failure(error: &Error) -> Mode {
+        if error.cause().is::<RawClientError>() {
+            Mode::Dropped
+        } else {
+            Mode::Ignore
+        }
+    }
+}
+
+pub enum EndpointLevel {}
+
+impl Behavior for EndpointLevel {
+    fn on_success<B>(response: &Response<B>) -> Mode {
+        match response.status() {
+            StatusCode::INTERNAL_SERVER_ERROR | StatusCode::TOO_MANY_REQUESTS => Mode::Dropped,
+            code if code.is_server_error() => Mode::Ignore,
+            _ => Mode::Success,
+        }
+    }
+
+    fn on_failure(_: &Error) -> Mode {
+        Mode::Ignore
+    }
+}
+
+#[pin_project]
+pub struct Acquire<B> {
+    #[pin]
+    future: deficit_semaphore::Acquire,
+    limiter: Arc<ConcurrencyLimiter<B>>,
+}
+
+impl<B> Future for Acquire<B>
+where
+    B: Behavior,
+{
+    type Output = Permit<B>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -109,20 +165,21 @@ impl Future for Acquire {
     }
 }
 
+#[derive(PartialEq, Debug)]
 pub enum Mode {
     Ignore,
     Success,
     Dropped,
 }
 
-pub struct Permit {
-    limiter: Arc<ConcurrencyLimiter>,
+pub struct Permit<B> {
+    limiter: Arc<ConcurrencyLimiter<B>>,
     in_flight_snapshot: usize,
     mode: Mode,
     _permit: deficit_semaphore::Permit,
 }
 
-impl Drop for Permit {
+impl<B> Drop for Permit<B> {
     fn drop(&mut self) {
         self.limiter.in_flight.fetch_sub(1, Ordering::SeqCst);
 
@@ -146,12 +203,86 @@ impl Drop for Permit {
     }
 }
 
-impl Permit {
-    pub fn success(&mut self) {
-        self.mode = Mode::Success;
+impl<B> Permit<B>
+where
+    B: Behavior,
+{
+    pub fn on_response<T>(&mut self, response: &Result<Response<T>, Error>) {
+        self.mode = match response {
+            Ok(response) => B::on_success(response),
+            Err(e) => B::on_failure(e),
+        };
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use futures::FutureExt;
+
+    fn host_limiter() -> Arc<ConcurrencyLimiter<HostLevel>> {
+        ConcurrencyLimiter::new()
     }
 
-    pub fn dropped(&mut self) {
-        self.mode = Mode::Dropped;
+    #[tokio::test]
+    async fn acquire_returns_permits_while_limit_not_reached() {
+        let limiter = host_limiter();
+
+        let max = limiter.limit.load(Ordering::SeqCst);
+        let mut permits = vec![];
+        for _ in 0..max as usize {
+            let permit = limiter.clone().acquire().await;
+            permits.push(permit);
+        }
+
+        // at limit, cannot acquire permit
+        assert!(limiter.clone().acquire().now_or_never().is_none());
+
+        // release one permit, can acquire new permit
+        permits.pop().unwrap();
+        limiter.acquire().await;
+    }
+
+    #[tokio::test]
+    async fn ignore_does_not_change_limits() {
+        let limiter = host_limiter();
+
+        let max = limiter.limit.load(Ordering::SeqCst);
+        let permit = limiter.clone().acquire().await;
+        drop(permit);
+        assert_eq!(limiter.limit.load(Ordering::SeqCst), max);
+    }
+
+    #[tokio::test]
+    async fn dropped_reduces_limit() {
+        let limiter = host_limiter();
+
+        let max = limiter.limit.load(Ordering::SeqCst);
+        let mut permit = limiter.clone().acquire().await;
+        permit.mode = Mode::Dropped;
+        drop(permit);
+        assert_eq!(limiter.limit.load(Ordering::SeqCst), max * 0.9);
+    }
+
+    #[tokio::test]
+    async fn success_increases_limit_if_sufficient_requests_are_in_flight() {
+        let limiter = host_limiter();
+
+        let max = limiter.limit.load(Ordering::SeqCst);
+        let mut permits = vec![];
+        for _ in 0..(max * 0.9) as usize {
+            let permit = limiter.clone().acquire().await;
+            permits.push(permit);
+        }
+
+        let mut permit = limiter.clone().acquire().await;
+        permit.mode = Mode::Success;
+        drop(permit);
+        let new_max = limiter.limit.load(Ordering::SeqCst);
+        assert!(new_max - max > 0. && new_max - max <= 1.);
+
+        drop(permits);
+        let new_new_max = limiter.limit.load(Ordering::SeqCst);
+        assert_eq!(new_max, new_new_max);
     }
 }
