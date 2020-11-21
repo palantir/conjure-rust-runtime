@@ -16,6 +16,7 @@ use crate::errors::{ThrottledError, UnavailableError};
 use crate::raw::Service;
 use crate::raw::{BodyError, RawBody};
 use crate::service::map_error::RawClientError;
+use crate::service::request::Pattern;
 use crate::service::Layer;
 use crate::{Body, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
@@ -161,6 +162,10 @@ where
         *new_req.method_mut() = req.method().clone();
         *new_req.uri_mut() = req.uri().clone();
         *new_req.headers_mut() = req.headers().clone();
+
+        if let Some(pattern) = req.extensions().get::<Pattern>() {
+            new_req.extensions_mut().insert(pattern.clone());
+        }
 
         let parts = new_req.into_parts().0;
         Request::from_parts(parts, req.body_mut().as_mut().map(|r| r.as_mut()))

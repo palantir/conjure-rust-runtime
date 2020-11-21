@@ -15,8 +15,8 @@ use crate::blocking;
 use crate::client::ClientState;
 use crate::config::{ServiceConfig, ServicesConfig};
 use crate::{
-    Client, HostMetricsRegistry, Idempotency, NodeSelectionStrategy, ServerQos, ServiceError,
-    UserAgent,
+    Client, ClientQos, HostMetricsRegistry, Idempotency, NodeSelectionStrategy, ServerQos,
+    ServiceError, UserAgent,
 };
 use arc_swap::ArcSwap;
 use conjure_error::Error;
@@ -31,6 +31,7 @@ pub struct ClientFactory {
     user_agent: Option<UserAgent>,
     metrics: Option<Arc<MetricRegistry>>,
     host_metrics: Option<Arc<HostMetricsRegistry>>,
+    client_qos: Option<ClientQos>,
     server_qos: Option<ServerQos>,
     service_error: Option<ServiceError>,
     idempotency: Option<Idempotency>,
@@ -45,6 +46,7 @@ impl ClientFactory {
             user_agent: None,
             metrics: None,
             host_metrics: None,
+            client_qos: None,
             server_qos: None,
             service_error: None,
             idempotency: None,
@@ -57,6 +59,14 @@ impl ClientFactory {
     /// Required.
     pub fn user_agent(&mut self, user_agent: UserAgent) -> &mut Self {
         self.user_agent = Some(user_agent);
+        self
+    }
+
+    /// Sets clients' rate limiting behavior.
+    ///
+    /// Defaults to `ClientQos::Enabled`.
+    pub fn client_qos(&mut self, client_qos: ClientQos) -> &mut Self {
+        self.client_qos = Some(client_qos);
         self
     }
 
