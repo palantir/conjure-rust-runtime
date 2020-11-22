@@ -242,6 +242,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[allow(clippy::float_cmp)]
     async fn ignore_does_not_change_limits() {
         let limiter = host_limiter();
 
@@ -252,6 +253,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[allow(clippy::float_cmp)]
     async fn dropped_reduces_limit() {
         let limiter = host_limiter();
 
@@ -263,6 +265,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[allow(clippy::float_cmp)]
     async fn success_increases_limit_if_sufficient_requests_are_in_flight() {
         let limiter = host_limiter();
 
