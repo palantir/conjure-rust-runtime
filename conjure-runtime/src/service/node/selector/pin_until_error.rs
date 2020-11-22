@@ -228,7 +228,7 @@ where
         let node = self.state.nodes.get(pin);
 
         PinUntilErrorNodeSelectorFuture {
-            future: node.wrap(self.inner.clone(), req),
+            future: node.wrap(&self.inner, req),
             state: self.state.clone(),
             pin,
         }

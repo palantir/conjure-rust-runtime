@@ -57,7 +57,7 @@ where
     type Future = SingleNodeSelectorFuture<S, B1>;
 
     fn call(&self, req: Request<B1>) -> Self::Future {
-        self.node.wrap(self.inner.clone(), req)
+        self.node.wrap(&self.inner, req)
     }
 }
 

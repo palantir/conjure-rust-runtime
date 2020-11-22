@@ -57,7 +57,8 @@ impl NodeSelectorLayer {
         let mut nodes = builder
             .get_uris()
             .iter()
-            .map(|url| LimitedNode::new(url, service, builder))
+            .enumerate()
+            .map(|(i, url)| LimitedNode::new(i, url, service, builder))
             .collect::<Vec<_>>();
 
         if nodes.is_empty() {

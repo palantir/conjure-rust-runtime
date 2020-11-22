@@ -47,9 +47,10 @@ impl LimitedNode {
         }
     }
 
-    pub fn new<T>(url: &Url, service: &str, builder: &Builder<T>) -> Self {
+    pub fn new<T>(idx: usize, url: &Url, service: &str, builder: &Builder<T>) -> Self {
         LimitedNode {
             node: Arc::new(Node {
+                idx,
                 url: url.clone(),
                 host_metrics: builder.get_host_metrics().map(|m| {
                     m.get(
@@ -81,14 +82,29 @@ impl LimitedNode {
         }
     }
 
-    pub fn wrap<S, B>(&self, inner: Arc<S>, request: Request<B>) -> Wrap<S, B>
+    pub fn wrap<S, B1, B2>(&self, inner: &Arc<S>, request: Request<B1>) -> Wrap<S, B1>
     where
-        S: Service<Request<B>>,
+        S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
     {
-        Wrap::Acquire {
-            future: self.acquire(&request),
-            inner,
-            request: Some(request),
+        // don't create the span if client QoS is disabled
+        if self.limiter.is_some() {
+            let span = zipkin::next_span()
+                .with_name("conjure-runtime: acquire permit")
+                .with_tag("node", &self.node.idx.to_string());
+
+            Wrap::Acquire {
+                future: span.detach().bind(self.acquire(&request)),
+                inner: inner.clone(),
+                request: Some(request),
+            }
+        } else {
+            Wrap::NodeFuture {
+                future: AcquiredNode {
+                    node: self.node.clone(),
+                    permit: None,
+                }
+                .wrap(&**inner, request),
+            }
         }
     }
 }
@@ -162,6 +178,7 @@ where
 }
 
 pub struct Node {
+    idx: usize,
     url: Url,
     host_metrics: Option<Arc<HostMetrics>>,
 }
@@ -170,6 +187,7 @@ impl Node {
     #[cfg(test)]
     fn test(url: &str) -> Arc<Self> {
         Arc::new(Node {
+            idx: 0,
             url: url.parse().unwrap(),
             host_metrics: None,
         })
@@ -183,7 +201,7 @@ where
 {
     Acquire {
         #[pin]
-        future: Acquire,
+        future: zipkin::Bind<Acquire>,
         inner: Arc<S>,
         request: Option<Request<B>>,
     },

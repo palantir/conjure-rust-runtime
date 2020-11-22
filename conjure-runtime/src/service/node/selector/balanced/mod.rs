@@ -26,6 +26,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
+use witchcraft_log::debug;
+use zipkin::{Detached, OpenSpan};
 
 mod reservoir;
 
@@ -150,6 +152,8 @@ where
     type Future = BalancedNodeSelectorFuture<S, B1>;
 
     fn call(&self, req: Request<B1>) -> Self::Future {
+        let span = zipkin::next_span().with_name("conjure-runtime: balanced node selection");
+
         // Dialogue skips nodes that have significantly worse scores than previous ones on each attempt, but to do that
         // here we'd need a way to notify tasks on score changes. Rather than adding the complexity of implementing
         // that, we just perform the filtering once when first constructing the future. This filtering is intended to
@@ -171,7 +175,16 @@ where
         let mut give_up_threshold = usize::max_value();
         for snapshot in snapshots {
             if snapshot.score.score > give_up_threshold {
-                break;
+                debug!(
+                    "filtering out node with score above threshold",
+                    safe: {
+                        score: snapshot.score.score,
+                        giveUpScore: give_up_threshold,
+                        hostIndex: snapshot.node.node.node.idx,
+                    },
+                );
+
+                continue;
             }
 
             if snapshot.score.in_flight > INFLIGHT_COMPARISON_THRESHOLD {
@@ -191,6 +204,7 @@ where
             nodes,
             service: self.inner.clone(),
             request: Some(req),
+            span: span.detach(),
         }
     }
 }
@@ -204,6 +218,7 @@ where
         nodes: Vec<AcquiringNode>,
         service: Arc<S>,
         request: Option<Request<B>>,
+        span: OpenSpan<Detached>,
     },
     Wrap {
         #[pin]
@@ -237,7 +252,10 @@ where
                     nodes,
                     service,
                     request,
+                    span,
                 } => {
+                    let mut _guard = Some(zipkin::set_current(span.context()));
+
                     // even though we've filtered above in Service::call, we still want to poll the nodes in order of
                     // score to ensure we pick the best scoring node if multiple are available at the same time.
                     let mut snapshots = nodes
@@ -253,6 +271,9 @@ where
                         .into_iter()
                         .filter_map(|s| match s.node.acquire.as_mut().poll(cx) {
                             Poll::Ready(node) => {
+                                // drop the context guard before we create the next future to avoid span nesting
+                                _guard = None;
+
                                 s.node.node.in_flight.fetch_add(1, Ordering::SeqCst);
 
                                 Some(BalancedNodeSelectorFuture::Wrap {
