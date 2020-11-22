@@ -48,17 +48,18 @@ impl Limiter {
 
     pub fn acquire(&self, method: &Method, pattern: &str) -> Acquire {
         Acquire {
-            host: future::maybe_done(self.host.clone().acquire()),
-            endpoint: self
-                .endpoints
-                .lock()
-                .entry(Endpoint {
-                    method: method.clone(),
-                    pattern: pattern.to_string(),
-                })
-                .or_insert_with(CiadConcurrencyLimiter::new)
-                .clone()
-                .acquire(),
+            endpoint: future::maybe_done(
+                self.endpoints
+                    .lock()
+                    .entry(Endpoint {
+                        method: method.clone(),
+                        pattern: pattern.to_string(),
+                    })
+                    .or_insert_with(CiadConcurrencyLimiter::new)
+                    .clone()
+                    .acquire(),
+            ),
+            host: self.host.clone().acquire(),
         }
     }
 }
@@ -66,9 +67,9 @@ impl Limiter {
 #[pin_project]
 pub struct Acquire {
     #[pin]
-    host: MaybeDone<ciad::Acquire<HostLevel>>,
+    endpoint: MaybeDone<ciad::Acquire<EndpointLevel>>,
     #[pin]
-    endpoint: ciad::Acquire<EndpointLevel>,
+    host: ciad::Acquire<HostLevel>,
 }
 
 impl Future for Acquire {
@@ -77,24 +78,26 @@ impl Future for Acquire {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
-        ready!(this.host.as_mut().poll(cx));
-        let endpoint = ready!(this.endpoint.poll(cx));
+        // acquire the endpoint permit first to avoid contention issues in the balanced limiter where requests to a
+        // thottled endpoint could "lock out" requests to other endpoints if we take the host permit first.
+        ready!(this.endpoint.as_mut().poll(cx));
+        let host = ready!(this.host.poll(cx));
 
         Poll::Ready(Permit {
-            host: this.host.take_output().unwrap(),
-            endpoint,
+            endpoint: this.endpoint.take_output().unwrap(),
+            host,
         })
     }
 }
 
 pub struct Permit {
-    host: ciad::Permit<HostLevel>,
     endpoint: ciad::Permit<EndpointLevel>,
+    host: ciad::Permit<HostLevel>,
 }
 
 impl Permit {
     pub fn on_response<B>(&mut self, response: &Result<Response<B>, Error>) {
-        self.host.on_response(response);
         self.endpoint.on_response(response);
+        self.host.on_response(response);
     }
 }
