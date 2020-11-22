@@ -1,0 +1,5 @@
+type: feature
+feature:
+  description: Client side rate limiting is now supported and enabled by default.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/55
