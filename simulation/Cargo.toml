@@ -1,0 +1,11 @@
+[package]
+name = "simulation"
+version = "0.1.0"
+authors = ["Steven Fackler <sfackler@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+plotters = "0.3"
+tokio = { versio = "0.2", features = ["test-util"] }
+
+conjure-runtime = { path = "../conjure-runtime" }

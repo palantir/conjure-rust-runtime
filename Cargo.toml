@@ -4,6 +4,7 @@ members = [
     "conjure-runtime-config",
     "conjure-verification",
     "conjure-verification-api",
+    "simulation",
 ]
 
 [patch.crates-io]
