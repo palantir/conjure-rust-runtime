@@ -11,8 +11,54 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::simulation::Simulation;
+use tokio::time::Duration;
+
+mod metrics;
+mod recorder;
 mod server;
+mod simulation;
 
 fn main() {
-    println!("Hello, world!");
+    let result = simplest_possible_case().run();
+
+    let status_codes = result
+        .status_codes
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let summary = format!(
+        "success={}%\tclient_mean={:?}\tserver_cpu={:?}\tclient_received={}/{}\tserver_resps={}\tcodes={{{}}}",
+        result.success_percentage,
+        result.client_mean,
+        result.server_cpu,
+        result.num_received,
+        result.num_sent,
+        result.num_global_responses,
+        status_codes,
+    );
+
+    println!("{}", summary);
+}
+
+fn simplest_possible_case() -> Simulation {
+    Simulation::new()
+        .server(|s| {
+            s.name("fast")
+                .handler(|h| h.response(200).delay(Duration::from_millis(600)))
+        })
+        .server(|s| {
+            s.name("medium")
+                .handler(|h| h.response(200).delay(Duration::from_millis(800)))
+        })
+        .server(|s| {
+            s.name("slightly_slow")
+                .handler(|h| h.response(200).delay(Duration::from_millis(1000)))
+        })
+        .requests_per_second(11)
+        .send_until(Duration::from_secs(20 * 60))
+        .abort_after(Duration::from_secs(60 * 60))
+        .clients(10)
 }

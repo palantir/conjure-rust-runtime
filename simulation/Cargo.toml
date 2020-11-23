@@ -5,7 +5,15 @@ authors = ["Steven Fackler <sfackler@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+bytes = "0.5"
+conjure-error = "0.7"
+futures = "0.3"
+http = "0.2"
+http-body = "0.3"
 plotters = "0.3"
-tokio = { versio = "0.2", features = ["test-util"] }
+rand = "0.7"
+rand_pcg = "0.2"
+tokio = { version = "0.2", features = ["test-util"] }
+witchcraft-metrics = "0.1"
 
 conjure-runtime = { path = "../conjure-runtime" }
