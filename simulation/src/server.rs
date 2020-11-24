@@ -21,6 +21,7 @@ use futures::future::BoxFuture;
 use http::{HeaderMap, Method, Request, Response};
 use http_body::Body;
 use parking_lot::Mutex;
+use rand::Rng;
 use std::collections::HashMap;
 use std::error;
 use std::mem;
@@ -39,9 +40,16 @@ pub struct Endpoint {
 impl Endpoint {
     pub const DEFAULT: Endpoint = Endpoint::post("/");
 
-    pub const fn post(path: &'static str) -> Endpoint {
+    pub const fn post(path: &'static str) -> Self {
         Endpoint {
             method: Method::POST,
+            path,
+        }
+    }
+
+    pub const fn get(path: &'static str) -> Self {
+        Endpoint {
+            method: Method::GET,
             path,
         }
     }
@@ -121,7 +129,7 @@ impl HandlerBuilder0 {
     }
 
     pub fn response(self, status: u16) -> HandlerBuilder1 {
-        self.response_with(move |_| Response::builder().status(status).body(EmptyBody).unwrap())
+        self.response_with(move |_| response(status))
     }
 
     pub fn response_with<F>(self, f: F) -> HandlerBuilder1
@@ -133,6 +141,27 @@ impl HandlerBuilder0 {
             response: Box::new(f),
         }
     }
+
+    pub fn respond_200_until_capacity(self, error_status: u16, capacity: u32) -> HandlerBuilder1 {
+        self.response_with(move |server| {
+            if server.active_requests() > capacity as i64 {
+                response(error_status)
+            } else {
+                response(200)
+            }
+        })
+    }
+
+    pub fn respond_500_at_rate(self, rate: f64) -> HandlerBuilder1 {
+        let rng = Mutex::new(crate::rng());
+        self.response_with(move |_| {
+            if rng.lock().gen_bool(rate) {
+                response(500)
+            } else {
+                response(200)
+            }
+        })
+    }
 }
 
 pub struct HandlerBuilder1 {
@@ -141,26 +170,42 @@ pub struct HandlerBuilder1 {
 }
 
 impl HandlerBuilder1 {
-    pub fn delay(self, delay: Duration) -> Handler {
-        self.delay_with(move |_| delay)
+    pub fn response_time(self, response_time: Duration) -> Handler {
+        self.response_time_with(move |_| response_time)
     }
 
-    pub fn delay_with<F>(self, f: F) -> Handler
+    pub fn response_time_with<F>(self, f: F) -> Handler
     where
         F: Fn(&Server) -> Duration + 'static + Sync + Send,
     {
         Handler {
             predicate: self.predicate,
             response: self.response,
-            delay: Box::new(f),
+            response_time: Box::new(f),
         }
+    }
+
+    pub fn linear_response_time(self, best_case: Duration, capacity: u32) -> Handler {
+        self.response_time_with(move |server| {
+            let in_flight = server.active_requests();
+
+            if in_flight > capacity as i64 {
+                best_case * 5
+            } else {
+                best_case + best_case * in_flight as u32 / capacity
+            }
+        })
     }
 }
 
 pub struct Handler {
     predicate: Box<dyn Fn(&Request<RawBody>) -> bool + Sync + Send>,
     response: Box<dyn Fn(&Server) -> Response<EmptyBody> + Sync + Send>,
-    delay: Box<dyn Fn(&Server) -> Duration + Sync + Send>,
+    response_time: Box<dyn Fn(&Server) -> Duration + Sync + Send>,
+}
+
+fn response(status: u16) -> Response<EmptyBody> {
+    Response::builder().status(status).body(EmptyBody).unwrap()
 }
 
 pub struct EmptyBody;
@@ -212,7 +257,7 @@ impl Service<Request<RawBody>> for SimulationRawClient {
         self.recorder.lock().record();
 
         let response = (handler.response)(server);
-        let delay = (handler.delay)(server);
+        let response_time = (handler.response_time)(server);
         let start = Instant::now();
 
         Box::pin({
@@ -220,7 +265,7 @@ impl Service<Request<RawBody>> for SimulationRawClient {
             let global_responses = self.global_responses.clone();
             let global_server_time_nanos = self.global_server_time_nanos.clone();
             async move {
-                time::delay_for(delay).await;
+                time::delay_for(response_time).await;
 
                 active_requests.dec();
                 global_responses.inc();

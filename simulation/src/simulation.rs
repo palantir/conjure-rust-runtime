@@ -16,11 +16,12 @@ use crate::recorder::{MetricsRecord, SimulationMetricsRecorder};
 use crate::server::{
     Endpoint, Server, ServerBuilder0, SimulationRawClient, SimulationRawClientBuilder,
 };
+use conjure_runtime::errors::{RemoteError, ThrottledError, UnavailableError};
 use conjure_runtime::{Agent, Builder, Client, NodeSelectionStrategy, UserAgent};
 use futures::stream::{self, Stream, StreamExt};
+use http::StatusCode;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
-use rand_pcg::Pcg64;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -126,7 +127,11 @@ pub struct SimulationBuilder2 {
 impl SimulationBuilder2 {
     pub fn send_until(self, cutoff: Duration) -> SimulationBuilder3 {
         let num_requests = cutoff.as_nanos() as u64 / self.delay_between_requests.as_nanos() as u64;
-        let mut rng = rng();
+        self.num_requests(num_requests)
+    }
+
+    pub fn num_requests(self, num_requests: u64) -> SimulationBuilder3 {
+        let mut rng = crate::rng();
 
         let it = (0..num_requests).map({
             let endpoints = self.endpoints;
@@ -135,7 +140,18 @@ impl SimulationBuilder2 {
         let stream = stream::iter(it);
         let stream = self.runtime.enter({
             let delay_between_requests = self.delay_between_requests;
-            move || time::throttle(delay_between_requests, stream)
+            // FIXME use tokio::time::throttle when it handles sub-milli delays properly
+            move || {
+                let mut next_item = Instant::now();
+                stream.then(move |v| {
+                    let wait = next_item;
+                    next_item += delay_between_requests;
+                    async move {
+                        time::delay_until(wait).await;
+                        v
+                    }
+                })
+            }
         });
 
         SimulationBuilder3 {
@@ -168,7 +184,7 @@ impl SimulationBuilder3 {
         let clients = (0..clients)
             .map(|_| self.runtime.enter(|| self.builder.build().unwrap()))
             .collect::<Vec<_>>();
-        let mut rng = rng();
+        let mut rng = crate::rng();
 
         let client_provider = move || clients.choose(&mut rng).unwrap().clone();
 
@@ -225,15 +241,26 @@ impl Simulation {
                                 .await;
                             num_received.set(num_received.get() + 1);
 
-                            match response {
-                                Ok(response) => {
-                                    *status_codes
-                                        .borrow_mut()
-                                        .entry(response.status().as_u16())
-                                        .or_insert(0) += 1;
+                            let status = match response {
+                                Ok(response) => response.status(),
+                                Err(error) => {
+                                    if let Some(error) = error.cause().downcast_ref::<RemoteError>()
+                                    {
+                                        error.status().clone()
+                                    } else if error.cause().is::<UnavailableError>() {
+                                        StatusCode::SERVICE_UNAVAILABLE
+                                    } else if error.cause().is::<ThrottledError>() {
+                                        StatusCode::TOO_MANY_REQUESTS
+                                    } else {
+                                        panic!("unexpected client error {:?}", error);
+                                    }
                                 }
-                                Err(_) => {}
-                            }
+                            };
+
+                            *status_codes
+                                .borrow_mut()
+                                .entry(status.as_u16())
+                                .or_insert(0) += 1;
                         }
                     }
                 });
@@ -272,11 +299,6 @@ impl Simulation {
             }
         })
     }
-}
-
-fn rng() -> Pcg64 {
-    // fixed seed from https://docs.rs/rand_pcg/0.2.1/rand_pcg/struct.Lcg128Xsl64.html
-    Pcg64::new(0xcafef00dd15ea5e5, 0xa02bdbf7bb3c0a7ac28fa16a64abf96)
 }
 
 #[derive(Copy, Clone)]

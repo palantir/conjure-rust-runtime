@@ -61,7 +61,7 @@ impl Builder {
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(5 * 60),
             backoff_slot_size: Duration::from_millis(250),
-            max_num_retries: 3,
+            max_num_retries: 4,
             server_qos: ServerQos::AutomaticRetry,
             service_error: ServiceError::WrapInNewError,
             idempotency: Idempotency::ByMethod,

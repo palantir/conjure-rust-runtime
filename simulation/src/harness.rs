@@ -87,7 +87,7 @@ impl SimulationResult {
             .join(", ");
 
         format!(
-            "success={}%\tclient_mean={:?}\tserver_cpu={:?}\tclient_received={}/{}\tserver_resps={}\tcodes={{{}}}",
+            "success={}%\tclient_mean={:?}\tserver_cpu={:?}\tclient_received={}/{}\tserver_resps={}\tcodes={{{}}}\n",
             self.report.success_percentage,
             self.report.client_mean,
             self.report.server_cpu,

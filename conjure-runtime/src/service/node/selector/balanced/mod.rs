@@ -28,7 +28,7 @@ use std::time::Duration;
 
 mod reservoir;
 
-const FAILURE_MEMORY: Duration = Duration::from_secs(10);
+const FAILURE_MEMORY: Duration = Duration::from_secs(30);
 const FAILURE_WEIGHT: f64 = 10.;
 
 struct TrackedNode {

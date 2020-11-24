@@ -256,7 +256,9 @@ where
             return Err(error);
         }
 
-        if !self.idempotent {
+        // we don't need to worry about idempotency of QoS responses, since the server explicitly told is it didn't
+        // perform the operation
+        if !self.idempotent && !self.is_qos_response(&error) {
             info!("unable to retry non-idempotent request");
             return Err(error);
         }
@@ -290,6 +292,10 @@ where
         time::delay_for(backoff).await;
 
         Ok(())
+    }
+
+    fn is_qos_response(&self, error: &Error) -> bool {
+        error.cause().is::<UnavailableError>() || error.cause().is::<ThrottledError>()
     }
 }
 

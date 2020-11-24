@@ -1,0 +1,1 @@
+success=100%	client_mean=120.201361ms	server_cpu=5400.38s	client_received=45000/45000	server_resps=45038	codes={200=45000}
