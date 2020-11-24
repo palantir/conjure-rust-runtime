@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::metrics;
+use crate::recorder::{MetricsRecord, SimulationMetricsRecorder};
 use crate::server::{
     Endpoint, Server, ServerBuilder0, SimulationRawClient, SimulationRawClientBuilder,
 };
 use conjure_runtime::{Agent, Builder, Client, UserAgent};
 use futures::stream::{self, Stream, StreamExt};
+use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 use rand_pcg::Pcg64;
 use std::cell::{Cell, RefCell};
@@ -65,13 +67,23 @@ impl SimulationBuilder0 {
             builder.uri(format!("http://{}", server.name()).parse().unwrap());
         }
 
-        let raw_client_builder = SimulationRawClientBuilder::new(self.servers, &self.metrics);
+        let mut recorder = self
+            .runtime
+            .enter(|| SimulationMetricsRecorder::new(&self.metrics));
+        recorder.filter_metrics(|id| {
+            id.name().ends_with("activeRequests") || id.name().ends_with("request")
+        });
+        let recorder = Arc::new(Mutex::new(recorder));
+
+        let raw_client_builder =
+            SimulationRawClientBuilder::new(self.servers, &self.metrics, &recorder);
         let builder = builder.with_raw_client_builder(raw_client_builder);
 
         SimulationBuilder1 {
             runtime: self.runtime,
             builder,
             metrics: self.metrics,
+            recorder,
             endpoints: self.endpoints,
             delay_between_requests: Duration::from_secs(1) / requests_per_second,
         }
@@ -82,6 +94,7 @@ pub struct SimulationBuilder1 {
     runtime: Runtime,
     metrics: Arc<MetricRegistry>,
     builder: Builder<SimulationRawClientBuilder>,
+    recorder: Arc<Mutex<SimulationMetricsRecorder>>,
     endpoints: Vec<Endpoint>,
     delay_between_requests: Duration,
 }
@@ -104,6 +117,7 @@ impl SimulationBuilder1 {
         SimulationBuilder2 {
             runtime: self.runtime,
             metrics: self.metrics,
+            recorder: self.recorder,
             builder: self.builder,
             requests: Box::pin(stream),
             abort_after: None,
@@ -114,6 +128,7 @@ impl SimulationBuilder1 {
 pub struct SimulationBuilder2 {
     runtime: Runtime,
     metrics: Arc<MetricRegistry>,
+    recorder: Arc<Mutex<SimulationMetricsRecorder>>,
     builder: Builder<SimulationRawClientBuilder>,
     requests: Pin<Box<dyn Stream<Item = Endpoint>>>,
     abort_after: Option<Duration>,
@@ -136,6 +151,7 @@ impl SimulationBuilder2 {
         Simulation {
             runtime: self.runtime,
             metrics: self.metrics,
+            recorder: self.recorder,
             requests: self.requests,
             client_provider: Box::new(client_provider),
             abort_after: self.abort_after,
@@ -146,6 +162,7 @@ impl SimulationBuilder2 {
 pub struct Simulation {
     runtime: Runtime,
     metrics: Arc<MetricRegistry>,
+    recorder: Arc<Mutex<SimulationMetricsRecorder>>,
     client_provider: Box<dyn FnMut() -> Client<Arc<SimulationRawClient>>>,
     requests: Pin<Box<dyn Stream<Item = Endpoint>>>,
     abort_after: Option<Duration>,
@@ -171,6 +188,7 @@ impl Simulation {
     pub fn run(mut self) -> SimulationReport {
         self.runtime.block_on({
             let metrics = self.metrics;
+            let recorder = self.recorder;
             let mut client_provider = self.client_provider;
             let requests = self.requests;
             let abort_after = self.abort_after;
@@ -237,6 +255,7 @@ impl Simulation {
                     num_sent: num_sent.get(),
                     num_received: num_received.get(),
                     num_global_responses: metrics::global_responses(&metrics).count(),
+                    record: recorder.lock().finish(),
                 }
             }
         })
@@ -257,4 +276,5 @@ pub struct SimulationReport {
     pub num_received: u64,
     pub num_global_responses: i64,
     pub status_codes: BTreeMap<u16, u64>,
+    pub record: MetricsRecord,
 }

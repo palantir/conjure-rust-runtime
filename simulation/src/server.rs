@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::metrics;
+use crate::recorder::SimulationMetricsRecorder;
 use bytes::Bytes;
 use conjure_error::Error;
 use conjure_runtime::raw::{BuildRawClient, RawBody, Service};
@@ -19,6 +20,7 @@ use conjure_runtime::Builder;
 use futures::future::BoxFuture;
 use http::{HeaderMap, Method, Request, Response};
 use http_body::Body;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::error;
 use std::mem;
@@ -184,6 +186,8 @@ impl Body for EmptyBody {
 
 pub struct SimulationRawClient {
     servers: HashMap<&'static str, Server>,
+    recorder: Arc<Mutex<SimulationMetricsRecorder>>,
+    metrics: Arc<MetricRegistry>,
     global_responses: Arc<Counter>,
     global_server_time_nanos: Arc<Counter>,
 }
@@ -204,6 +208,8 @@ impl Service<Request<RawBody>> for SimulationRawClient {
             .expect("no handler available for request");
 
         server.active_requests.inc();
+        metrics::request_meter(&self.metrics, server.name, req.uri().path()).mark(1);
+        self.recorder.lock().record();
 
         let response = (handler.response)(server);
         let delay = (handler.delay)(server);
@@ -231,10 +237,16 @@ pub struct SimulationRawClientBuilder {
 }
 
 impl SimulationRawClientBuilder {
-    pub fn new(servers: Vec<Server>, metrics: &Arc<MetricRegistry>) -> Self {
+    pub fn new(
+        servers: Vec<Server>,
+        metrics: &Arc<MetricRegistry>,
+        recorder: &Arc<Mutex<SimulationMetricsRecorder>>,
+    ) -> Self {
         SimulationRawClientBuilder {
             client: Arc::new(SimulationRawClient {
                 servers: servers.into_iter().map(|s| (s.name, s)).collect(),
+                recorder: recorder.clone(),
+                metrics: metrics.clone(),
                 global_responses: metrics::global_responses(metrics),
                 global_server_time_nanos: metrics::global_server_time_nanos(metrics),
             }),

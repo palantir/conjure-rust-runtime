@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::sync::Arc;
-use witchcraft_metrics::{Counter, MetricId, MetricRegistry};
+use witchcraft_metrics::{Counter, Meter, MetricId, MetricRegistry};
 
 pub fn global_responses(registry: &MetricRegistry) -> Arc<Counter> {
     registry.counter("globalResponses")
@@ -24,4 +24,16 @@ pub fn global_server_time_nanos(registry: &MetricRegistry) -> Arc<Counter> {
 
 pub fn active_requests(registry: &MetricRegistry, server: &'static str) -> Arc<Counter> {
     registry.counter(MetricId::new("activeRequests").with_tag("server", server))
+}
+
+pub fn request_meter(
+    registry: &MetricRegistry,
+    server: &'static str,
+    endpoint: &str,
+) -> Arc<Meter> {
+    registry.meter(
+        MetricId::new("request")
+            .with_tag("server", server)
+            .with_tag("endpoint", endpoint.to_string()),
+    )
 }

@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::simulation::Simulation;
+use plotters::drawing::IntoDrawingArea;
+use plotters::prelude::BitMapBackend;
+use plotters::style::colors;
 use tokio::time::Duration;
 
 mod metrics;
@@ -39,8 +42,28 @@ fn main() {
         result.num_global_responses,
         status_codes,
     );
-
     println!("{}", summary);
+
+    let title = format!(
+        "<strategy> success={}% client_mean={:?} server_cpu={:?}",
+        result.success_percentage, result.client_mean, result.server_cpu
+    );
+
+    let root = BitMapBackend::new("results/test.png", (800, 1200)).into_drawing_area();
+    root.fill(&colors::WHITE).unwrap();
+    let root = root
+        .margin(10, 10, 0, 0)
+        .titled(&title, ("sans-serif", 20))
+        .unwrap();
+
+    let parts = root.split_evenly((2, 1));
+    result
+        .record
+        .chart(&parts[0], |id| id.name().ends_with("activeRequests"));
+
+    result
+        .record
+        .chart(&parts[1], |id| id.name().ends_with("request"));
 }
 
 fn simplest_possible_case() -> Simulation {
