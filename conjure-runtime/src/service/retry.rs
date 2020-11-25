@@ -15,6 +15,7 @@ use crate::body::ResetTrackingBody;
 use crate::errors::{ThrottledError, UnavailableError};
 use crate::raw::Service;
 use crate::raw::{BodyError, RawBody};
+use crate::rng::ConjureRng;
 use crate::service::map_error::RawClientError;
 use crate::service::Layer;
 use crate::{Body, Builder, Idempotency};
@@ -51,6 +52,7 @@ pub struct RetryLayer {
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
+    rng: Arc<ConjureRng>,
 }
 
 impl RetryLayer {
@@ -59,6 +61,7 @@ impl RetryLayer {
             idempotency: builder.get_idempotency(),
             max_num_retries: builder.get_max_num_retries(),
             backoff_slot_size: builder.get_backoff_slot_size(),
+            rng: Arc::new(ConjureRng::new(builder)),
         }
     }
 }
@@ -72,6 +75,7 @@ impl<S> Layer<S> for RetryLayer {
             idempotency: self.idempotency,
             max_num_retries: self.max_num_retries,
             backoff_slot_size: self.backoff_slot_size,
+            rng: self.rng,
         }
     }
 }
@@ -84,6 +88,7 @@ pub struct RetryService<S> {
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
+    rng: Arc<ConjureRng>,
 }
 
 impl<'a, S> Service<Request<RetryBody<'a>>> for RetryService<S>
@@ -111,6 +116,7 @@ where
             idempotent,
             max_num_retries: self.max_num_retries,
             backoff_slot_size: self.backoff_slot_size,
+            rng: self.rng.clone(),
             attempt: 0,
         };
 
@@ -123,6 +129,7 @@ struct State<S> {
     idempotent: bool,
     max_num_retries: u32,
     backoff_slot_size: Duration,
+    rng: Arc<ConjureRng>,
     attempt: u32,
 }
 
@@ -280,7 +287,8 @@ where
                 if max == Duration::from_secs(0) {
                     Duration::from_secs(0)
                 } else {
-                    rand::thread_rng().gen_range(Duration::from_secs(0), max)
+                    self.rng
+                        .with(|rng| rng.gen_range(Duration::from_secs(0), max))
                 }
             }
         };

@@ -18,6 +18,7 @@ use crate::raw::{BuildRawClient, DefaultRawClientBuilder};
 use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
+use rand::RngCore;
 use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
@@ -40,6 +41,7 @@ pub struct Builder<T = DefaultRawClientBuilder> {
     node_selection_strategy: NodeSelectionStrategy,
     metrics: Option<Arc<MetricRegistry>>,
     host_metrics: Option<Arc<HostMetricsRegistry>>,
+    rng_builder: Option<Box<dyn Fn() -> Box<dyn RngCore + Sync + Send> + Sync + Send>>,
     raw_client_builder: T,
 }
 
@@ -68,6 +70,7 @@ impl Builder {
             node_selection_strategy: NodeSelectionStrategy::PinUntilError,
             metrics: None,
             host_metrics: None,
+            rng_builder: None,
             raw_client_builder: DefaultRawClientBuilder,
         }
     }
@@ -321,6 +324,25 @@ impl<T> Builder<T> {
         self.host_metrics.as_ref()
     }
 
+    /// Sets the provider for random number generators used to produce entropy for client operations.
+    ///
+    /// Defaults to `None`, in which case the client will manage its own RNGs.
+    pub fn rng_builder<F, R>(&mut self, rng_builder: F) -> &mut Self
+    where
+        F: Fn() -> R + 'static + Sync + Send,
+        R: RngCore + 'static + Sync + Send,
+    {
+        self.rng_builder = Some(Box::new(move || Box::new(rng_builder())));
+        self
+    }
+
+    /// Returns the builder's configured RNG provider.
+    pub fn get_rng_builder(
+        &self,
+    ) -> Option<&(dyn Fn() -> Box<dyn RngCore + Sync + Send> + 'static + Sync + Send)> {
+        self.rng_builder.as_deref()
+    }
+
     /// Sets the raw client builder.
     ///
     /// Defaults to `DefaultRawClientBuilder`.
@@ -341,6 +363,7 @@ impl<T> Builder<T> {
             node_selection_strategy: self.node_selection_strategy,
             metrics: self.metrics,
             host_metrics: self.host_metrics,
+            rng_builder: self.rng_builder,
             raw_client_builder,
         }
     }

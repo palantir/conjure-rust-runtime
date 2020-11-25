@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::raw::Service;
+use crate::rng::ConjureRng;
 use crate::service::node::Node;
 use crate::service::Layer;
+use crate::Builder;
 use arc_swap::ArcSwap;
 use futures::ready;
 use http::{Request, Response};
@@ -40,18 +42,18 @@ pub trait Entropy {
     fn shuffle<T>(&self, slice: &mut [T]);
 }
 
-pub struct RandEntropy;
+pub struct RandEntropy(ConjureRng);
 
 impl Entropy for RandEntropy {
     fn gen_range<T>(&self, start: T, end: T) -> T
     where
         T: SampleUniform,
     {
-        rand::thread_rng().gen_range(start, end)
+        self.0.with(|rng| rng.gen_range(start, end))
     }
 
     fn shuffle<T>(&self, slice: &mut [T]) {
-        slice.shuffle(&mut rand::thread_rng());
+        self.0.with(|rng| slice.shuffle(rng));
     }
 }
 
@@ -67,8 +69,8 @@ pub struct FixedNodes {
 }
 
 impl FixedNodes {
-    pub fn new(nodes: Vec<Arc<Node>>) -> Self {
-        Self::with_entropy(nodes, RandEntropy)
+    pub fn new<T>(nodes: Vec<Arc<Node>>, builder: &Builder<T>) -> Self {
+        Self::with_entropy(nodes, RandEntropy(ConjureRng::new(builder)))
     }
 
     fn with_entropy<E>(mut nodes: Vec<Arc<Node>>, entropy: E) -> Self
@@ -101,8 +103,8 @@ pub struct ReshufflingNodes<E = RandEntropy> {
 }
 
 impl ReshufflingNodes {
-    pub fn new(nodes: Vec<Arc<Node>>) -> Self {
-        Self::with_entropy(nodes, RandEntropy)
+    pub fn new<T>(nodes: Vec<Arc<Node>>, builder: &Builder<T>) -> Self {
+        Self::with_entropy(nodes, RandEntropy(ConjureRng::new(builder)))
     }
 }
 

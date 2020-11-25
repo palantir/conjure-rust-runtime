@@ -1,1 +1,1 @@
-success=73%	client_mean=120ms	server_cpu=558.2s	client_received=6000/6000	server_resps=6000	codes={200=4382, 400=1618}
+success=55%	client_mean=120ms	server_cpu=450s	client_received=6000/6000	server_resps=6000	codes={200=3300, 400=2700}

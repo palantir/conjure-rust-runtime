@@ -95,7 +95,8 @@ impl SimulationBuilder1 {
         builder
             .service(SERVICE)
             .user_agent(UserAgent::new(Agent::new("simulation", "0.0.0")))
-            .metrics(self.metrics.clone());
+            .metrics(self.metrics.clone())
+            .rng_builder(|| crate::rng());
         for server in &self.servers {
             builder.uri(format!("http://{}", server.name()).parse().unwrap());
         }
