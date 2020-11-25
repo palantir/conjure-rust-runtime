@@ -84,7 +84,9 @@ impl State {
         if self.has_permits() {
             if let Some(head) = &mut self.head {
                 unsafe {
-                    head.as_mut().waker.wake_by_ref();
+                    if let Some(waker) = head.as_mut().waker.take() {
+                        waker.wake();
+                    }
                 }
             }
         }
@@ -92,7 +94,7 @@ impl State {
 }
 
 struct Node {
-    waker: Waker,
+    waker: Option<Waker>,
     next: Option<NonNull<Node>>,
     prev: Option<NonNull<Node>>,
 }
@@ -200,7 +202,7 @@ impl Future for Acquire {
             Some(node) => node,
             None => {
                 *this.node = Some(Node {
-                    waker: cx.waker().clone(),
+                    waker: None, // will be filled in below
                     next: None,
                     prev: None,
                 });
@@ -232,8 +234,12 @@ impl Future for Acquire {
             Poll::Ready(permit)
         } else {
             // if the future jumped executors (uncommon but possible), update the waker
-            if !node.waker.will_wake(cx.waker()) {
-                node.waker = cx.waker().clone();
+            if !node
+                .waker
+                .as_ref()
+                .map_or(false, |w| w.will_wake(cx.waker()))
+            {
+                node.waker = Some(cx.waker().clone());
             }
 
             Poll::Pending
@@ -381,11 +387,11 @@ mod test {
         assert_eq!(count2, 0);
         drop(permit1);
         drop(permit2);
-        assert_eq!(count1, 2);
+        assert_eq!(count1, 1);
         assert_eq!(count2, 0);
 
         let _permit = assert_ready(fut1.poll(&mut count_cx1));
-        assert_eq!(count1, 2);
+        assert_eq!(count1, 1);
         assert_eq!(count2, 1);
 
         assert_ready(fut2.poll(&mut count_cx2));
