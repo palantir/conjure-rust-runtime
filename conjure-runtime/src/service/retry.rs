@@ -196,16 +196,16 @@ where
                         error,
                         retry_after: None,
                     })
-                } else if error.cause().is::<RawClientError>() && self.idempotent {
+                } else if self.idempotent && error.cause().is::<RawClientError>() {
                     Ok(AttemptOutcome::Retry {
                         error,
                         retry_after: None,
                     })
-                } else if error
-                    .cause()
-                    .downcast_ref::<RemoteError>()
-                    .map_or(false, |e| *e.status() == StatusCode::INTERNAL_SERVER_ERROR)
-                    && self.idempotent
+                } else if self.idempotent
+                    && error
+                        .cause()
+                        .downcast_ref::<RemoteError>()
+                        .map_or(false, |e| *e.status() == StatusCode::INTERNAL_SERVER_ERROR)
                 {
                     Ok(AttemptOutcome::Retry {
                         error,
