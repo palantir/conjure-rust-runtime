@@ -721,7 +721,7 @@ mod test {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
                     match attempt {
-                        0 => Err(Error::internal_safe(UnavailableError(()))),
+                        0 => Err(Error::internal_safe("blammo")),
                         1 => Ok(()),
                         _ => panic!(),
                     }
@@ -734,7 +734,34 @@ mod test {
             .body(None)
             .unwrap();
         let err = service.call(request).await.err().unwrap();
-        assert!(err.cause().is::<UnavailableError>());
+        assert_eq!(err.cause().to_string(), "blammo");
+    }
+    #[tokio::test]
+    async fn retry_non_idempotent_for_qos_errors() {
+        let service = RetryLayer::new(
+            Builder::new()
+                .max_num_retries(2)
+                .backoff_slot_size(Duration::from_secs(0)),
+        )
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |_| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    match attempt {
+                        0 => Err(Error::internal_safe(UnavailableError(()))),
+                        1 => Ok(()),
+                        _ => panic!(),
+                    }
+                }
+            }
+        }));
+
+        let request = Request::builder()
+            .extension(RetryConfig { idempotent: false })
+            .body(None)
+            .unwrap();
+        service.call(request).await.unwrap();
     }
 
     #[tokio::test]
