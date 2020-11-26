@@ -42,6 +42,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
 ```
 
 
+## `all_nodes_500[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -52,6 +53,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="all_nodes_500[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `all_nodes_500[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -62,6 +65,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="all_nodes_500[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `all_nodes_500[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -72,6 +77,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="all_nodes_500[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `black_hole[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -82,6 +89,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="black_hole[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `black_hole[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -92,6 +101,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="black_hole[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `black_hole[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -102,6 +113,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="black_hole[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `drastic_slowdown[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -112,6 +125,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="drastic_slowdown[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `drastic_slowdown[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -122,6 +137,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="drastic_slowdown[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `drastic_slowdown[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -132,6 +149,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="drastic_slowdown[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `fast_400s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -142,6 +161,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="fast_400s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `fast_400s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -152,6 +173,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="fast_400s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `fast_400s_then_revert[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -162,6 +185,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="fast_400s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `fast_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -172,6 +197,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="fast_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `fast_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -182,6 +209,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="fast_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `fast_503s_then_revert[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -192,6 +221,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="fast_503s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `one_big_spike[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -202,6 +233,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="one_big_spike[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `one_big_spike[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -212,6 +245,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="one_big_spike[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `one_big_spike[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -222,6 +257,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="one_big_spike[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -232,6 +269,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -242,6 +281,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `one_endpoint_dies_on_each_server[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -252,6 +293,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="one_endpoint_dies_on_each_server[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `short_outage_on_one_node[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -262,6 +305,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="short_outage_on_one_node[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `short_outage_on_one_node[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -272,6 +317,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="short_outage_on_one_node[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `short_outage_on_one_node[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -282,6 +329,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="short_outage_on_one_node[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `simplest_possible_case[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -292,6 +341,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="simplest_possible_case[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `simplest_possible_case[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -302,6 +353,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="simplest_possible_case[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `simplest_possible_case[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -312,6 +365,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="simplest_possible_case[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `slow_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -322,6 +377,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="slow_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `slow_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -332,6 +389,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="slow_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `slow_503s_then_revert[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -342,6 +401,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="slow_503s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `slowdown_and_error_thresholds[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -352,6 +413,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="slowdown_and_error_thresholds[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `slowdown_and_error_thresholds[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -362,6 +425,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="slowdown_and_error_thresholds[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `slowdown_and_error_thresholds[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -372,6 +437,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="slowdown_and_error_thresholds[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `uncommon_flakes[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
 <table>
     <tr>
         <th>master</th>
@@ -382,6 +449,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="uncommon_flakes[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
+
+## `uncommon_flakes[CONCURRENCY_LIMITER_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>
@@ -392,6 +461,8 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <td><image width=400 src="uncommon_flakes[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
+
+## `uncommon_flakes[UNLIMITED_ROUND_ROBIN]`
 <table>
     <tr>
         <th>master</th>

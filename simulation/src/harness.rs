@@ -97,7 +97,6 @@ impl Harness {
 <!-- Run `cargo test -p simulation --release` to regenerate this report. -->
 
 {}
-
 {}
             ",
             self.report_txt_section(),
@@ -127,7 +126,8 @@ impl Harness {
     fn report_images_section(&self) -> String {
         self.results.iter().map(|r| {
             format!(
-                "\
+                "
+## `{basename}`
 <table>
     <tr>
         <th>master</th>
