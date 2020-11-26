@@ -18,7 +18,6 @@ use crate::raw::{BuildRawClient, DefaultRawClientBuilder};
 use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
-use rand::RngCore;
 use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
@@ -41,7 +40,7 @@ pub struct Builder<T = DefaultRawClientBuilder> {
     node_selection_strategy: NodeSelectionStrategy,
     metrics: Option<Arc<MetricRegistry>>,
     host_metrics: Option<Arc<HostMetricsRegistry>>,
-    rng_builder: Option<Box<dyn Fn() -> Box<dyn RngCore + Sync + Send> + Sync + Send>>,
+    deterministic: bool,
     raw_client_builder: T,
 }
 
@@ -70,7 +69,7 @@ impl Builder {
             node_selection_strategy: NodeSelectionStrategy::PinUntilError,
             metrics: None,
             host_metrics: None,
-            rng_builder: None,
+            deterministic: false,
             raw_client_builder: DefaultRawClientBuilder,
         }
     }
@@ -324,23 +323,21 @@ impl<T> Builder<T> {
         self.host_metrics.as_ref()
     }
 
-    /// Sets the provider for random number generators used to produce entropy for client operations.
+    /// Controls the client's use of entropy.
     ///
-    /// Defaults to `None`, in which case the client will manage its own RNGs.
-    pub fn rng_builder<F, R>(&mut self, rng_builder: F) -> &mut Self
-    where
-        F: Fn() -> R + 'static + Sync + Send,
-        R: RngCore + 'static + Sync + Send,
-    {
-        self.rng_builder = Some(Box::new(move || Box::new(rng_builder())));
+    /// Several components of the client rely on random number generators. If determinism is enabled, these will be
+    /// initialized with a fixed seed such that clients created with the same configuration will produce the same
+    /// behavior.
+    ///
+    /// Defaults to `false`.
+    pub fn deterministic(&mut self, deterministic: bool) -> &mut Self {
+        self.deterministic = deterministic;
         self
     }
 
-    /// Returns the builder's configured RNG provider.
-    pub fn get_rng_builder(
-        &self,
-    ) -> Option<&(dyn Fn() -> Box<dyn RngCore + Sync + Send> + 'static + Sync + Send)> {
-        self.rng_builder.as_deref()
+    /// Returns the builder's configured determinism.
+    pub fn get_deterministic(&self) -> bool {
+        self.deterministic
     }
 
     /// Sets the raw client builder.
@@ -363,7 +360,7 @@ impl<T> Builder<T> {
             node_selection_strategy: self.node_selection_strategy,
             metrics: self.metrics,
             host_metrics: self.host_metrics,
-            rng_builder: self.rng_builder,
+            deterministic: self.deterministic,
             raw_client_builder,
         }
     }
