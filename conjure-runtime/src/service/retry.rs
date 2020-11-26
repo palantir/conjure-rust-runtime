@@ -736,6 +736,7 @@ mod test {
         let err = service.call(request).await.err().unwrap();
         assert_eq!(err.cause().to_string(), "blammo");
     }
+
     #[tokio::test]
     async fn retry_non_idempotent_for_qos_errors() {
         let service = RetryLayer::new(

@@ -39,7 +39,8 @@ fn main() {
         .simulation(black_hole)
         .simulation(one_endpoint_dies_on_each_server)
         .simulation(uncommon_flakes)
-        .simulation(one_big_spike);
+        .simulation(one_big_spike)
+        .finish();
 }
 
 fn simplest_possible_case(s: SimulationBuilder1) -> Simulation {

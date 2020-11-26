@@ -18,7 +18,7 @@ use plotters::style::colors;
 use std::any;
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct Harness {
     results: Vec<SimulationResult>,
@@ -29,7 +29,7 @@ impl Harness {
         Harness { results: vec![] }
     }
 
-    pub fn simulation<F>(&mut self, f: F) -> &mut Self
+    pub fn simulation<F>(mut self, f: F) -> Self
     where
         F: Fn(SimulationBuilder1) -> Simulation,
     {
@@ -47,11 +47,10 @@ impl Harness {
                 strategy,
                 report,
             };
+            self.results.push(result);
+            let result = &self.results[self.results.len() - 1];
 
-            let results_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("results");
-            let txt_file = results_dir
-                .join("txt")
-                .join(format!("{}.txt", result.basename()));
+            let txt_file = self.txt_file(result);
 
             let old_summary = if txt_file.exists() {
                 fs::read_to_string(&txt_file).unwrap()
@@ -74,17 +73,83 @@ impl Harness {
 
             fs::write(txt_file, new_summary).unwrap();
 
-            let image_path = results_dir.join(format!("{}.png", result.basename()));
+            let image_path = self.png_file(result);
             if image_path.exists() {
-                let prev_path = results_dir.join(format!("{}.prev.png", result.basename()));
+                let prev_path = image_path.with_extension("prev.png");
                 fs::rename(&image_path, &prev_path).unwrap();
             }
-            result.chart(&results_dir.join(format!("{}.png", result.basename())));
-
-            self.results.push(result);
+            result.chart(&image_path);
         }
 
         self
+    }
+
+    pub fn finish(mut self) {
+        if env::var_os("CI").is_some() {
+            return;
+        }
+
+        self.results.sort_by_key(|r| r.basename());
+
+        let report = format!(
+            "
+# Report
+<!-- Run `cargo test -p simulation --release` to regenerate this report. -->
+
+{}
+
+{}
+            ",
+            self.report_txt_section(),
+            self.report_images_section(),
+        );
+
+        fs::write(self.results_dir().join("report.md"), report).unwrap();
+    }
+
+    fn report_txt_section(&self) -> String {
+        let lines = self
+            .results
+            .iter()
+            .map(|r| format!("{:70}:\t{}", r.basename(), r.summary()))
+            .collect::<String>();
+
+        format!("```\n{}```\n", lines)
+    }
+
+    fn report_images_section(&self) -> String {
+        self.results.iter().map(|r| {
+            format!(
+                "\
+<table>
+    <tr>
+        <th>master</th>
+        <th>current</th>
+    </tr>
+    <tr>
+        <td><image width=400 src=\"https://media.githubusercontent.com/media/palantir/conjure-java-runtime/master/simulation/results/{basename}.png\" /></td>
+        <td><image width=400 src=\"{basename}.png\" /></td>
+    </tr>
+</table>
+",
+                basename = r.basename(),
+            )
+        }).collect()
+    }
+
+    fn results_dir(&self) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("results")
+    }
+
+    fn txt_file(&self, result: &SimulationResult) -> PathBuf {
+        self.results_dir()
+            .join("txt")
+            .join(format!("{}.txt", result.basename()))
+    }
+
+    fn png_file(&self, result: &SimulationResult) -> PathBuf {
+        self.results_dir()
+            .join(format!("{}.png", result.basename()))
     }
 }
 
