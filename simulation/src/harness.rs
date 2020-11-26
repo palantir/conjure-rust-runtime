@@ -57,6 +57,11 @@ impl Harness {
             )
             .unwrap();
 
+            let image_path = results_dir.join(format!("{}.png", result.basename()));
+            if image_path.exists() {
+                let prev_path = results_dir.join(format!("{}.prev.png", result.basename()));
+                fs::rename(&image_path, &prev_path).unwrap();
+            }
             result.chart(&results_dir.join(format!("{}.png", result.basename())));
 
             self.results.push(result);
