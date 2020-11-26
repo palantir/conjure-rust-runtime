@@ -272,7 +272,7 @@ where
         retry_after: Option<Duration>,
     ) -> Result<(), Error> {
         self.attempt += 1;
-        if self.attempt >= self.max_num_retries {
+        if self.attempt > self.max_num_retries {
             info!("exceeded retry limits");
             return Err(error);
         }
