@@ -33,9 +33,9 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
            slow_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=367.226666ms	server_cpu=522.877s	client_received=1500/1500	server_resps=1626	codes={200=1500}
                slow_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=85.196ms	server_cpu=124.026s	client_received=1500/1500	server_resps=1521	codes={200=1500}
                          slow_503s_then_revert[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=85.196ms	server_cpu=124.026s	client_received=1500/1500	server_resps=1521	codes={200=1500}
-   slowdown_and_error_thresholds[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=2%	client_mean=1.91015s	server_cpu=41840.03s	client_received=10000/10000	server_resps=10000	codes={200=200, 500=9800}
-       slowdown_and_error_thresholds[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=2.4%	client_mean=1.830541666s	server_cpu=39988.33s	client_received=10000/10000	server_resps=10000	codes={200=240, 500=9760}
-                 slowdown_and_error_thresholds[UNLIMITED_ROUND_ROBIN]:	success=2.4%	client_mean=1.830541666s	server_cpu=39988.33s	client_received=10000/10000	server_resps=10000	codes={200=240, 500=9760}
+   slowdown_and_error_thresholds[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=3.6%	client_mean=8.351922222s	server_cpu=162092.66s	client_received=10000/10000	server_resps=39399	codes={200=360, 500=9640}
+       slowdown_and_error_thresholds[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=3.3%	client_mean=6.60663063s	server_cpu=156373.63s	client_received=10000/10000	server_resps=39351	codes={200=333, 500=9667}
+                 slowdown_and_error_thresholds[UNLIMITED_ROUND_ROBIN]:	success=3.3%	client_mean=6.60663063s	server_cpu=156373.63s	client_received=10000/10000	server_resps=39351	codes={200=333, 500=9667}
                  uncommon_flakes[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=98.9%	client_mean=1ms	server_cpu=10s	client_received=10000/10000	server_resps=10000	codes={200=9889, 500=111}
                      uncommon_flakes[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=98.9%	client_mean=1ms	server_cpu=10s	client_received=10000/10000	server_resps=10000	codes={200=9886, 500=114}
                                uncommon_flakes[UNLIMITED_ROUND_ROBIN]:	success=98.9%	client_mean=1ms	server_cpu=10s	client_received=10000/10000	server_resps=10000	codes={200=9886, 500=114}

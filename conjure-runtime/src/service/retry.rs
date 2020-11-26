@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::body::ResetTrackingBody;
-use crate::errors::{ThrottledError, UnavailableError};
+use crate::errors::{RemoteError, ThrottledError, UnavailableError};
 use crate::raw::Service;
 use crate::raw::{BodyError, RawBody};
 use crate::rng::ConjureRng;
@@ -22,7 +22,7 @@ use crate::{Body, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
 use futures::future::{self, BoxFuture};
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
-use http::{HeaderValue, Request};
+use http::{HeaderValue, Request, StatusCode};
 use rand::Rng;
 use std::error;
 use std::pin::Pin;
@@ -37,9 +37,10 @@ pub struct RetryConfig {
 
 /// A layer which retries failed requests in certain cases.
 ///
-/// A request is retried if it fails with a service error with a cause of `ThrottledError`, `UnavailableError`, or
-/// `RawClientError`. Only idempotent requests can be retried which is configured by the `Idempotency` enum, and can be
-/// overridden on a request-by-request basis by passing the `RetryConfig` type in the request's extensions map.
+/// All requests that fail with a cause of `ThrottledError` or `UnavailableError` will be retried. Requests failing with
+/// a cause of `RawClientError` or `RemoteError` and a status code of `INTERNAL_SERVER_ERROR` will be retried if the
+/// request is considered idempotent. This is configured by the `Idempotency` enum, and can be overridden on a
+/// request-by-request basis by passing the `RetryConfig` type in the request's extensions map.
 ///
 /// The layer retries up to a specified maximum number of times, applying exponential backoff with full jitter in
 /// between each attempt.
@@ -197,6 +198,21 @@ where
                         error,
                         retry_after: None,
                     })
+                } else if error.cause().is::<RawClientError>() && self.idempotent {
+                    Ok(AttemptOutcome::Retry {
+                        error,
+                        retry_after: None,
+                    })
+                } else if error
+                    .cause()
+                    .downcast_ref::<RemoteError>()
+                    .map_or(false, |e| *e.status() == StatusCode::INTERNAL_SERVER_ERROR)
+                    && self.idempotent
+                {
+                    Ok(AttemptOutcome::Retry {
+                        error,
+                        retry_after: None,
+                    })
                 } else {
                     Err(error)
                 }
@@ -262,13 +278,6 @@ where
             return Err(error);
         }
 
-        // we don't need to worry about idempotency of QoS responses, since the server explicitly told is it didn't
-        // perform the operation
-        if !self.idempotent && !self.is_qos_response(&error) {
-            info!("unable to retry non-idempotent request");
-            return Err(error);
-        }
-
         if let Some(body) = body {
             let needs_reset = body.needs_reset();
             if needs_reset && !body.reset().await {
@@ -299,10 +308,6 @@ where
         time::delay_for(backoff).await;
 
         Ok(())
-    }
-
-    fn is_qos_response(&self, error: &Error) -> bool {
-        error.cause().is::<UnavailableError>() || error.cause().is::<ThrottledError>()
     }
 }
 
