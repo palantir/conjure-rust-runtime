@@ -186,6 +186,7 @@ where
                     _ => return Err(error),
                 }
 
+                #[allow(clippy::if_same_then_else)] // conditionals get too crazy if combined
                 if let Some(throttled) = error.cause().downcast_ref::<ThrottledError>() {
                     Ok(AttemptOutcome::Retry {
                         retry_after: throttled.retry_after,
