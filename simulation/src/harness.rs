@@ -16,6 +16,7 @@ use plotters::drawing::IntoDrawingArea;
 use plotters::prelude::BitMapBackend;
 use plotters::style::colors;
 use std::any;
+use std::env;
 use std::fs;
 use std::path::Path;
 
@@ -48,14 +49,30 @@ impl Harness {
             };
 
             let results_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("results");
+            let txt_file = results_dir
+                .join("txt")
+                .join(format!("{}.txt", result.basename()));
 
-            fs::write(
-                results_dir
-                    .join("txt")
-                    .join(format!("{}.txt", result.basename())),
-                result.summary(),
-            )
-            .unwrap();
+            let old_summary = if txt_file.exists() {
+                fs::read_to_string(&txt_file).unwrap()
+            } else {
+                String::new()
+            };
+
+            let new_summary = result.summary();
+
+            if new_summary == old_summary {
+                continue;
+            }
+
+            if env::var_os("CI").is_some() {
+                panic!(
+                    "simulation {} results have changed - rerun simulations locally and check in the new results",
+                    result.basename(),
+                );
+            }
+
+            fs::write(txt_file, new_summary).unwrap();
 
             let image_path = results_dir.join(format!("{}.png", result.basename()));
             if image_path.exists() {
