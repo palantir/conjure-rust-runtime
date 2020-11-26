@@ -108,10 +108,17 @@ impl Harness {
     }
 
     fn report_txt_section(&self) -> String {
+        let width = self
+            .results
+            .iter()
+            .map(|r| r.basename().len())
+            .max()
+            .unwrap();
+
         let lines = self
             .results
             .iter()
-            .map(|r| format!("{:70}:\t{}", r.basename(), r.summary()))
+            .map(|r| format!("{:>width$}:\t{}", r.basename(), r.summary(), width = width))
             .collect::<String>();
 
         format!("```\n{}```\n", lines)
