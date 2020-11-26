@@ -248,8 +248,7 @@ impl Service<Request<RawBody>> for SimulationRawClient {
         let handler = server
             .handlers
             .iter()
-            .filter(|h| (h.predicate)(&req))
-            .next()
+            .find(|h| (h.predicate)(&req))
             .expect("no handler available for request");
 
         server.active_requests.inc();

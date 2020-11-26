@@ -104,7 +104,7 @@ impl SimulationBuilder1 {
             .service(SERVICE)
             .user_agent(UserAgent::new(Agent::new("simulation", "0.0.0")))
             .metrics(self.metrics.clone())
-            .rng_builder(|| crate::rng());
+            .rng_builder(crate::rng);
         for server in &self.servers {
             builder.uri(format!("http://{}", server.name()).parse().unwrap());
         }
@@ -218,7 +218,7 @@ pub struct Simulation {
 }
 
 impl Simulation {
-    pub fn new() -> SimulationBuilder0 {
+    pub fn builder() -> SimulationBuilder0 {
         SimulationBuilder0
     }
 
@@ -255,7 +255,7 @@ impl Simulation {
                                 Err(error) => {
                                     if let Some(error) = error.cause().downcast_ref::<RemoteError>()
                                     {
-                                        error.status().clone()
+                                        *error.status()
                                     } else if error.cause().is::<UnavailableError>() {
                                         StatusCode::SERVICE_UNAVAILABLE
                                     } else if error.cause().is::<ThrottledError>() {

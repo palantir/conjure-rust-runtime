@@ -61,7 +61,7 @@ impl Reservoir for FullyBufferedReservoir {
 
     fn snapshot(&self) -> Box<dyn Snapshot> {
         let mut values = self.values.lock().clone();
-        values.sort();
+        values.sort_unstable();
         Box::new(FullyBufferedSnapshot { values })
     }
 }

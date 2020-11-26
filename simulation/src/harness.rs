@@ -40,7 +40,7 @@ impl Harness {
             Strategy::ConcurrencyLimiterPinUntilError,
             Strategy::UnlimitedRoundRobin,
         ] {
-            let report = f(Simulation::new().strategy(strategy)).run();
+            let report = f(Simulation::builder().strategy(strategy)).run();
             let result = SimulationResult {
                 name,
                 strategy,
