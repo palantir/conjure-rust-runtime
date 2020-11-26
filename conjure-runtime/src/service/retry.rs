@@ -805,7 +805,7 @@ mod test {
     async fn give_up_after_limit() {
         let service = RetryLayer::new(
             Builder::new()
-                .max_num_retries(2)
+                .max_num_retries(1)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
         .layer(service::service_fn({
