@@ -27,8 +27,7 @@ use rand::Rng;
 use std::error;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::time;
+use tokio::time::{self, Duration};
 use witchcraft_log::info;
 
 #[derive(Copy, Clone)]

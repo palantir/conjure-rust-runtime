@@ -253,7 +253,7 @@ impl Service<Request<RawBody>> for SimulationRawClient {
             .expect("no handler available for request");
 
         server.active_requests.inc();
-        metrics::request_meter(&self.metrics, server.name, req.uri().path()).mark(1);
+        metrics::request_counter(&self.metrics, server.name, req.uri().path()).inc();
         self.recorder.lock().record();
 
         let response = (handler.response)(server);

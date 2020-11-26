@@ -29,7 +29,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::runtime::{self, Runtime};
 use tokio::time::{self, Duration, Instant};
-use witchcraft_metrics::{MetricId, MetricRegistry};
+use witchcraft_metrics::MetricRegistry;
 
 const SERVICE: &str = "simulation";
 
@@ -37,17 +37,25 @@ pub struct SimulationBuilder0;
 
 impl SimulationBuilder0 {
     pub fn strategy(self, strategy: Strategy) -> SimulationBuilder1 {
-        let runtime = runtime::Builder::new()
+        let mut runtime = runtime::Builder::new()
             .enable_time()
             .basic_scheduler()
             .build()
             .unwrap();
-        runtime.enter(|| time::pause());
+        runtime.block_on(async {
+            time::pause();
+            // https://github.com/tokio-rs/tokio/issues/3179
+            time::delay_for(Duration::from_millis(1)).await;
+        });
+
+        let metrics = Arc::new(MetricRegistry::new());
+        // initialize the responses timer with our custom reservoir
+        metrics::responses_timer(&metrics, SERVICE);
 
         SimulationBuilder1 {
             runtime,
             servers: vec![],
-            metrics: Arc::new(MetricRegistry::new()),
+            metrics,
             endpoints: vec![Endpoint::DEFAULT],
             strategy,
         }
@@ -277,10 +285,7 @@ impl Simulation {
                 SimulationReport {
                     end_time: start.elapsed(),
                     client_mean: Duration::from_nanos(
-                        metrics
-                            .timer(
-                                MetricId::new("client.response").with_tag("service-name", SERVICE),
-                            )
+                        metrics::responses_timer(&metrics, SERVICE)
                             .snapshot()
                             .mean() as u64,
                     ),
