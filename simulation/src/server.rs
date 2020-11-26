@@ -263,12 +263,14 @@ impl Service<Request<RawBody>> for SimulationRawClient {
             let active_requests = server.active_requests.clone();
             let global_responses = self.global_responses.clone();
             let global_server_time_nanos = self.global_server_time_nanos.clone();
+            let recorder = self.recorder.clone();
             async move {
                 time::delay_for(response_time).await;
 
                 active_requests.dec();
                 global_responses.inc();
                 global_server_time_nanos.add(start.elapsed().as_nanos() as i64);
+                recorder.lock().record();
 
                 Ok(response)
             }

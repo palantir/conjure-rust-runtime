@@ -98,9 +98,6 @@ impl MetricsRecord {
             .iter()
             .filter(|(id, _)| filter(id))
             .map(|(id, points)| {
-                let points =
-                    reduce_granularity(root.dim_in_pixel().0 as usize / 3, points.to_vec());
-
                 x_max = f64::max(x_max, points[points.len() - 1].0);
                 y_max = points.iter().map(|p| p.1).fold(y_max, f64::max);
 
@@ -119,6 +116,9 @@ impl MetricsRecord {
 
         chart.configure_mesh().x_desc("time_sec").draw().unwrap();
 
+        let width = chart.backend_coord(&(x_max, 0.)).0 - chart.backend_coord(&(0., 0.)).0;
+        let period = x_max / width as f64 * 3.;
+
         // https://colorbrewer2.org/#type=qualitative&scheme=Set1&n=6
         let colors = [
             &RGBColor(0xe4, 0x1a, 0x1c),
@@ -136,6 +136,8 @@ impl MetricsRecord {
                 .map(|t| format!("[{}] ", t.1))
                 .collect::<String>();
             let name = format!("{}{}.count", tags, id.name());
+
+            let points = downsample(points, period);
 
             chart
                 .draw_series(LineSeries::new(points, color))
@@ -156,19 +158,36 @@ impl MetricsRecord {
     }
 }
 
-fn reduce_granularity(max_samples: usize, raw_samples: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
-    if raw_samples.len() <= max_samples {
-        return raw_samples;
+fn downsample(raw: &[(f64, f64)], period: f64) -> Vec<(f64, f64)> {
+    let mut out = vec![];
+
+    // this does extra work by having to skip over empty buckets, but makes the implementation easier
+    let mut points = raw.iter().copied().peekable();
+    for i in 0.. {
+        let start = i as f64 * period;
+        let end = start + period;
+
+        // FIXME this isn't ideal since sample density isn't uniform, but it shouldn't matter much in practice
+        let mut sum = 0.;
+        let mut count = 0;
+        while let Some(&(x, y)) = points.peek() {
+            if x >= end {
+                break;
+            }
+
+            sum += y;
+            count += 1;
+            points.next();
+        }
+
+        if count > 0 {
+            out.push((start + period / 2., sum / count as f64));
+        }
+
+        if points.peek().is_none() {
+            break;
+        }
     }
 
-    let half_granularity = raw_samples
-        .chunks_exact(2)
-        .map(|c| (mean(c[0].0, c[1].0), mean(c[0].1, c[1].1)))
-        .collect();
-
-    reduce_granularity(max_samples, half_granularity)
-}
-
-fn mean(a: f64, b: f64) -> f64 {
-    (a + b) / 2.
+    out
 }

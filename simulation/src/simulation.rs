@@ -281,6 +281,8 @@ impl Simulation {
                     None => run_requests.await,
                 }
 
+                recorder.lock().record();
+
                 let status_codes = status_codes.into_inner();
                 SimulationReport {
                     end_time: start.elapsed(),
