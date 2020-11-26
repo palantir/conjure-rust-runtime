@@ -191,9 +191,7 @@ where
                         retry_after: throttled.retry_after,
                         error,
                     })
-                } else if error.cause().is::<UnavailableError>()
-                    || error.cause().is::<RawClientError>()
-                {
+                } else if error.cause().is::<UnavailableError>() {
                     Ok(AttemptOutcome::Retry {
                         error,
                         retry_after: None,
