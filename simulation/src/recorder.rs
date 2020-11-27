@@ -116,6 +116,7 @@ impl MetricsRecord {
 
         chart.configure_mesh().x_desc("time_sec").draw().unwrap();
 
+        // Downsample to one point per 3 pixels x-axis. The rasterizer doesn't seem to do well with higher densities.
         let width = chart.backend_coord(&(x_max, 0.)).0 - chart.backend_coord(&(0., 0.)).0;
         let period = x_max / width as f64 * 3.;
 
