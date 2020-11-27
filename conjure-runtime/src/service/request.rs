@@ -49,9 +49,9 @@ const USERINFO: &AsciiSet = &PATH
 // https://url.spec.whatwg.org/#component-percent-encode-set
 const COMPONENT: &AsciiSet = &USERINFO.add(b'$').add(b'%').add(b'&').add(b'+').add(b',');
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct Pattern {
-    pub pattern: String,
+    pub pattern: &'static str,
 }
 
 /// A layer which converts a Conjure `Request` to an `http::Request`.
@@ -87,7 +87,7 @@ where
         *new_req.uri_mut() = build_url(req.pattern, req.params);
         *new_req.headers_mut() = req.headers;
         new_req.extensions_mut().insert(Pattern {
-            pattern: req.pattern.to_string(),
+            pattern: req.pattern,
         });
         if let Some(idempotent) = req.idempotent {
             new_req.extensions_mut().insert(RetryConfig { idempotent });

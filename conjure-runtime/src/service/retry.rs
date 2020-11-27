@@ -164,7 +164,7 @@ where
         *new_req.headers_mut() = req.headers().clone();
 
         if let Some(pattern) = req.extensions().get::<Pattern>() {
-            new_req.extensions_mut().insert(pattern.clone());
+            new_req.extensions_mut().insert(*pattern);
         }
 
         let parts = new_req.into_parts().0;

@@ -38,7 +38,7 @@ impl<'a, T> RequestBuilder<'a, T> {
     pub(crate) fn new(
         client: &'a Client<T>,
         method: Method,
-        pattern: &'a str,
+        pattern: &'static str,
     ) -> RequestBuilder<'a, T> {
         RequestBuilder {
             client,
@@ -129,7 +129,7 @@ where
 
 pub(crate) struct Request<'a> {
     pub(crate) method: Method,
-    pub(crate) pattern: &'a str,
+    pub(crate) pattern: &'static str,
     pub(crate) params: HashMap<String, Vec<String>>,
     pub(crate) headers: HeaderMap,
     pub(crate) body: Option<Pin<Box<ResetTrackingBody<dyn Body + Sync + Send + 'a>>>>,
@@ -137,7 +137,7 @@ pub(crate) struct Request<'a> {
 }
 
 impl<'a> Request<'a> {
-    pub(crate) fn new(method: Method, pattern: &'a str) -> Request<'a> {
+    pub(crate) fn new(method: Method, pattern: &'static str) -> Request<'a> {
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, DEFAULT_ACCEPT.clone());
 

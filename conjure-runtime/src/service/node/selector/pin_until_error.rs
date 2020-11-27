@@ -342,9 +342,7 @@ mod test {
 
     fn request() -> Request<()> {
         Request::builder()
-            .extension(Pattern {
-                pattern: "foo".to_string(),
-            })
+            .extension(Pattern { pattern: "foo" })
             .body(())
             .unwrap()
     }

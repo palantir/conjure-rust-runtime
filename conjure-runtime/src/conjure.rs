@@ -33,6 +33,9 @@ use std::future::Future;
 use std::pin::Pin;
 use tokio::io::AsyncReadExt;
 
+// https://github.com/rust-lang/rust/issues/63033#issuecomment-540720267
+struct StaticHack(&'static str);
+
 impl<T, B> Client<T>
 where
     T: Service<http::Request<raw::RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
@@ -45,14 +48,14 @@ where
     async fn conjure_inner(
         &self,
         method: Method,
-        path: &str,
+        path: StaticHack,
         path_params: PathParams,
         query_params: QueryParams,
         headers: HeaderMap,
         body: Option<RawBody<'_>>,
         accept: Accept,
     ) -> Result<Response<B>, Error> {
-        let mut request = RequestBuilder::new(self, method, path);
+        let mut request = RequestBuilder::new(self, method, path.0);
         for (key, value) in &path_params {
             request = request.param(key, value);
         }
@@ -109,7 +112,7 @@ where
             let response = self
                 .conjure_inner(
                     method,
-                    path,
+                    StaticHack(path),
                     path_params,
                     query_params,
                     headers,
