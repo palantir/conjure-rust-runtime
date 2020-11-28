@@ -11,15 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use plotters::chart::{ChartBuilder, SeriesLabelPosition};
-use plotters::coord::Shift;
-use plotters::drawing::DrawingArea;
-use plotters::element::PathElement;
-use plotters::prelude::DrawingBackend;
-use plotters::series::LineSeries;
-use plotters::style::colors;
-use plotters::style::{Color, RGBColor};
 use std::collections::BTreeMap;
+use std::io::{self, Write};
 use std::sync::Arc;
 use tokio::time::Instant;
 use witchcraft_metrics::{Metric, MetricId, MetricRegistry};
@@ -85,13 +78,12 @@ pub struct MetricsRecord {
 }
 
 impl MetricsRecord {
-    pub fn chart<B, F>(&self, root: &DrawingArea<B, Shift>, filter: F)
+    pub fn chart<F, W>(&self, filter: F, mut w: W) -> io::Result<()>
     where
-        B: DrawingBackend,
         F: Fn(&MetricId) -> bool,
+        W: Write,
     {
         let mut x_max = 0.;
-        let mut y_max = 0.;
 
         let plots = self
             .captures
@@ -99,63 +91,59 @@ impl MetricsRecord {
             .filter(|(id, _)| filter(id))
             .map(|(id, points)| {
                 x_max = f64::max(x_max, points[points.len() - 1].0);
-                y_max = points.iter().map(|p| p.1).fold(y_max, f64::max);
 
                 (id, points)
             })
             .collect::<Vec<_>>();
         assert!(!plots.is_empty());
 
-        let mut chart = ChartBuilder::on(root)
-            .margin(5)
-            .margin_right(30)
-            .x_label_area_size(30)
-            .y_label_area_size(50)
-            .build_cartesian_2d(0f64..x_max, 0f64..y_max)
-            .unwrap();
+        // downsample to roughly 1 point per pixel
+        let period = x_max / 800.;
+        let plots = plots
+            .into_iter()
+            .map(|(id, points)| (id, downsample(points, period)))
+            .collect::<Vec<_>>();
 
-        chart.configure_mesh().x_desc("time_sec").draw().unwrap();
+        write!(
+            w,
+            "
+set key inside left top Left reverse opaque box
+set xlabel \"time_sec\" noenhanced
+set xrange [0:*] noextend
+set grid x y
+plot",
+        )?;
 
-        // Downsample to one point per 3 pixels x-axis. The rasterizer doesn't seem to do well with higher densities.
-        let width = chart.backend_coord(&(x_max, 0.)).0 - chart.backend_coord(&(0., 0.)).0;
-        let period = x_max / width as f64 * 3.;
+        for (i, (id, points)) in plots.iter().enumerate() {
+            if i != 0 {
+                write!(w, ",")?;
+            }
 
-        // https://colorbrewer2.org/#type=qualitative&scheme=Set1&n=6
-        let colors = [
-            &RGBColor(0xe4, 0x1a, 0x1c),
-            &RGBColor(0x37, 0x7e, 0xb8),
-            &RGBColor(0x4d, 0xaf, 0x4a),
-            &RGBColor(0x98, 0x4e, 0xa3),
-            &RGBColor(0xff, 0x7f, 0x00),
-            &RGBColor(0xff, 0xff, 0x33),
-        ];
-
-        for ((id, points), color) in plots.into_iter().zip(colors.iter().copied().cycle()) {
             let tags = id
                 .tags()
                 .iter()
                 .map(|t| format!("[{}] ", t.1))
                 .collect::<String>();
-            let name = format!("{}{}.count", tags, id.name());
+            let title = format!("{}{}.count", tags, id.name());
 
-            let points = downsample(points, period);
-
-            chart
-                .draw_series(LineSeries::new(points, color))
-                .unwrap()
-                .label(name)
-                .legend(move |(x, y)| {
-                    PathElement::new(vec![(x, y), (x + 20, y)], color.stroke_width(2))
-                });
+            write!(
+                w,
+                r#" "-" binary endian=little record={} format="%float64" using 1:2 with lines title "{}" noenhanced"#,
+                points.len(),
+                title,
+            )?;
         }
 
-        chart
-            .configure_series_labels()
-            .position(SeriesLabelPosition::UpperLeft)
-            .background_style(&colors::WHITE)
-            .border_style(&colors::BLACK)
-            .draw()
-            .unwrap();
+        writeln!(w)?;
+
+        for (_, points) in &plots {
+            for (x, y) in points {
+                w.write_all(&x.to_le_bytes())?;
+                w.write_all(&y.to_le_bytes())?;
+            }
+        }
+
+        Ok(())
     }
 }
 

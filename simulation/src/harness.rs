@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::simulation::{Simulation, SimulationBuilder1, SimulationReport, Strategy};
-use plotters::drawing::IntoDrawingArea;
-use plotters::prelude::BitMapBackend;
-use plotters::style::colors;
 use std::any;
 use std::env;
 use std::fs;
+use std::io::BufWriter;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 pub struct Harness {
     results: Vec<SimulationResult>,
@@ -78,7 +78,9 @@ impl Harness {
                 let prev_path = image_path.with_extension("prev.png");
                 fs::rename(&image_path, &prev_path).unwrap();
             }
-            result.chart(&image_path);
+            result
+                .chart(&image_path)
+                .expect("error rendering charts with gnuplot");
         }
 
         self
@@ -192,7 +194,14 @@ impl SimulationResult {
         )
     }
 
-    fn chart(&self, path: &Path) {
+    fn chart(&self, path: &Path) -> io::Result<()> {
+        let mut gnuplot = Command::new("gnuplot")
+            .arg("-")
+            .stdin(Stdio::piped())
+            .spawn()?;
+
+        let mut w = BufWriter::new(gnuplot.stdin.take().unwrap());
+
         let title = format!(
             "{} success={}% client_mean={:?} server_cpu={:?}",
             self.strategy,
@@ -201,20 +210,33 @@ impl SimulationResult {
             self.report.server_cpu
         );
 
-        let root = BitMapBackend::new(path, (800, 1200)).into_drawing_area();
-        root.fill(&colors::WHITE).unwrap();
-        let root = root
-            .margin(10, 10, 0, 0)
-            .titled(&title, ("sans-serif", 15))
-            .unwrap();
+        write!(
+            w,
+            r#"
+set terminal pngcairo font "sans-serif,8" size 800, 1200
+set output "{}"
+set multiplot title "{}" font "sans-serif,10" noenhanced layout 2,1
+"#,
+            path.display(),
+            title,
+        )?;
 
-        let parts = root.split_evenly((2, 1));
         self.report
             .record
-            .chart(&parts[0], |id| id.name().ends_with("activeRequests"));
+            .chart(|id| id.name().ends_with("activeRequests"), &mut w)?;
 
         self.report
             .record
-            .chart(&parts[1], |id| id.name().ends_with("request"));
+            .chart(|id| id.name().ends_with("request"), &mut w)?;
+
+        w.flush()?;
+        drop(w);
+
+        let status = gnuplot.wait().unwrap();
+        if !status.success() {
+            panic!("gnuplot returned status {}", status);
+        }
+
+        Ok(())
     }
 }
