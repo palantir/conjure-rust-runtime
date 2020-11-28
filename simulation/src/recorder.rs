@@ -171,7 +171,7 @@ plot",
         }
 
         if !self.events.is_empty() {
-            for (time, _) in &self.events {
+            for time in self.events.keys() {
                 writeln!(w, "{}", time.as_secs_f64())?;
             }
             writeln!(w, "e")?;
