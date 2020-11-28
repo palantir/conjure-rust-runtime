@@ -104,12 +104,12 @@ fn slow_503s_then_revert(s: SimulationBuilder1) -> Simulation {
                 h.response(200)
                     .linear_response_time(Duration::from_millis(60), capacity)
             })
-            .until(Duration::from_secs(3))
+            .until(Duration::from_secs(3), "slow 503s")
             .handler(|h| {
                 h.response(503)
                     .linear_response_time(Duration::from_secs(1), capacity)
             })
-            .until(Duration::from_secs(10))
+            .until(Duration::from_secs(10), "revert")
             .handler(|h| {
                 h.response(200)
                     .linear_response_time(Duration::from_millis(10), capacity)
@@ -129,9 +129,9 @@ fn fast_503s_then_revert(s: SimulationBuilder1) -> Simulation {
     .server(|s| {
         s.name("fast_503s_then_revert")
             .handler(|h| h.response(200).response_time(Duration::from_millis(120)))
-            .until(Duration::from_secs(3))
+            .until(Duration::from_secs(3), "fast 503s")
             .handler(|h| h.response(503).response_time(Duration::from_millis(10)))
-            .until(Duration::from_secs(60))
+            .until(Duration::from_secs(60), "revert")
             .handler(|h| h.response(200).response_time(Duration::from_millis(120)))
     })
     .requests_per_second(500)
@@ -148,9 +148,9 @@ fn fast_400s_then_revert(s: SimulationBuilder1) -> Simulation {
     .server(|s| {
         s.name("fast_400s_then_revert")
             .handler(|h| h.response(200).response_time(Duration::from_millis(120)))
-            .until(Duration::from_secs(3))
+            .until(Duration::from_secs(3), "fast 400s")
             .handler(|h| h.response(400).response_time(Duration::from_millis(20)))
-            .until(Duration::from_secs(30))
+            .until(Duration::from_secs(30), "revert")
             .handler(|h| h.response(200).response_time(Duration::from_millis(120)))
     })
     .requests_per_second(100)
@@ -167,9 +167,9 @@ fn short_outage_on_one_node(s: SimulationBuilder1) -> Simulation {
     .server(|s| {
         s.name("has_short_outage")
             .handler(|h| h.response(200).response_time(Duration::from_secs(2)))
-            .until(Duration::from_secs(30))
+            .until(Duration::from_secs(30), "20s outage")
             .handler(|h| h.response(500).response_time(Duration::from_nanos(10)))
-            .until(Duration::from_secs(50))
+            .until(Duration::from_secs(50), "revert")
             .handler(|h| h.response(200).response_time(Duration::from_secs(2)))
     })
     .requests_per_second(20)
@@ -192,12 +192,12 @@ fn drastic_slowdown(s: SimulationBuilder1) -> Simulation {
                 h.response(200)
                     .linear_response_time(Duration::from_millis(60), capacity)
             })
-            .until(Duration::from_secs(3))
+            .until(Duration::from_secs(3), "slow 200s")
             .handler(|h| {
                 h.response(200)
                     .linear_response_time(Duration::from_secs(10), capacity)
             })
-            .until(Duration::from_secs(10))
+            .until(Duration::from_secs(10), "revert")
             .handler(|h| {
                 h.response(200)
                     .linear_response_time(Duration::from_millis(60), capacity)
@@ -213,13 +213,13 @@ fn all_nodes_500(s: SimulationBuilder1) -> Simulation {
     s.server(|s| {
         s.name("node1")
             .handler(|h| h.response(500).response_time(Duration::from_millis(600)))
-            .until(Duration::from_secs(10))
+            .until(Duration::from_secs(10), "revert badness")
             .handler(|h| h.response(200).response_time(Duration::from_millis(600)))
     })
     .server(|s| {
         s.name("node2")
             .handler(|h| h.response(500).response_time(Duration::from_millis(600)))
-            .until(Duration::from_secs(10))
+            .until(Duration::from_secs(10), "revert badness")
             .handler(|h| h.response(200).response_time(Duration::from_millis(600)))
     })
     .requests_per_second(100)
@@ -236,7 +236,7 @@ fn black_hole(s: SimulationBuilder1) -> Simulation {
     .server(|s| {
         s.name("node2_black_hole")
             .handler(|h| h.response(200).response_time(Duration::from_millis(600)))
-            .until(Duration::from_secs(3))
+            .until(Duration::from_secs(3), "black hole")
             .handler(|h| {
                 h.response(200)
                     .response_time(Duration::from_secs(60 * 60 * 24))
@@ -264,7 +264,7 @@ fn one_endpoint_dies_on_each_server(s: SimulationBuilder1) -> Simulation {
                     .response(200)
                     .response_time(Duration::from_millis(600))
             })
-            .until(Duration::from_secs(3))
+            .until(Duration::from_secs(3), "e1 breaks")
             .handler(|h| {
                 h.endpoint(endpoint1.clone())
                     .response(500)
@@ -288,7 +288,7 @@ fn one_endpoint_dies_on_each_server(s: SimulationBuilder1) -> Simulation {
                     .response(200)
                     .response_time(Duration::from_millis(600))
             })
-            .until(Duration::from_secs(3))
+            .until(Duration::from_secs(3), "e2 breaks")
             .handler(|h| {
                 h.endpoint(endpoint1.clone())
                     .response(200)

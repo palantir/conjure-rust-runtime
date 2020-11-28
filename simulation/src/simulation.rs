@@ -14,7 +14,8 @@
 use crate::metrics;
 use crate::recorder::{MetricsRecord, SimulationMetricsRecorder};
 use crate::server::{
-    Endpoint, Server, ServerBuilder0, SimulationRawClient, SimulationRawClientBuilder,
+    Endpoint, Server, ServerBuilder0, ServerBuilder1, SimulationRawClient,
+    SimulationRawClientBuilder,
 };
 use conjure_runtime::errors::{RemoteError, ThrottledError, UnavailableError};
 use conjure_runtime::{Agent, Builder, Client, NodeSelectionStrategy, UserAgent};
@@ -52,10 +53,16 @@ impl SimulationBuilder0 {
         // initialize the responses timer with our custom reservoir
         metrics::responses_timer(&metrics, SERVICE);
 
+        let mut recorder = runtime.enter(|| SimulationMetricsRecorder::new(&metrics));
+        recorder.filter_metrics(|id| {
+            id.name().ends_with("activeRequests") || id.name().ends_with("request")
+        });
+
         SimulationBuilder1 {
             runtime,
             servers: vec![],
             metrics,
+            recorder,
             endpoints: vec![Endpoint::DEFAULT],
             strategy,
         }
@@ -65,6 +72,7 @@ impl SimulationBuilder0 {
 pub struct SimulationBuilder1 {
     runtime: Runtime,
     metrics: Arc<MetricRegistry>,
+    recorder: SimulationMetricsRecorder,
     servers: Vec<Server>,
     endpoints: Vec<Endpoint>,
     strategy: Strategy,
@@ -73,14 +81,14 @@ pub struct SimulationBuilder1 {
 impl SimulationBuilder1 {
     pub fn server<F>(mut self, f: F) -> Self
     where
-        F: FnOnce(ServerBuilder0) -> Server,
+        F: FnOnce(ServerBuilder0) -> ServerBuilder1,
     {
-        let server = self.runtime.enter(|| {
-            f(ServerBuilder0 {
-                metrics: &self.metrics,
-            })
+        let server = self.runtime.enter({
+            let metrics = &self.metrics;
+            let recorder = &mut self.recorder;
+            move || f(ServerBuilder0 { metrics, recorder })
         });
-        self.servers.push(server);
+        self.servers.push(server.build());
         self
     }
 
@@ -90,13 +98,7 @@ impl SimulationBuilder1 {
     }
 
     pub fn requests_per_second(self, requests_per_second: u32) -> SimulationBuilder2 {
-        let mut recorder = self
-            .runtime
-            .enter(|| SimulationMetricsRecorder::new(&self.metrics));
-        recorder.filter_metrics(|id| {
-            id.name().ends_with("activeRequests") || id.name().ends_with("request")
-        });
-        let recorder = Arc::new(Mutex::new(recorder));
+        let recorder = Arc::new(Mutex::new(self.recorder));
 
         let mut builder = Builder::new();
         self.strategy.apply(&mut builder);

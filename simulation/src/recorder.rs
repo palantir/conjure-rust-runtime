@@ -14,7 +14,7 @@
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::sync::Arc;
-use tokio::time::Instant;
+use tokio::time::{Duration, Instant};
 use witchcraft_metrics::{Metric, MetricId, MetricRegistry};
 
 pub struct SimulationMetricsRecorder {
@@ -22,6 +22,7 @@ pub struct SimulationMetricsRecorder {
     start: Instant,
     prefilter: Box<dyn Fn(&MetricId) -> bool + Sync + Send>,
     captures: BTreeMap<MetricId, Vec<(f64, f64)>>,
+    events: BTreeMap<Duration, Vec<&'static str>>,
 }
 
 impl SimulationMetricsRecorder {
@@ -31,6 +32,7 @@ impl SimulationMetricsRecorder {
             start: Instant::now(),
             prefilter: Box::new(|_| true),
             captures: BTreeMap::new(),
+            events: BTreeMap::new(),
         }
     }
 
@@ -66,15 +68,24 @@ impl SimulationMetricsRecorder {
         }
     }
 
+    pub fn event(&mut self, time: Duration, value: &'static str) {
+        let events = self.events.entry(time).or_insert_with(Vec::new);
+        if events.last() != Some(&value) {
+            events.push(value);
+        }
+    }
+
     pub fn finish(&self) -> MetricsRecord {
         MetricsRecord {
             captures: self.captures.clone(),
+            events: self.events.clone(),
         }
     }
 }
 
 pub struct MetricsRecord {
     captures: BTreeMap<MetricId, Vec<(f64, f64)>>,
+    events: BTreeMap<Duration, Vec<&'static str>>,
 }
 
 impl MetricsRecord {
@@ -84,6 +95,7 @@ impl MetricsRecord {
         W: Write,
     {
         let mut x_max = 0.;
+        let mut y_max = 0.;
 
         let plots = self
             .captures
@@ -91,6 +103,7 @@ impl MetricsRecord {
             .filter(|(id, _)| filter(id))
             .map(|(id, points)| {
                 x_max = f64::max(x_max, points[points.len() - 1].0);
+                y_max = points.iter().map(|p| p.1).fold(y_max, f64::max);
 
                 (id, points)
             })
@@ -109,9 +122,11 @@ impl MetricsRecord {
             "
 set key inside left top Left reverse opaque box
 set xlabel \"time_sec\" noenhanced
-set xrange [0:*] noextend
+set xrange [0:{}] noextend
+set yrange [0:{}] noextend
 set grid x y
 plot",
+            x_max, y_max,
         )?;
 
         for (i, (id, points)) in plots.iter().enumerate() {
@@ -134,6 +149,18 @@ plot",
             )?;
         }
 
+        if !self.events.is_empty() {
+            write!(
+                w,
+                r#", "-" using 1:(0):(0):({}) with vectors nohead title "events""#,
+                y_max,
+            )?;
+            write!(
+                w,
+                r#", "-" using 1:(0):2 with labels left offset character 1, 1 notitle"#,
+            )?;
+        }
+
         writeln!(w)?;
 
         for (_, points) in &plots {
@@ -141,6 +168,18 @@ plot",
                 w.write_all(&x.to_le_bytes())?;
                 w.write_all(&y.to_le_bytes())?;
             }
+        }
+
+        if !self.events.is_empty() {
+            for (time, _) in &self.events {
+                writeln!(w, "{}", time.as_secs_f64())?;
+            }
+            writeln!(w, "e")?;
+
+            for (time, names) in &self.events {
+                writeln!(w, r#"{} "{}""#, time.as_secs_f64(), names.join(", "))?;
+            }
+            writeln!(w, "e")?;
         }
 
         Ok(())

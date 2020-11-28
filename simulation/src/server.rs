@@ -65,25 +65,28 @@ impl Endpoint {
 
 pub struct ServerBuilder0<'a> {
     pub metrics: &'a MetricRegistry,
+    pub recorder: &'a mut SimulationMetricsRecorder,
 }
 
-impl ServerBuilder0<'_> {
-    pub fn name(self, name: &'static str) -> Server {
-        Server {
+impl<'a> ServerBuilder0<'a> {
+    pub fn name(self, name: &'static str) -> ServerBuilder1<'a> {
+        ServerBuilder1 {
             name,
             active_requests: metrics::active_requests(&self.metrics, name),
             handlers: vec![],
+            recorder: self.recorder,
         }
     }
 }
 
-pub struct Server {
+pub struct ServerBuilder1<'a> {
     name: &'static str,
     active_requests: Arc<Counter>,
     handlers: Vec<Handler>,
+    recorder: &'a mut SimulationMetricsRecorder,
 }
 
-impl Server {
+impl ServerBuilder1<'_> {
     pub fn handler<F>(mut self, f: F) -> Self
     where
         F: FnOnce(HandlerBuilder0) -> Handler,
@@ -95,7 +98,9 @@ impl Server {
         self
     }
 
-    pub fn until(mut self, cutover: Duration) -> Self {
+    pub fn until(mut self, cutover: Duration, name: &'static str) -> Self {
+        self.recorder.event(cutover, name);
+
         let cutover = Instant::now() + cutover;
 
         for handler in &mut self.handlers {
@@ -107,6 +112,22 @@ impl Server {
         self
     }
 
+    pub fn build(self) -> Server {
+        Server {
+            name: self.name,
+            active_requests: self.active_requests,
+            handlers: self.handlers,
+        }
+    }
+}
+
+pub struct Server {
+    name: &'static str,
+    active_requests: Arc<Counter>,
+    handlers: Vec<Handler>,
+}
+
+impl Server {
     pub fn name(&self) -> &'static str {
         self.name
     }
