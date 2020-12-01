@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![cfg(test)]
-
 use crate::harness::Harness;
 use crate::server::Endpoint;
-use crate::simulation::{Simulation, SimulationBuilder1};
+use crate::simulation::{Simulation, SimulationBuilder1, TokioClock};
 use rand_pcg::Pcg64;
+use std::sync::Arc;
 use tokio::time::Duration;
+use witchcraft_metrics::Meter;
 
 mod harness;
 mod metrics;
@@ -40,6 +41,7 @@ fn main() {
         .simulation(one_endpoint_dies_on_each_server)
         .simulation(uncommon_flakes)
         .simulation(one_big_spike)
+        .simulation(server_side_rate_limits)
         .finish();
 }
 
@@ -56,7 +58,7 @@ fn simplest_possible_case(s: SimulationBuilder1) -> Simulation {
         s.name("slightly_slow")
             .handler(|h| h.response(200).response_time(Duration::from_millis(1000)))
     })
-    .requests_per_second(11)
+    .requests_per_second(11.)
     .send_until(Duration::from_secs(20 * 60))
     .abort_after(Duration::from_secs(60 * 60))
     .clients(10)
@@ -84,7 +86,7 @@ fn slowdown_and_error_thresholds(s: SimulationBuilder1) -> Simulation {
         })
     })
     .endpoints(vec![Endpoint::get("/")])
-    .requests_per_second(500)
+    .requests_per_second(500.)
     .send_until(Duration::from_secs(20))
     .abort_after(Duration::from_secs(10 * 60))
     .clients(10)
@@ -115,7 +117,7 @@ fn slow_503s_then_revert(s: SimulationBuilder1) -> Simulation {
                     .linear_response_time(Duration::from_millis(10), capacity)
             })
     })
-    .requests_per_second(100)
+    .requests_per_second(100.)
     .send_until(Duration::from_secs(15))
     .abort_after(Duration::from_secs(10 * 60))
     .clients(10)
@@ -134,7 +136,7 @@ fn fast_503s_then_revert(s: SimulationBuilder1) -> Simulation {
             .until(Duration::from_secs(60), "revert")
             .handler(|h| h.response(200).response_time(Duration::from_millis(120)))
     })
-    .requests_per_second(500)
+    .requests_per_second(500.)
     .send_until(Duration::from_secs(90))
     .abort_after(Duration::from_secs(10 * 60))
     .clients(10)
@@ -153,7 +155,7 @@ fn fast_400s_then_revert(s: SimulationBuilder1) -> Simulation {
             .until(Duration::from_secs(30), "revert")
             .handler(|h| h.response(200).response_time(Duration::from_millis(120)))
     })
-    .requests_per_second(100)
+    .requests_per_second(100.)
     .send_until(Duration::from_secs(60))
     .abort_after(Duration::from_secs(10 * 60))
     .clients(10)
@@ -172,7 +174,7 @@ fn short_outage_on_one_node(s: SimulationBuilder1) -> Simulation {
             .until(Duration::from_secs(50), "revert")
             .handler(|h| h.response(200).response_time(Duration::from_secs(2)))
     })
-    .requests_per_second(20)
+    .requests_per_second(20.)
     .send_until(Duration::from_secs(80))
     .abort_after(Duration::from_secs(3 * 60))
     .clients(10)
@@ -203,7 +205,7 @@ fn drastic_slowdown(s: SimulationBuilder1) -> Simulation {
                     .linear_response_time(Duration::from_millis(60), capacity)
             })
     })
-    .requests_per_second(200)
+    .requests_per_second(200.)
     .send_until(Duration::from_secs(20))
     .abort_after(Duration::from_secs(10 * 60))
     .clients(10)
@@ -222,7 +224,7 @@ fn all_nodes_500(s: SimulationBuilder1) -> Simulation {
             .until(Duration::from_secs(10), "revert badness")
             .handler(|h| h.response(200).response_time(Duration::from_millis(600)))
     })
-    .requests_per_second(100)
+    .requests_per_second(100.)
     .send_until(Duration::from_secs(20))
     .abort_after(Duration::from_secs(10 * 60))
     .clients(10)
@@ -242,7 +244,7 @@ fn black_hole(s: SimulationBuilder1) -> Simulation {
                     .response_time(Duration::from_secs(60 * 60 * 24))
             })
     })
-    .requests_per_second(200)
+    .requests_per_second(200.)
     .send_until(Duration::from_secs(10))
     .abort_after(Duration::from_secs(30))
     .clients(10)
@@ -301,7 +303,7 @@ fn one_endpoint_dies_on_each_server(s: SimulationBuilder1) -> Simulation {
             })
     })
     .endpoints(vec![endpoint1, endpoint2])
-    .requests_per_second(250)
+    .requests_per_second(250.)
     .send_until(Duration::from_secs(10))
     .abort_after(Duration::from_secs(60))
     .clients(10)
@@ -320,7 +322,7 @@ fn uncommon_flakes(s: SimulationBuilder1) -> Simulation {
                 .response_time(Duration::from_nanos(1000))
         })
     })
-    .requests_per_second(1000)
+    .requests_per_second(1000.)
     .send_until(Duration::from_secs(10))
     .abort_after(Duration::from_secs(10))
     .clients(10)
@@ -340,10 +342,39 @@ fn one_big_spike(s: SimulationBuilder1) -> Simulation {
                 .response_time(Duration::from_millis(150))
         })
     })
-    .requests_per_second(30_000)
+    .requests_per_second(30_000.)
     .num_requests(1000)
     .abort_after(Duration::from_secs(10))
     .clients(1)
+}
+
+fn server_side_rate_limits(mut s: SimulationBuilder1) -> Simulation {
+    let total_rate_limit = 0.1;
+    let num_servers = 4;
+    let num_clients = 2;
+    let per_server_rate_limit = total_rate_limit / num_servers as f64;
+
+    for i in 0..num_servers {
+        s = s.server(|s| {
+            let request_rate = Meter::new_with(Arc::new(TokioClock));
+            s.name(&format!("node{}", i)).handler(move |h| {
+                h.response_with(move |_| {
+                    if request_rate.one_minute_rate() < per_server_rate_limit {
+                        request_rate.mark(1);
+                        server::response(200)
+                    } else {
+                        server::response(429)
+                    }
+                })
+                .response_time(Duration::from_secs(200))
+            })
+        });
+    }
+
+    s.requests_per_second(total_rate_limit)
+        .send_until(Duration::from_secs(25_000 * 60))
+        .abort_after(Duration::from_secs(1_000 * 60 * 60))
+        .clients(num_clients)
 }
 
 fn rng() -> Pcg64 {

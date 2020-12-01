@@ -30,7 +30,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::runtime::{self, Runtime};
 use tokio::time::{self, Duration, Instant};
-use witchcraft_metrics::MetricRegistry;
+use witchcraft_metrics::{Clock, MetricRegistry};
 
 const SERVICE: &str = "simulation";
 
@@ -49,7 +49,9 @@ impl SimulationBuilder0 {
             time::delay_for(Duration::from_millis(1)).await;
         });
 
-        let metrics = Arc::new(MetricRegistry::new());
+        let mut metrics = MetricRegistry::new();
+        metrics.set_clock(Arc::new(TokioClock));
+        let metrics = Arc::new(metrics);
         // initialize the responses timer with our custom reservoir
         metrics::responses_timer(&metrics, SERVICE);
 
@@ -97,7 +99,7 @@ impl SimulationBuilder1 {
         self
     }
 
-    pub fn requests_per_second(self, requests_per_second: u32) -> SimulationBuilder2 {
+    pub fn requests_per_second(self, requests_per_second: f64) -> SimulationBuilder2 {
         let recorder = Arc::new(Mutex::new(self.recorder));
 
         let mut builder = Builder::new();
@@ -106,6 +108,7 @@ impl SimulationBuilder1 {
             .service(SERVICE)
             .user_agent(UserAgent::new(Agent::new("simulation", "0.0.0")))
             .metrics(self.metrics.clone())
+            .request_timeout(Duration::from_secs(1_000_000))
             .deterministic(true);
         for server in &self.servers {
             builder.uri(format!("http://{}", server.name()).parse().unwrap());
@@ -121,7 +124,7 @@ impl SimulationBuilder1 {
             metrics: self.metrics,
             recorder,
             endpoints: self.endpoints,
-            delay_between_requests: Duration::from_secs(1) / requests_per_second,
+            delay_between_requests: Duration::from_secs_f64(1. / requests_per_second),
         }
     }
 }
@@ -357,4 +360,12 @@ pub struct SimulationReport {
     pub num_global_responses: i64,
     pub status_codes: BTreeMap<u16, u64>,
     pub record: MetricsRecord,
+}
+
+pub struct TokioClock;
+
+impl Clock for TokioClock {
+    fn now(&self) -> std::time::Instant {
+        Instant::now().into_std()
+    }
 }

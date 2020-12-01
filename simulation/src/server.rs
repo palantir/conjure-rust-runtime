@@ -69,9 +69,9 @@ pub struct ServerBuilder0<'a> {
 }
 
 impl<'a> ServerBuilder0<'a> {
-    pub fn name(self, name: &'static str) -> ServerBuilder1<'a> {
+    pub fn name(self, name: &str) -> ServerBuilder1<'a> {
         ServerBuilder1 {
-            name,
+            name: name.to_string(),
             active_requests: metrics::active_requests(&self.metrics, name),
             handlers: vec![],
             recorder: self.recorder,
@@ -80,7 +80,7 @@ impl<'a> ServerBuilder0<'a> {
 }
 
 pub struct ServerBuilder1<'a> {
-    name: &'static str,
+    name: String,
     active_requests: Arc<Counter>,
     handlers: Vec<Handler>,
     recorder: &'a mut SimulationMetricsRecorder,
@@ -122,14 +122,14 @@ impl ServerBuilder1<'_> {
 }
 
 pub struct Server {
-    name: &'static str,
+    name: String,
     active_requests: Arc<Counter>,
     handlers: Vec<Handler>,
 }
 
 impl Server {
-    pub fn name(&self) -> &'static str {
-        self.name
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn active_requests(&self) -> i64 {
@@ -225,7 +225,7 @@ pub struct Handler {
     response_time: Box<dyn Fn(&Server) -> Duration + Sync + Send>,
 }
 
-fn response(status: u16) -> Response<EmptyBody> {
+pub fn response(status: u16) -> Response<EmptyBody> {
     Response::builder().status(status).body(EmptyBody).unwrap()
 }
 
@@ -251,7 +251,7 @@ impl Body for EmptyBody {
 }
 
 pub struct SimulationRawClient {
-    servers: HashMap<&'static str, Server>,
+    servers: HashMap<String, Server>,
     recorder: Arc<Mutex<SimulationMetricsRecorder>>,
     metrics: Arc<MetricRegistry>,
     global_responses: Arc<Counter>,
@@ -273,7 +273,7 @@ impl Service<Request<RawBody>> for SimulationRawClient {
             .expect("no handler available for request");
 
         server.active_requests.inc();
-        metrics::request_counter(&self.metrics, server.name, req.uri().path()).inc();
+        metrics::request_counter(&self.metrics, &server.name, req.uri().path()).inc();
         self.recorder.lock().record();
 
         let response = (handler.response)(server);
@@ -311,7 +311,7 @@ impl SimulationRawClientBuilder {
     ) -> Self {
         SimulationRawClientBuilder {
             client: Arc::new(SimulationRawClient {
-                servers: servers.into_iter().map(|s| (s.name, s)).collect(),
+                servers: servers.into_iter().map(|s| (s.name.clone(), s)).collect(),
                 recorder: recorder.clone(),
                 metrics: metrics.clone(),
                 global_responses: metrics::global_responses(metrics),

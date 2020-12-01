@@ -23,18 +23,14 @@ pub fn global_server_time_nanos(registry: &MetricRegistry) -> Arc<Counter> {
     registry.counter("globalServerTime")
 }
 
-pub fn active_requests(registry: &MetricRegistry, server: &'static str) -> Arc<Counter> {
-    registry.counter(MetricId::new("activeRequests").with_tag("server", server))
+pub fn active_requests(registry: &MetricRegistry, server: &str) -> Arc<Counter> {
+    registry.counter(MetricId::new("activeRequests").with_tag("server", server.to_string()))
 }
 
-pub fn request_counter(
-    registry: &MetricRegistry,
-    server: &'static str,
-    endpoint: &str,
-) -> Arc<Counter> {
+pub fn request_counter(registry: &MetricRegistry, server: &str, endpoint: &str) -> Arc<Counter> {
     registry.counter(
         MetricId::new("request")
-            .with_tag("server", server)
+            .with_tag("server", server.to_string())
             .with_tag("endpoint", endpoint.to_string()),
     )
 }

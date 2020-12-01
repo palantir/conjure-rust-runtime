@@ -24,6 +24,9 @@
 one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=63.9%	client_mean=600ms	server_cpu=1500s	client_received=2500/2500	server_resps=2500	codes={200=1597, 500=903}
     one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=65%	client_mean=600ms	server_cpu=1500s	client_received=2500/2500	server_resps=2500	codes={200=1624, 500=876}
               one_endpoint_dies_on_each_server[UNLIMITED_ROUND_ROBIN]:	success=65%	client_mean=600ms	server_cpu=1500s	client_received=2500/2500	server_resps=2500	codes={200=1624, 500=876}
+         server_side_rate_limits[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=54.7%	client_mean=542.708035202s	server_cpu=112416400s	client_received=150000/150000	server_resps=562082	codes={200=82012, 429=67988}
+             server_side_rate_limits[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=99%	client_mean=315.945302637s	server_cpu=48388200s	client_received=150000/150000	server_resps=241941	codes={200=148491, 429=1509}
+                       server_side_rate_limits[UNLIMITED_ROUND_ROBIN]:	success=99%	client_mean=315.945302637s	server_cpu=48388200s	client_received=150000/150000	server_resps=241941	codes={200=148491, 429=1509}
         short_outage_on_one_node[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=99.4%	client_mean=2s	server_cpu=3180.01s	client_received=1600/1600	server_resps=1600	codes={200=1590, 500=10}
             short_outage_on_one_node[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=99.2%	client_mean=2s	server_cpu=3174.013s	client_received=1600/1600	server_resps=1600	codes={200=1587, 500=13}
                       short_outage_on_one_node[UNLIMITED_ROUND_ROBIN]:	success=99.2%	client_mean=2s	server_cpu=3174.013s	client_received=1600/1600	server_resps=1600	codes={200=1587, 500=13}
@@ -291,6 +294,42 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
     <tr>
         <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-java-runtime/master/simulation/results/one_endpoint_dies_on_each_server[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="one_endpoint_dies_on_each_server[UNLIMITED_ROUND_ROBIN].png" /></td>
+    </tr>
+</table>
+
+## `server_side_rate_limits[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]`
+<table>
+    <tr>
+        <th>master</th>
+        <th>current</th>
+    </tr>
+    <tr>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-java-runtime/master/simulation/results/server_side_rate_limits[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="server_side_rate_limits[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+    </tr>
+</table>
+
+## `server_side_rate_limits[CONCURRENCY_LIMITER_ROUND_ROBIN]`
+<table>
+    <tr>
+        <th>master</th>
+        <th>current</th>
+    </tr>
+    <tr>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-java-runtime/master/simulation/results/server_side_rate_limits[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="server_side_rate_limits[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+    </tr>
+</table>
+
+## `server_side_rate_limits[UNLIMITED_ROUND_ROBIN]`
+<table>
+    <tr>
+        <th>master</th>
+        <th>current</th>
+    </tr>
+    <tr>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-java-runtime/master/simulation/results/server_side_rate_limits[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="server_side_rate_limits[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
 
