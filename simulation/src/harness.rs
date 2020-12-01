@@ -136,7 +136,7 @@ impl Harness {
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src=\"https://media.githubusercontent.com/media/palantir/conjure-java-runtime/master/simulation/results/{basename}.png\" /></td>
+        <td><image width=400 src=\"https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/{basename}.png\" /></td>
         <td><image width=400 src=\"{basename}.png\" /></td>
     </tr>
 </table>
