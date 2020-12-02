@@ -53,7 +53,9 @@ impl SimulationBuilder0 {
         metrics.set_clock(Arc::new(TokioClock));
         let metrics = Arc::new(metrics);
         // initialize the responses timer with our custom reservoir
-        metrics::responses_timer(&metrics, SERVICE);
+        runtime.enter(|| {
+            metrics::responses_timer(&metrics, SERVICE);
+        });
 
         let mut recorder = runtime.enter(|| SimulationMetricsRecorder::new(&metrics));
         recorder.filter_metrics(|id| {
