@@ -39,9 +39,12 @@ pub fn responses_timer(registry: &MetricRegistry, service_name: &'static str) ->
     registry.timer_with(
         MetricId::new("client.response").with_tag("service-name", service_name),
         || {
-            Timer::new(FullyBufferedReservoir {
-                values: Mutex::new(vec![]),
-            })
+            Timer::new_with(
+                FullyBufferedReservoir {
+                    values: Mutex::new(vec![]),
+                },
+                registry.clock().clone(),
+            )
         },
     )
 }
