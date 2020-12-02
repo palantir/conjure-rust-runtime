@@ -19,7 +19,7 @@ use crate::server::{
 };
 use conjure_runtime::errors::{RemoteError, ThrottledError, UnavailableError};
 use conjure_runtime::{Agent, Builder, Client, NodeSelectionStrategy, UserAgent};
-use futures::stream::{self, Stream, StreamExt};
+use futures::stream::{Stream, StreamExt};
 use http::StatusCode;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
@@ -149,24 +149,13 @@ impl SimulationBuilder2 {
     pub fn num_requests(self, num_requests: u64) -> SimulationBuilder3 {
         let mut rng = crate::rng();
 
-        let it = (0..num_requests).map({
-            let endpoints = self.endpoints;
-            move |_| endpoints.choose(&mut rng).unwrap().clone()
-        });
-        let stream = stream::iter(it);
         let stream = self.runtime.enter({
+            let endpoints = self.endpoints;
             let delay_between_requests = self.delay_between_requests;
-            // FIXME use tokio::time::throttle when it handles sub-milli delays properly
             move || {
-                let mut next_item = Instant::now();
-                stream.then(move |v| {
-                    let wait = next_item;
-                    next_item += delay_between_requests;
-                    async move {
-                        time::delay_until(wait).await;
-                        v
-                    }
-                })
+                time::interval(delay_between_requests)
+                    .take(num_requests as usize)
+                    .map(move |_| endpoints.choose(&mut rng).unwrap().clone())
             }
         });
 
