@@ -18,7 +18,7 @@ use crate::server::{
     SimulationRawClientBuilder,
 };
 use conjure_runtime::errors::{RemoteError, ThrottledError, UnavailableError};
-use conjure_runtime::{Agent, Builder, Client, NodeSelectionStrategy, UserAgent};
+use conjure_runtime::{Agent, Builder, Client, ClientQos, NodeSelectionStrategy, UserAgent};
 use futures::stream::{Stream, StreamExt};
 use http::StatusCode;
 use parking_lot::Mutex;
@@ -110,7 +110,7 @@ impl SimulationBuilder1 {
             .service(SERVICE)
             .user_agent(UserAgent::new(Agent::new("simulation", "0.0.0")))
             .metrics(self.metrics.clone())
-            .request_timeout(Duration::from_secs(1_000_000))
+            .request_timeout(Duration::from_secs(10_000_000))
             .deterministic(true);
         for server in &self.servers {
             builder.uri(format!("http://{}", server.name()).parse().unwrap());
@@ -355,8 +355,9 @@ impl Strategy {
                 builder.node_selection_strategy(NodeSelectionStrategy::PinUntilError);
             }
             Strategy::UnlimitedRoundRobin => {
-                // FIXME disable qos
-                builder.node_selection_strategy(NodeSelectionStrategy::Balanced);
+                builder
+                    .node_selection_strategy(NodeSelectionStrategy::Balanced)
+                    .client_qos(ClientQos::DangerousDisableSympatheticClientQos);
             }
         }
     }
