@@ -1,0 +1,1 @@
+success=86.6%	client_mean=219.611418379s	server_cpu=33867.441s	client_received=8662/10000	server_resps=11507	codes={200=8662}

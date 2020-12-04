@@ -68,15 +68,15 @@ impl NodeSelectorLayer {
         } else {
             match builder.get_node_selection_strategy() {
                 NodeSelectionStrategy::PinUntilError => NodeSelectorLayer::PinUntilError(
-                    PinUntilErrorNodeSelectorLayer::new(ReshufflingNodes::new(nodes)),
+                    PinUntilErrorNodeSelectorLayer::new(ReshufflingNodes::new(nodes, builder)),
                 ),
                 NodeSelectionStrategy::PinUntilErrorWithoutReshuffle => {
                     NodeSelectorLayer::PinUntilErrorWithoutReshuffle(
-                        PinUntilErrorNodeSelectorLayer::new(FixedNodes::new(nodes)),
+                        PinUntilErrorNodeSelectorLayer::new(FixedNodes::new(nodes, builder)),
                     )
                 }
                 NodeSelectionStrategy::Balanced => {
-                    NodeSelectorLayer::Balanced(BalancedNodeSelectorLayer::new(nodes))
+                    NodeSelectorLayer::Balanced(BalancedNodeSelectorLayer::new(nodes, builder))
                 }
             }
         }

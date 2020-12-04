@@ -35,6 +35,7 @@ pub use crate::raw::default::*;
 use crate::Builder;
 use conjure_error::Error;
 use std::future::Future;
+use std::sync::Arc;
 
 mod body;
 mod default;
@@ -54,6 +55,19 @@ pub trait Service<R> {
 
     /// Asynchronously perform the request.
     fn call(&self, req: R) -> Self::Future;
+}
+
+impl<R, T> Service<R> for Arc<T>
+where
+    T: ?Sized + Service<R>,
+{
+    type Response = T::Response;
+    type Error = T::Error;
+    type Future = T::Future;
+
+    fn call(&self, req: R) -> Self::Future {
+        (**self).call(req)
+    }
 }
 
 /// A factory of raw HTTP clients.

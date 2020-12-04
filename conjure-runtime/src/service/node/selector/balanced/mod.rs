@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::raw::Service;
+use crate::rng::ConjureRng;
 use crate::service::node::selector::balanced::reservoir::CoarseExponentialDecayReservoir;
 use crate::service::node::{Acquire, LimitedNode, NodeFuture};
 use crate::service::Layer;
+use crate::Builder;
 use conjure_error::Error;
 use futures::ready;
 use http::{Request, Response};
@@ -33,7 +35,7 @@ mod reservoir;
 
 const INFLIGHT_COMPARISON_THRESHOLD: usize = 5;
 const UNHEALTHY_SCORE_MULTIPLIER: usize = 2;
-const FAILURE_MEMORY: Duration = Duration::from_secs(10);
+const FAILURE_MEMORY: Duration = Duration::from_secs(30);
 const FAILURE_WEIGHT: f64 = 10.;
 
 pub struct TrackedNode {
@@ -89,11 +91,11 @@ pub trait Entropy {
     fn shuffle<T>(&self, slice: &mut [T]);
 }
 
-pub struct RandEntropy;
+pub struct RandEntropy(ConjureRng);
 
 impl Entropy for RandEntropy {
     fn shuffle<T>(&self, slice: &mut [T]) {
-        slice.shuffle(&mut rand::thread_rng());
+        self.0.with(|rng| slice.shuffle(rng));
     }
 }
 
@@ -107,8 +109,8 @@ pub struct BalancedNodeSelectorLayer<T = RandEntropy> {
 }
 
 impl BalancedNodeSelectorLayer {
-    pub fn new(nodes: Vec<LimitedNode>) -> Self {
-        Self::with_entropy(nodes, RandEntropy)
+    pub fn new<T>(nodes: Vec<LimitedNode>, builder: &Builder<T>) -> Self {
+        Self::with_entropy(nodes, RandEntropy(ConjureRng::new(builder)))
     }
 }
 

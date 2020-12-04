@@ -213,6 +213,7 @@ mod host_metrics;
 pub mod raw;
 mod request;
 mod response;
+mod rng;
 mod service;
 #[cfg(test)]
 mod test;
