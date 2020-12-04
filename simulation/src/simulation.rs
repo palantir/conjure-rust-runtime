@@ -219,89 +219,113 @@ impl Simulation {
     }
 
     pub fn run(mut self) -> SimulationReport {
-        self.runtime.block_on({
-            let metrics = self.metrics;
-            let recorder = self.recorder;
-            let mut client_provider = self.client_provider;
-            let requests = self.requests;
-            let abort_after = self.abort_after;
-            async move {
-                let start = Instant::now();
+        let runner = Runner {
+            metrics: self.metrics,
+            recorder: self.recorder,
+            client_provider: self.client_provider,
+            requests: self.requests,
+            abort_after: self.abort_after,
+        };
 
-                let status_codes = RefCell::new(BTreeMap::new());
-                let num_sent = Cell::new(0);
-                let num_received = Cell::new(0);
+        self.runtime.block_on(runner.run())
+    }
+}
 
-                let run_requests = requests.for_each_concurrent(None, {
-                    let status_codes = &status_codes;
-                    let num_sent = &num_sent;
-                    let num_received = &num_received;
-                    move |endpoint| {
-                        let client = client_provider();
-                        async move {
-                            num_sent.set(num_sent.get() + 1);
-                            let response = client
-                                .request(endpoint.method().clone(), endpoint.path())
-                                .send()
-                                .await;
-                            num_received.set(num_received.get() + 1);
+struct Runner {
+    metrics: Arc<MetricRegistry>,
+    recorder: Arc<Mutex<SimulationMetricsRecorder>>,
+    client_provider: Box<dyn FnMut() -> Client<Arc<SimulationRawClient>>>,
+    requests: Pin<Box<dyn Stream<Item = Endpoint>>>,
+    abort_after: Option<Duration>,
+}
 
-                            let status = match response {
-                                Ok(response) => response.status(),
-                                Err(error) => {
-                                    if let Some(error) = error.cause().downcast_ref::<RemoteError>()
-                                    {
-                                        *error.status()
-                                    } else if error.cause().is::<UnavailableError>() {
-                                        StatusCode::SERVICE_UNAVAILABLE
-                                    } else if error.cause().is::<ThrottledError>() {
-                                        StatusCode::TOO_MANY_REQUESTS
-                                    } else {
-                                        panic!("unexpected client error {:?}", error);
-                                    }
-                                }
-                            };
+impl Runner {
+    async fn run(mut self) -> SimulationReport {
+        let start = Instant::now();
 
-                            *status_codes
-                                .borrow_mut()
-                                .entry(status.as_u16())
-                                .or_insert(0) += 1;
-                        }
-                    }
-                });
+        let request_runner = RequestRunner {
+            status_codes: RefCell::new(BTreeMap::new()),
+            num_sent: Cell::new(0),
+            num_received: Cell::new(0),
+        };
 
-                match abort_after {
-                    Some(abort_after) => {
-                        let _ = time::timeout(abort_after, run_requests).await;
-                    }
-                    None => run_requests.await,
-                }
+        let run_requests = self.requests.for_each_concurrent(None, {
+            let client_provider = &mut self.client_provider;
+            let request_runner = &request_runner;
+            move |endpoint| {
+                let client = client_provider();
+                request_runner.run(client, endpoint)
+            }
+        });
 
-                recorder.lock().record();
+        match self.abort_after {
+            Some(abort_after) => {
+                let _ = time::timeout(abort_after, run_requests).await;
+            }
+            None => run_requests.await,
+        }
 
-                let status_codes = status_codes.into_inner();
-                SimulationReport {
-                    end_time: start.elapsed(),
-                    client_mean: Duration::from_nanos(
-                        metrics::responses_timer(&metrics, SERVICE)
-                            .snapshot()
-                            .mean() as u64,
-                    ),
-                    success_percentage: f64::round(
-                        status_codes.get(&200).copied().unwrap_or(0) as f64 * 1000.
-                            / num_sent.get() as f64,
-                    ) / 10.,
-                    server_cpu: Duration::from_nanos(
-                        metrics::global_server_time_nanos(&metrics).count() as u64,
-                    ),
-                    status_codes,
-                    num_sent: num_sent.get(),
-                    num_received: num_received.get(),
-                    num_global_responses: metrics::global_responses(&metrics).count(),
-                    record: recorder.lock().finish(),
+        self.recorder.lock().record();
+
+        let status_codes = request_runner.status_codes.into_inner();
+        SimulationReport {
+            end_time: start.elapsed(),
+            client_mean: Duration::from_nanos(
+                metrics::responses_timer(&self.metrics, SERVICE)
+                    .snapshot()
+                    .mean() as u64,
+            ),
+            success_percentage: f64::round(
+                status_codes.get(&200).copied().unwrap_or(0) as f64 * 1000.
+                    / request_runner.num_sent.get() as f64,
+            ) / 10.,
+            server_cpu: Duration::from_nanos(
+                metrics::global_server_time_nanos(&self.metrics).count() as u64,
+            ),
+            status_codes,
+            num_sent: request_runner.num_sent.get(),
+            num_received: request_runner.num_received.get(),
+            num_global_responses: metrics::global_responses(&self.metrics).count(),
+            record: self.recorder.lock().finish(),
+        }
+    }
+}
+
+struct RequestRunner {
+    status_codes: RefCell<BTreeMap<u16, u64>>,
+    num_sent: Cell<u64>,
+    num_received: Cell<u64>,
+}
+
+impl RequestRunner {
+    async fn run(&self, client: Client<Arc<SimulationRawClient>>, endpoint: Endpoint) {
+        self.num_sent.set(self.num_sent.get() + 1);
+        let response = client
+            .request(endpoint.method().clone(), endpoint.path())
+            .send()
+            .await;
+        self.num_received.set(self.num_received.get() + 1);
+
+        let status = match response {
+            Ok(response) => response.status(),
+            Err(error) => {
+                if let Some(error) = error.cause().downcast_ref::<RemoteError>() {
+                    *error.status()
+                } else if error.cause().is::<UnavailableError>() {
+                    StatusCode::SERVICE_UNAVAILABLE
+                } else if error.cause().is::<ThrottledError>() {
+                    StatusCode::TOO_MANY_REQUESTS
+                } else {
+                    panic!("unexpected client error {:?}", error);
                 }
             }
-        })
+        };
+
+        *self
+            .status_codes
+            .borrow_mut()
+            .entry(status.as_u16())
+            .or_insert(0) += 1;
     }
 }
 
