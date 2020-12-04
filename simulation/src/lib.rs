@@ -26,7 +26,7 @@ mod recorder;
 mod server;
 mod simulation;
 
-// FIXME implement live_reloading and server_side_rate_limits
+// FIXME(#59) implement live_reloading and server_side_rate_limits
 fn main() {
     Harness::new()
         .simulation(simplest_possible_case)
