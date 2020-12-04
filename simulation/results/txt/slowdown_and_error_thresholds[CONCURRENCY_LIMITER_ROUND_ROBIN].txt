@@ -1,0 +1,1 @@
+success=3.7%	client_mean=8.775961956s	server_cpu=195917.78s	client_received=10000/10000	server_resps=49065	codes={200=368, 500=9632}

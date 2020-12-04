@@ -12,22 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::body::ResetTrackingBody;
-use crate::errors::{ThrottledError, UnavailableError};
+use crate::errors::{RemoteError, ThrottledError, UnavailableError};
 use crate::raw::Service;
 use crate::raw::{BodyError, RawBody};
+use crate::rng::ConjureRng;
 use crate::service::map_error::RawClientError;
 use crate::service::Layer;
 use crate::{Body, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
 use futures::future::{self, BoxFuture};
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
-use http::{HeaderValue, Request};
+use http::{HeaderValue, Request, StatusCode};
 use rand::Rng;
 use std::error;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::time;
+use tokio::time::{self, Duration};
 use witchcraft_log::info;
 
 #[derive(Copy, Clone)]
@@ -37,9 +37,10 @@ pub struct RetryConfig {
 
 /// A layer which retries failed requests in certain cases.
 ///
-/// A request is retried if it fails with a service error with a cause of `ThrottledError`, `UnavailableError`, or
-/// `RawClientError`. Only idempotent requests can be retried which is configured by the `Idempotency` enum, and can be
-/// overridden on a request-by-request basis by passing the `RetryConfig` type in the request's extensions map.
+/// All requests that fail with a cause of `ThrottledError` or `UnavailableError` will be retried. Requests failing with
+/// a cause of `RawClientError` or `RemoteError` and a status code of `INTERNAL_SERVER_ERROR` will be retried if the
+/// request is considered idempotent. This is configured by the `Idempotency` enum, and can be overridden on a
+/// request-by-request basis by passing the `RetryConfig` type in the request's extensions map.
 ///
 /// The layer retries up to a specified maximum number of times, applying exponential backoff with full jitter in
 /// between each attempt.
@@ -51,6 +52,7 @@ pub struct RetryLayer {
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
+    rng: Arc<ConjureRng>,
 }
 
 impl RetryLayer {
@@ -59,6 +61,7 @@ impl RetryLayer {
             idempotency: builder.get_idempotency(),
             max_num_retries: builder.get_max_num_retries(),
             backoff_slot_size: builder.get_backoff_slot_size(),
+            rng: Arc::new(ConjureRng::new(builder)),
         }
     }
 }
@@ -72,6 +75,7 @@ impl<S> Layer<S> for RetryLayer {
             idempotency: self.idempotency,
             max_num_retries: self.max_num_retries,
             backoff_slot_size: self.backoff_slot_size,
+            rng: self.rng,
         }
     }
 }
@@ -84,6 +88,7 @@ pub struct RetryService<S> {
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
+    rng: Arc<ConjureRng>,
 }
 
 impl<'a, S> Service<Request<RetryBody<'a>>> for RetryService<S>
@@ -111,6 +116,7 @@ where
             idempotent,
             max_num_retries: self.max_num_retries,
             backoff_slot_size: self.backoff_slot_size,
+            rng: self.rng.clone(),
             attempt: 0,
         };
 
@@ -123,6 +129,7 @@ struct State<S> {
     idempotent: bool,
     max_num_retries: u32,
     backoff_slot_size: Duration,
+    rng: Arc<ConjureRng>,
     attempt: u32,
 }
 
@@ -179,13 +186,27 @@ where
                     _ => return Err(error),
                 }
 
+                #[allow(clippy::if_same_then_else)] // conditionals get too crazy if combined
                 if let Some(throttled) = error.cause().downcast_ref::<ThrottledError>() {
                     Ok(AttemptOutcome::Retry {
                         retry_after: throttled.retry_after,
                         error,
                     })
-                } else if error.cause().is::<UnavailableError>()
-                    || error.cause().is::<RawClientError>()
+                } else if error.cause().is::<UnavailableError>() {
+                    Ok(AttemptOutcome::Retry {
+                        error,
+                        retry_after: None,
+                    })
+                } else if self.idempotent && error.cause().is::<RawClientError>() {
+                    Ok(AttemptOutcome::Retry {
+                        error,
+                        retry_after: None,
+                    })
+                } else if self.idempotent
+                    && error
+                        .cause()
+                        .downcast_ref::<RemoteError>()
+                        .map_or(false, |e| *e.status() == StatusCode::INTERNAL_SERVER_ERROR)
                 {
                     Ok(AttemptOutcome::Retry {
                         error,
@@ -251,13 +272,8 @@ where
         retry_after: Option<Duration>,
     ) -> Result<(), Error> {
         self.attempt += 1;
-        if self.attempt >= self.max_num_retries {
+        if self.attempt > self.max_num_retries {
             info!("exceeded retry limits");
-            return Err(error);
-        }
-
-        if !self.idempotent {
-            info!("unable to retry non-idempotent request");
             return Err(error);
         }
 
@@ -278,7 +294,8 @@ where
                 if max == Duration::from_secs(0) {
                     Duration::from_secs(0)
                 } else {
-                    rand::thread_rng().gen_range(Duration::from_secs(0), max)
+                    self.rng
+                        .with(|rng| rng.gen_range(Duration::from_secs(0), max))
                 }
             }
         };
@@ -708,7 +725,7 @@ mod test {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
                     match attempt {
-                        0 => Err(Error::internal_safe(UnavailableError(()))),
+                        0 => Err(Error::internal_safe("blammo")),
                         1 => Ok(()),
                         _ => panic!(),
                     }
@@ -721,7 +738,35 @@ mod test {
             .body(None)
             .unwrap();
         let err = service.call(request).await.err().unwrap();
-        assert!(err.cause().is::<UnavailableError>());
+        assert_eq!(err.cause().to_string(), "blammo");
+    }
+
+    #[tokio::test]
+    async fn retry_non_idempotent_for_qos_errors() {
+        let service = RetryLayer::new(
+            Builder::new()
+                .max_num_retries(2)
+                .backoff_slot_size(Duration::from_secs(0)),
+        )
+        .layer(service::service_fn({
+            let attempt = AtomicUsize::new(0);
+            move |_| {
+                let attempt = attempt.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    match attempt {
+                        0 => Err(Error::internal_safe(UnavailableError(()))),
+                        1 => Ok(()),
+                        _ => panic!(),
+                    }
+                }
+            }
+        }));
+
+        let request = Request::builder()
+            .extension(RetryConfig { idempotent: false })
+            .body(None)
+            .unwrap();
+        service.call(request).await.unwrap();
     }
 
     #[tokio::test]
@@ -760,7 +805,7 @@ mod test {
     async fn give_up_after_limit() {
         let service = RetryLayer::new(
             Builder::new()
-                .max_num_retries(2)
+                .max_num_retries(1)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
         .layer(service::service_fn({

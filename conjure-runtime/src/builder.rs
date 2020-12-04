@@ -40,6 +40,7 @@ pub struct Builder<T = DefaultRawClientBuilder> {
     node_selection_strategy: NodeSelectionStrategy,
     metrics: Option<Arc<MetricRegistry>>,
     host_metrics: Option<Arc<HostMetricsRegistry>>,
+    deterministic: bool,
     raw_client_builder: T,
 }
 
@@ -61,13 +62,14 @@ impl Builder {
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(5 * 60),
             backoff_slot_size: Duration::from_millis(250),
-            max_num_retries: 3,
+            max_num_retries: 4,
             server_qos: ServerQos::AutomaticRetry,
             service_error: ServiceError::WrapInNewError,
             idempotency: Idempotency::ByMethod,
             node_selection_strategy: NodeSelectionStrategy::PinUntilError,
             metrics: None,
             host_metrics: None,
+            deterministic: false,
             raw_client_builder: DefaultRawClientBuilder,
         }
     }
@@ -321,6 +323,23 @@ impl<T> Builder<T> {
         self.host_metrics.as_ref()
     }
 
+    /// Controls the client's use of entropy.
+    ///
+    /// Several components of the client rely on random number generators. If determinism is enabled, these will be
+    /// initialized with a fixed seed such that clients created with the same configuration will produce the same
+    /// behavior.
+    ///
+    /// Defaults to `false`.
+    pub fn deterministic(&mut self, deterministic: bool) -> &mut Self {
+        self.deterministic = deterministic;
+        self
+    }
+
+    /// Returns the builder's configured determinism.
+    pub fn get_deterministic(&self) -> bool {
+        self.deterministic
+    }
+
     /// Sets the raw client builder.
     ///
     /// Defaults to `DefaultRawClientBuilder`.
@@ -341,6 +360,7 @@ impl<T> Builder<T> {
             node_selection_strategy: self.node_selection_strategy,
             metrics: self.metrics,
             host_metrics: self.host_metrics,
+            deterministic: self.deterministic,
             raw_client_builder,
         }
     }
