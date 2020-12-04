@@ -18,7 +18,7 @@ parking_lot = "0.11"
 rand = "0.7"
 rand_pcg = "0.2"
 tempfile = "3.0"
-tokio = { version = "0.2", features = ["test-util"] }
+tokio = { version = "0.3", features = ["test-util"] }
 witchcraft-metrics = "0.2"
 
 conjure-runtime = { path = "../conjure-runtime" }
