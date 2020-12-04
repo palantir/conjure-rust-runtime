@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::errors::{RemoteError, TimeoutError};
+use crate::errors::RemoteError;
 use crate::{
     blocking, Agent, Body, BodyWriter, Builder, Client, ServerQos, ServiceError, UserAgent,
 };
@@ -39,7 +39,6 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
-use tokio::time;
 use zipkin::{SpanId, TraceContext, TraceId};
 
 const STOCK_CONFIG: &str = r#"
@@ -474,106 +473,6 @@ failed-url-cooldown: 1h
         |builder| async move {
             let response = builder.build().unwrap().get("/").send().await.unwrap();
             assert_eq!(response.status(), StatusCode::OK);
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn slow_headers() {
-    test(
-        r#"
-uris: ["https://localhost:{{port}}"]
-security:
-  ca-file: "{{ca_file}}"
-request-timeout: 1s
-    "#,
-        1,
-        |_| async {
-            time::delay_for(Duration::from_secs(2)).await;
-            Ok(Response::new(hyper::Body::empty()))
-        },
-        |builder| async move {
-            let start = Instant::now();
-            let error = builder
-                .build()
-                .unwrap()
-                .get("/")
-                .send()
-                .await
-                .err()
-                .unwrap();
-            assert!(start.elapsed() < Duration::from_secs(2));
-            assert!(error.cause().is::<TimeoutError>());
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn slow_request_body() {
-    test(
-        r#"
-uris: ["https://localhost:{{port}}"]
-security:
-  ca-file: "{{ca_file}}"
-request-timeout: 1s
-    "#,
-        1,
-        |req| async {
-            req.into_body().for_each(|_| async {}).await;
-            Ok(Response::new(hyper::Body::empty()))
-        },
-        |builder| async move {
-            let start = Instant::now();
-            let error = builder
-                .build()
-                .unwrap()
-                .post("/")
-                .body(InfiniteBody)
-                .send()
-                .await
-                .err()
-                .unwrap();
-            assert!(start.elapsed() < Duration::from_secs(2));
-            assert!(error.cause().is::<TimeoutError>());
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn slow_response_body() {
-    test(
-        r#"
-uris: ["https://localhost:{{port}}"]
-security:
-  ca-file: "{{ca_file}}"
-request-timeout: 1s
-    "#,
-        1,
-        |_| async {
-            let (mut sender, body) = hyper::Body::channel();
-            tokio::spawn(async move {
-                time::delay_for(Duration::from_secs(2)).await;
-                let _ = sender.send_data(Bytes::from("hi")).await;
-            });
-            Ok(Response::new(body))
-        },
-        |builder| async move {
-            let start = Instant::now();
-            let body = builder
-                .build()
-                .unwrap()
-                .get("/")
-                .send()
-                .await
-                .unwrap()
-                .into_body();
-            pin_mut!(body);
-            let error = body.read_to_end(&mut vec![]).await.err().unwrap();
-            assert!(start.elapsed() < Duration::from_secs(2));
-            assert!(error.get_ref().unwrap().is::<TimeoutError>());
         },
     )
     .await;

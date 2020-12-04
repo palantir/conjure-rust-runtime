@@ -57,7 +57,9 @@ pub struct ServicesConfig {
     #[serde(deserialize_with = "de_opt_duration")]
     connect_timeout: Option<Duration>,
     #[serde(deserialize_with = "de_opt_duration")]
-    request_timeout: Option<Duration>,
+    read_timeout: Option<Duration>,
+    #[serde(deserialize_with = "de_opt_duration")]
+    write_timeout: Option<Duration>,
     #[serde(deserialize_with = "de_opt_duration")]
     backoff_slot_size: Option<Duration>,
 }
@@ -84,8 +86,12 @@ impl ServicesConfig {
             service.connect_timeout = self.connect_timeout;
         }
 
-        if service.request_timeout.is_none() {
-            service.request_timeout = self.request_timeout;
+        if service.read_timeout.is_none() {
+            service.read_timeout = self.read_timeout;
+        }
+
+        if service.write_timeout.is_none() {
+            service.write_timeout = self.write_timeout;
         }
 
         if service.backoff_slot_size.is_none() {
@@ -110,9 +116,14 @@ impl ServicesConfig {
         self.connect_timeout
     }
 
-    /// Returns the request timeout.
-    pub fn request_timeout(&self) -> Option<Duration> {
-        self.request_timeout
+    /// Returns the read timeout.
+    pub fn read_timeout(&self) -> Option<Duration> {
+        self.read_timeout
+    }
+
+    /// Returns the write timeout.
+    pub fn write_timeout(&self) -> Option<Duration> {
+        self.write_timeout
     }
 
     /// Returns the backoff slot size.
@@ -161,9 +172,15 @@ impl ServicesConfigBuilder {
         self
     }
 
-    /// Sets the request timeout.
-    pub fn request_timeout(&mut self, request_timeout: Duration) -> &mut Self {
-        self.0.request_timeout = Some(request_timeout);
+    /// Sets the read timeout.
+    pub fn read_timeout(&mut self, read_timeout: Duration) -> &mut Self {
+        self.0.read_timeout = Some(read_timeout);
+        self
+    }
+
+    /// Sets the write timeout.
+    pub fn write_timeout(&mut self, write_timeout: Duration) -> &mut Self {
+        self.0.write_timeout = Some(write_timeout);
         self
     }
 
@@ -189,7 +206,9 @@ pub struct ServiceConfig {
     #[serde(deserialize_with = "de_opt_duration")]
     connect_timeout: Option<Duration>,
     #[serde(deserialize_with = "de_opt_duration")]
-    request_timeout: Option<Duration>,
+    read_timeout: Option<Duration>,
+    #[serde(deserialize_with = "de_opt_duration")]
+    write_timeout: Option<Duration>,
     #[serde(deserialize_with = "de_opt_duration")]
     backoff_slot_size: Option<Duration>,
     max_num_retries: Option<u32>,
@@ -221,9 +240,14 @@ impl ServiceConfig {
         self.connect_timeout
     }
 
-    /// Returns the request timeout.
-    pub fn request_timeout(&self) -> Option<Duration> {
-        self.request_timeout
+    /// Returns the read timeout.
+    pub fn read_timeout(&self) -> Option<Duration> {
+        self.read_timeout
+    }
+
+    /// Returns the write timeout.
+    pub fn write_timeout(&self) -> Option<Duration> {
+        self.write_timeout
     }
 
     /// Returns the backoff slot size.
@@ -278,9 +302,15 @@ impl ServiceConfigBuilder {
         self
     }
 
-    /// Sets the request timeout.
-    pub fn request_timeout(&mut self, request_timeout: Duration) -> &mut Self {
-        self.0.request_timeout = Some(request_timeout);
+    /// Sets the read timeout.
+    pub fn read_timeout(&mut self, read_timeout: Duration) -> &mut Self {
+        self.0.read_timeout = Some(read_timeout);
+        self
+    }
+
+    /// Sets the write timeout.
+    pub fn write_timeout(&mut self, write_timeout: Duration) -> &mut Self {
+        self.0.write_timeout = Some(write_timeout);
         self
     }
 
