@@ -241,8 +241,6 @@ struct Runner {
 
 impl Runner {
     async fn run(mut self) -> SimulationReport {
-        let start = Instant::now();
-
         let request_runner = RequestRunner {
             status_codes: RefCell::new(BTreeMap::new()),
             num_sent: Cell::new(0),
@@ -269,7 +267,6 @@ impl Runner {
 
         let status_codes = request_runner.status_codes.into_inner();
         SimulationReport {
-            end_time: start.elapsed(),
             client_mean: Duration::from_nanos(
                 metrics::responses_timer(&self.metrics, SERVICE)
                     .snapshot()
@@ -366,7 +363,6 @@ impl Strategy {
 }
 
 pub struct SimulationReport {
-    pub end_time: Duration,
     pub client_mean: Duration,
     pub success_percentage: f64,
     pub server_cpu: Duration,
