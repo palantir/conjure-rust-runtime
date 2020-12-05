@@ -154,7 +154,7 @@ where
     type Future = BalancedNodeSelectorFuture<S, B1>;
 
     fn call(&self, req: Request<B1>) -> Self::Future {
-        let span = zipkin::next_span().with_name("conjure-runtime: balanced node selection");
+        let span = zipkin::next_span().with_name("conjure-runtime: balanced-node-selection");
 
         // Dialogue skips nodes that have significantly worse scores than previous ones on each attempt, but to do that
         // here we'd need a way to notify tasks on score changes. Rather than adding the complexity of implementing

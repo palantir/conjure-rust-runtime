@@ -135,6 +135,11 @@
 //! * `conjure-runtime: get /widget-service/{widgetId}` - The name of this span is built from the request's method and
 //!     path pattern.
 //!     * `conjure-runtime: attempt 1`
+//!         * `conjure-runtime: acquire-permit` - If client QoS is enabled and the node selection strategy is not
+//!             [`Balanced`], this span covers the time spent acquiring a concurrency limiter permit.
+//!         * `conjure-runtime: balanced-node-selection` - If the node selection strategy is [`Balanced`], this span
+//!             covers the time spent selecting a node and (if client QoS is enabled) acquiring a concurrency limiter
+//!             permit.
 //!         * `conjure-runtime: wait-for-headers` - This span is sent to the server, and lasts until the server sends
 //!             the headers of the response.
 //!         * `conjure-runtime: wait-for-body` - This span is tracked along with the response body, and lasts until the
@@ -192,6 +197,7 @@
 //! [Conjure]: https://github.com/palantir/conjure
 //! [`dialogue`]: https://github.com/palantir/dialogue
 //! [`zipkin`]: https://docs.rs/zipkin
+//! [`Balanced`]:(NodeSelectionStrategy::Balanced)
 #![doc(html_root_url = "https://docs.rs/conjure-runtime/0.2")]
 #![warn(missing_docs, clippy::all)]
 

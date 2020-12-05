@@ -117,7 +117,7 @@ impl LimitedNode {
         // don't create the span if client QoS is disabled
         if self.limiter.is_some() {
             let span = zipkin::next_span()
-                .with_name("conjure-runtime: acquire permit")
+                .with_name("conjure-runtime: acquire-permit")
                 .with_tag("node", &self.node.idx.to_string());
 
             Wrap::Acquire {
