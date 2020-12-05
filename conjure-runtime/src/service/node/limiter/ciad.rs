@@ -50,6 +50,14 @@ impl<B> CiadConcurrencyLimiter<B> {
         })
     }
 
+    pub fn limit(&self) -> f64 {
+        self.limit.load(Ordering::SeqCst)
+    }
+
+    pub fn in_flight(&self) -> usize {
+        self.in_flight.load(Ordering::SeqCst)
+    }
+
     pub fn acquire(self: Arc<Self>) -> Acquire<B> {
         Acquire {
             future: self.semaphore.clone().acquire(),

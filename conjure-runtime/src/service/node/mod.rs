@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::raw::Service;
-use crate::service::node::limiter::{Limiter, Permit};
+use crate::service::node::limiter::{InFlightReducer, LimitReducer, Limiter, Permit};
 pub use crate::service::node::metrics::NodeMetricsLayer;
 pub use crate::service::node::selector::NodeSelectorLayer;
 pub use crate::service::node::uri::NodeUriLayer;
 use crate::service::request::Pattern;
+use crate::util::weak_reducing_gauge::WeakReducingGauge;
 use crate::{Builder, ClientQos, HostMetrics};
 use conjure_error::Error;
 use futures::ready;
@@ -27,6 +28,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use url::Url;
+use witchcraft_metrics::MetricId;
 
 pub mod limiter;
 pub mod metrics;
@@ -48,7 +50,7 @@ impl LimitedNode {
     }
 
     pub fn new<T>(idx: usize, url: &Url, service: &str, builder: &Builder<T>) -> Self {
-        LimitedNode {
+        let node = LimitedNode {
             node: Arc::new(Node {
                 idx,
                 url: url.clone(),
@@ -64,7 +66,33 @@ impl LimitedNode {
                 ClientQos::Enabled => Some(Limiter::new()),
                 ClientQos::DangerousDisableSympatheticClientQos => None,
             },
+        };
+
+        if let (Some(metrics), Some(limiter)) = (builder.get_metrics(), &node.limiter) {
+            metrics
+                .gauge_with(
+                    MetricId::new("conjure-runtime.concurrencylimiter.max")
+                        .with_tag("service", service.to_string())
+                        .with_tag("hostIndex", idx.to_string()),
+                    || WeakReducingGauge::new(LimitReducer),
+                )
+                .downcast_ref::<WeakReducingGauge<LimitReducer>>()
+                .expect("conjure-runtime.concurrencylimiter.max metric already registered")
+                .push(limiter.host_limiter());
+
+            metrics
+                .gauge_with(
+                    MetricId::new("conjure-runtime.concurrencylimiter.in-flight")
+                        .with_tag("service", service.to_string())
+                        .with_tag("hostIndex", idx.to_string()),
+                    || WeakReducingGauge::new(InFlightReducer),
+                )
+                .downcast_ref::<WeakReducingGauge<InFlightReducer>>()
+                .expect("conjure-runtime.concurrencylimiter.in-flight metric already registered")
+                .push(limiter.host_limiter());
         }
+
+        node
     }
 
     pub fn acquire<B>(&self, request: &Request<B>) -> Acquire {

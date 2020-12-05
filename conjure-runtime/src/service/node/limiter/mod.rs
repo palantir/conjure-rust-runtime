@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::service::node::limiter::ciad::{CiadConcurrencyLimiter, EndpointLevel, HostLevel};
+use crate::util::weak_reducing_gauge::Reduce;
 use conjure_error::Error;
 use futures::future::{self, MaybeDone};
 use futures::ready;
@@ -44,6 +45,10 @@ impl Limiter {
             host: CiadConcurrencyLimiter::new(),
             endpoints: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub fn host_limiter(&self) -> &Arc<CiadConcurrencyLimiter<HostLevel>> {
+        &self.host
     }
 
     pub fn acquire(&self, method: &Method, pattern: &'static str) -> Acquire {
@@ -99,5 +104,43 @@ impl Permit {
     pub fn on_response<B>(&mut self, response: &Result<Response<B>, Error>) {
         self.endpoint.on_response(response);
         self.host.on_response(response);
+    }
+}
+
+pub struct LimitReducer;
+
+impl Reduce for LimitReducer {
+    type Input = CiadConcurrencyLimiter<HostLevel>;
+    type Value = f64;
+
+    fn default(&self) -> Self::Value {
+        0.
+    }
+
+    fn map(&self, v: &Self::Input) -> Self::Value {
+        v.limit()
+    }
+
+    fn reduce(&self, a: &mut Self::Value, b: Self::Value) {
+        *a = f64::min(*a, b);
+    }
+}
+
+pub struct InFlightReducer;
+
+impl Reduce for InFlightReducer {
+    type Input = CiadConcurrencyLimiter<HostLevel>;
+    type Value = usize;
+
+    fn default(&self) -> Self::Value {
+        0
+    }
+
+    fn map(&self, v: &Self::Input) -> Self::Value {
+        v.in_flight()
+    }
+
+    fn reduce(&self, a: &mut Self::Value, b: Self::Value) {
+        *a += b;
     }
 }

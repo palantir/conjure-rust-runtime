@@ -179,6 +179,10 @@
 //! * `tls.handshake (context: <service_name>, protocol: <protocol_version>, cipher: <cipher_name>)` - A `Meter`
 //!     tracking the rate of TLS handshakes, tagged by the service, TLS protocol version (e.g. `TLSv1.3`), and cipher
 //!     name (e.g. `TLS_CHACHA20_POLY1305_SHA256`).
+//! * `conjure-runtime.concurrencylimiter.max (service: <service_name>, hostIndex: <host_index>)` - A `Gauge` reporting
+//!     the maximum number of concurrent requests which are currently permitted to be made to a specific host.
+//! * `conjure-runtime.concurrencylimiter.in-flight (service: <service_name>, hostIndex: <host_index>)` - A `Gauge`
+//!     reporting the current number of requests being made to a specific host.
 //!
 //! ### Host Metrics
 //!
