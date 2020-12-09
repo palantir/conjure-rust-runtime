@@ -80,15 +80,3 @@ impl fmt::Display for UnavailableError {
 }
 
 impl Error for UnavailableError {}
-
-/// An error due to a request timing out.
-#[derive(Debug)]
-pub struct TimeoutError(pub(crate) ());
-
-impl fmt::Display for TimeoutError {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.write_str("request timed out")
-    }
-}
-
-impl Error for TimeoutError {}

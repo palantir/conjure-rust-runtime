@@ -129,6 +129,10 @@ impl ClientFactory {
     ///
     /// If no configuration is present for the specified service in the `ServicesConfig`, the client will
     /// immediately return an error for all requests.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `user_agent` is not set.
     pub fn client(&self, service: &str) -> Result<Client, Error> {
         let service_config = self.config.map({
             let service = service.to_string();
@@ -192,6 +196,10 @@ impl ClientFactory {
     ///
     /// If no configuration is present for the specified service in the `ServicesConfig`, the client will
     /// immediately return an error for all requests.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `user_agent` is not set.
     pub fn blocking_client(&self, service: &str) -> Result<blocking::Client, Error> {
         self.client(service).map(blocking::Client)
     }

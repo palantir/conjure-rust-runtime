@@ -110,7 +110,6 @@ impl SimulationBuilder1 {
             .service(SERVICE)
             .user_agent(UserAgent::new(Agent::new("simulation", "0.0.0")))
             .metrics(self.metrics.clone())
-            .request_timeout(Duration::from_secs(10_000_000))
             .deterministic(true);
         for server in &self.servers {
             builder.uri(format!("http://{}", server.name()).parse().unwrap());

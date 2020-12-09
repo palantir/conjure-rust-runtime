@@ -64,7 +64,7 @@ fn root_defaults() {
                 }
             },
             "connect-timeout": "11 seconds",
-            "request-timeout": "3 minutes"
+            "read-timeout": "3 minutes"
         }
     "#;
     let config = serde_json::from_str::<ServicesConfig>(config).unwrap();
@@ -82,7 +82,7 @@ fn root_defaults() {
                 .build(),
         ))
         .connect_timeout(Duration::from_secs(11))
-        .request_timeout(Duration::from_secs(3 * 60))
+        .read_timeout(Duration::from_secs(3 * 60))
         .build();
     assert_eq!(config.merged_service("foo"), Some(expected));
 }
@@ -103,7 +103,7 @@ fn service_overrides() {
                         "type": "direct"
                     },
                     "connect-timeout": "13 seconds",
-                    "request-timeout": "2 minutes"
+                    "read-timeout": "2 minutes"
                 }
             },
             "security": {
@@ -118,7 +118,7 @@ fn service_overrides() {
                 }
             },
             "connect-timeout": "11 seconds",
-            "request-timeout": "3 minutes"
+            "read-timeout": "3 minutes"
         }
     "#;
     let config = serde_json::from_str::<ServicesConfig>(config).unwrap();
@@ -131,7 +131,7 @@ fn service_overrides() {
         )
         .proxy(ProxyConfig::Direct)
         .connect_timeout(Duration::from_secs(13))
-        .request_timeout(Duration::from_secs(2 * 60))
+        .read_timeout(Duration::from_secs(2 * 60))
         .build();
     assert_eq!(config.merged_service("foo"), Some(expected));
 }

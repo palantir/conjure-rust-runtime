@@ -31,7 +31,8 @@ pub struct Builder<T = DefaultRawClientBuilder> {
     security: SecurityConfig,
     proxy: ProxyConfig,
     connect_timeout: Duration,
-    request_timeout: Duration,
+    read_timeout: Duration,
+    write_timeout: Duration,
     backoff_slot_size: Duration,
     max_num_retries: u32,
     client_qos: ClientQos,
@@ -61,7 +62,8 @@ impl Builder {
             security: SecurityConfig::builder().build(),
             proxy: ProxyConfig::Direct,
             connect_timeout: Duration::from_secs(10),
-            request_timeout: Duration::from_secs(5 * 60),
+            read_timeout: Duration::from_secs(5 * 60),
+            write_timeout: Duration::from_secs(5 * 60),
             backoff_slot_size: Duration::from_millis(250),
             max_num_retries: 4,
             client_qos: ClientQos::Enabled,
@@ -94,8 +96,12 @@ impl<T> Builder<T> {
             self.connect_timeout(connect_timeout);
         }
 
-        if let Some(request_timeout) = config.request_timeout() {
-            self.request_timeout(request_timeout);
+        if let Some(read_timeout) = config.read_timeout() {
+            self.read_timeout(read_timeout);
+        }
+
+        if let Some(write_timeout) = config.write_timeout() {
+            self.write_timeout(write_timeout);
         }
 
         if let Some(backoff_slot_size) = config.backoff_slot_size() {
@@ -197,20 +203,34 @@ impl<T> Builder<T> {
         self.connect_timeout
     }
 
-    /// Sets the request timeout.
+    /// Sets the read timeout.
     ///
-    /// This timeout applies to the entire duration of the request, from the first attempt to send it to the last read
-    /// of the response body.
+    /// This timeout applies to socket-level read attempts.
     ///
     /// Defaults to 5 minutes.
-    pub fn request_timeout(&mut self, request_timeout: Duration) -> &mut Self {
-        self.request_timeout = request_timeout;
+    pub fn read_timeout(&mut self, read_timeout: Duration) -> &mut Self {
+        self.read_timeout = read_timeout;
         self
     }
 
-    /// Returns the builder's configured request timeout.
-    pub fn get_request_timeout(&self) -> Duration {
-        self.request_timeout
+    /// Returns the builder's configured read timeout.
+    pub fn get_read_timeout(&self) -> Duration {
+        self.read_timeout
+    }
+
+    /// Sets the write timeout.
+    ///
+    /// This timeout applies to socket-level write attempts.
+    ///
+    /// Defaults to 5 minutes.
+    pub fn write_timeout(&mut self, write_timeout: Duration) -> &mut Self {
+        self.write_timeout = write_timeout;
+        self
+    }
+
+    /// Returns the builder's configured write timeout.
+    pub fn get_write_timeout(&self) -> Duration {
+        self.write_timeout
     }
 
     /// Sets the backoff slot size.
@@ -231,7 +251,7 @@ impl<T> Builder<T> {
 
     /// Sets the maximum number of times a request attempt will be retried before giving up.
     ///
-    /// Defaults to 3.
+    /// Defaults to 4.
     pub fn max_num_retries(&mut self, max_num_retries: u32) -> &mut Self {
         self.max_num_retries = max_num_retries;
         self
@@ -366,7 +386,8 @@ impl<T> Builder<T> {
             security: self.security,
             proxy: self.proxy,
             connect_timeout: self.connect_timeout,
-            request_timeout: self.request_timeout,
+            read_timeout: self.read_timeout,
+            write_timeout: self.write_timeout,
             backoff_slot_size: self.backoff_slot_size,
             max_num_retries: self.max_num_retries,
             client_qos: self.client_qos,
