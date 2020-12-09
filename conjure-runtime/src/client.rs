@@ -22,7 +22,6 @@ use crate::service::request::RequestLayer;
 use crate::service::response::ResponseLayer;
 use crate::service::retry::RetryLayer;
 use crate::service::span::{SpanBody, SpanLayer};
-use crate::service::timeout::{TimeoutBody, TimeoutLayer};
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
 use crate::service::{Identity, Layer, ServiceBuilder, Stack};
@@ -45,7 +44,6 @@ type BaseLayer = layers!(
     MetricsLayer,
     RequestLayer,
     ResponseLayer,
-    TimeoutLayer,
     RetryLayer,
     HttpErrorLayer,
     SpanLayer,
@@ -61,7 +59,7 @@ type BaseLayer = layers!(
 
 type BaseService<T> = <BaseLayer as Layer<T>>::Service;
 
-pub(crate) type BaseBody<B> = TimeoutBody<SpanBody<DecodedBody<B>>>;
+pub(crate) type BaseBody<B> = SpanBody<DecodedBody<B>>;
 
 pub(crate) struct ClientState<T> {
     service: BaseService<T>,
@@ -88,7 +86,6 @@ impl<T> ClientState<T> {
             .layer(MetricsLayer::new(service, builder))
             .layer(RequestLayer)
             .layer(ResponseLayer)
-            .layer(TimeoutLayer::new(builder.get_request_timeout()))
             .layer(RetryLayer::new(builder))
             .layer(HttpErrorLayer::new(builder))
             .layer(SpanLayer)

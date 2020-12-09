@@ -13,6 +13,7 @@
 // limitations under the License.
 use crate::raw::{BuildRawClient, RawBody, Service};
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService};
+use crate::service::timeout::{TimeoutLayer, TimeoutService};
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::Builder;
 use bytes::Bytes;
@@ -39,7 +40,8 @@ const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
 // Most servers time out idle connections after 60 seconds, so we'll set the client timeout a bit below that.
 const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 
-type ConjureConnector = TlsMetricsService<HttpsConnector<ProxyConnectorService<HttpConnector>>>;
+type ConjureConnector =
+    TlsMetricsService<HttpsConnector<ProxyConnectorService<TimeoutService<HttpConnector>>>>;
 
 /// The default raw client builder used by `conjure_runtime`.
 #[derive(Copy, Clone)]
@@ -71,6 +73,7 @@ impl BuildRawClient for DefaultRawClientBuilder {
             .layer(TlsMetricsLayer::new(&service, builder))
             .layer(HttpsLayer::with_connector(ssl).map_err(Error::internal_safe)?)
             .layer(ProxyConnectorLayer::new(&proxy))
+            .layer(TimeoutLayer::new(builder))
             .service(connector);
 
         let client = hyper::Client::builder()

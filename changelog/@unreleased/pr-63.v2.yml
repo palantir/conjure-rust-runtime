@@ -1,0 +1,6 @@
+type: break
+break:
+  description: The request timeout has been replaced by socket-level read and write
+    timeouts.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/63
