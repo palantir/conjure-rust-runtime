@@ -1,0 +1,5 @@
+type: feature
+fix:
+  description: Added support for the new mesh proxy mode.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/64
