@@ -19,12 +19,13 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use conjure_error::Error;
-use conjure_runtime_config::ServiceConfig;
+use conjure_runtime_config::{ServiceConfig, ServiceConfigBuilder};
 use hyper::client::HttpConnector;
 use hyper::header::HeaderValue;
 use hyper::Method;
 use hyper_openssl::HttpsConnector;
 use openssl::ssl::{SslConnector, SslMethod};
+use std::borrow::Cow;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use witchcraft_log::info;
@@ -53,6 +54,8 @@ impl ClientState {
         host_metrics: &HostMetricsRegistry,
         service_config: &ServiceConfig,
     ) -> Result<ClientState, Error> {
+        let service_config = Self::rewrite_for_mesh(service_config)?;
+
         let mut connector = HttpConnector::new();
         connector.enforce_http(false);
         connector.set_nodelay(true);
@@ -79,7 +82,7 @@ impl ClientState {
             .pool_idle_timeout(HTTP_KEEPALIVE)
             .build(connector);
 
-        let node_selector = NodeSelector::new(service, host_metrics, service_config);
+        let node_selector = NodeSelector::new(service, host_metrics, &service_config);
 
         Ok(ClientState {
             client,
@@ -89,6 +92,38 @@ impl ClientState {
             request_timeout: service_config.request_timeout(),
             proxy,
         })
+    }
+
+    fn rewrite_for_mesh(service_config: &ServiceConfig) -> Result<Cow<'_, ServiceConfig>, Error> {
+        let prefix = "mesh-";
+
+        let mesh_uris = service_config
+            .uris()
+            .iter()
+            .filter(|uri| uri.scheme().starts_with(prefix))
+            .count();
+
+        if mesh_uris == 0 {
+            return Ok(Cow::Borrowed(service_config));
+        }
+
+        if service_config.uris().len() != 1 {
+            return Err(
+                Error::internal_safe("exactly one URI must be present in mesh mode")
+                    .with_safe_param("uris", service_config.uris()),
+            );
+        }
+
+        let new_uri = service_config.uris()[0].as_str()[prefix.len()..]
+            .parse()
+            .unwrap();
+
+        let config = ServiceConfigBuilder::from(service_config.clone())
+            .uris(vec![new_uri])
+            .max_num_retries(0)
+            .build();
+
+        Ok(Cow::Owned(config))
     }
 }
 

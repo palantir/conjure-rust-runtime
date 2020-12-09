@@ -799,3 +799,22 @@ impl Body for InfiniteBody {
         panic!("should not reset");
     }
 }
+
+#[tokio::test]
+async fn mesh_mode() {
+    test(
+        r#"
+services:
+  service:
+    uris: ["mesh-https://localhost:{{port}}"]
+    security:
+      ca-file: "{{ca_file}}"
+    "#,
+        1,
+        |_| async { Ok(Response::new(hyper::Body::empty())) },
+        |client| async move {
+            client.get("/").send().await.unwrap();
+        },
+    )
+    .await;
+}
