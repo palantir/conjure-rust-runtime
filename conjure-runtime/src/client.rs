@@ -95,10 +95,12 @@ impl ClientState {
     }
 
     fn rewrite_for_mesh(service_config: &ServiceConfig) -> Result<Cow<ServiceConfig>, Error> {
+        let prefix = "mesh-";
+
         let mesh_uris = service_config
             .uris()
             .iter()
-            .filter(|uri| uri.scheme().starts_with("mesh-"))
+            .filter(|uri| uri.scheme().starts_with(prefix))
             .count();
 
         if mesh_uris == 0 {
@@ -115,7 +117,7 @@ impl ClientState {
         let old_uri = &service_config.uris()[0];
         let mut new_uri = old_uri.clone();
         new_uri
-            .set_scheme(old_uri.scheme().strip_prefix("mesh-").unwrap())
+            .set_scheme(&old_uri.scheme()[prefix.len()..])
             .unwrap();
 
         let config = ServiceConfigBuilder::from(service_config.clone())
