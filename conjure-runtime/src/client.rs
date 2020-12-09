@@ -114,10 +114,8 @@ impl ClientState {
             );
         }
 
-        let old_uri = &service_config.uris()[0];
-        let mut new_uri = old_uri.clone();
-        new_uri
-            .set_scheme(&old_uri.scheme()[prefix.len()..])
+        let new_uri = service_config.uris()[0].as_str()[prefix.len()..]
+            .parse()
             .unwrap();
 
         let config = ServiceConfigBuilder::from(service_config.clone())
