@@ -37,7 +37,7 @@ serde = "1.0"
 witchcraft-log = "0.3"
 witchcraft-metrics = "0.2"
 tokio = { version = "0.2", features = ["io-util", "rt-threaded", "time"] }
-tokio-io-timeout = "0.4"
+tokio-io-timeout = "0.5"
 tower = "0.3"
 url = "2.0"
 zipkin = "0.4"
