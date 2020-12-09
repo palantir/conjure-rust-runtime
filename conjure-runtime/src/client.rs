@@ -94,7 +94,7 @@ impl ClientState {
         })
     }
 
-    fn rewrite_for_mesh(service_config: &ServiceConfig) -> Result<Cow<ServiceConfig>, Error> {
+    fn rewrite_for_mesh(service_config: &ServiceConfig) -> Result<Cow<'_, ServiceConfig>, Error> {
         let prefix = "mesh-";
 
         let mesh_uris = service_config
