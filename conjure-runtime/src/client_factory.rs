@@ -142,6 +142,7 @@ impl ClientFactory {
         let user_agent = self.user_agent.clone();
         let metrics = self.metrics.clone();
         let host_metrics = self.host_metrics.clone();
+        let client_qos = self.client_qos;
         let server_qos = self.server_qos;
         let service_error = self.service_error;
         let idempotency = self.idempotency;
@@ -158,6 +159,9 @@ impl ClientFactory {
             }
             if let Some(host_metrics) = host_metrics.clone() {
                 builder.host_metrics(host_metrics);
+            }
+            if let Some(client_qos) = client_qos {
+                builder.client_qos(client_qos);
             }
             if let Some(server_qos) = server_qos {
                 builder.server_qos(server_qos);
