@@ -38,7 +38,7 @@ const RESHUFFLE_JITTER: Duration = Duration::from_secs(60);
 pub trait Entropy {
     fn gen_range<T>(&self, start: T, end: T) -> T
     where
-        T: SampleUniform;
+        T: SampleUniform + PartialOrd;
 
     fn shuffle<T>(&self, slice: &mut [T]);
 }
@@ -48,9 +48,9 @@ pub struct RandEntropy(ConjureRng);
 impl Entropy for RandEntropy {
     fn gen_range<T>(&self, start: T, end: T) -> T
     where
-        T: SampleUniform,
+        T: SampleUniform + PartialOrd,
     {
-        self.0.with(|rng| rng.gen_range(start, end))
+        self.0.with(|rng| rng.gen_range(start..end))
     }
 
     fn shuffle<T>(&self, slice: &mut [T]) {

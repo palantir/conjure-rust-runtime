@@ -300,7 +300,7 @@ where
                     Duration::from_secs(0)
                 } else {
                     self.rng
-                        .with(|rng| rng.gen_range(Duration::from_secs(0), max))
+                        .with(|rng| rng.gen_range(Duration::from_secs(0)..max))
                 }
             }
         };
