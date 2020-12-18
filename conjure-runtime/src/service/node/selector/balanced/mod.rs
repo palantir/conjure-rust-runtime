@@ -73,7 +73,7 @@ impl TrackedNode {
 
 pub struct AcquiringNode {
     node: Arc<TrackedNode>,
-    // FIXME ideally we'd just pin the entire Vec<AcquiringNode>
+    // FIXME(#69) ideally we'd just pin the entire Vec<AcquiringNode>
     acquire: Pin<Box<Acquire>>,
 }
 
