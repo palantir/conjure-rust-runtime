@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::raw::Service;
-use crate::service::node::Node;
+use crate::service::node::{LimitedNode, Wrap};
 use crate::service::Layer;
-use http::Request;
+use conjure_error::Error;
+use http::{Request, Response};
 use std::sync::Arc;
 
 /// A node selector layer which always selects a single node.
@@ -22,11 +23,11 @@ use std::sync::Arc;
 /// This isn't necessary (the normal selectors will work with one node), but avoids a bit of extra unnecessary
 /// bookkeeping when there's only one node for a service.
 pub struct SingleNodeSelectorLayer {
-    node: Arc<Node>,
+    node: LimitedNode,
 }
 
 impl SingleNodeSelectorLayer {
-    pub fn new(node: Arc<Node>) -> SingleNodeSelectorLayer {
+    pub fn new(node: LimitedNode) -> SingleNodeSelectorLayer {
         SingleNodeSelectorLayer { node }
     }
 }
@@ -36,29 +37,28 @@ impl<S> Layer<S> for SingleNodeSelectorLayer {
 
     fn layer(self, inner: S) -> SingleNodeSelectorService<S> {
         SingleNodeSelectorService {
-            inner,
+            inner: Arc::new(inner),
             node: self.node,
         }
     }
 }
 
 pub struct SingleNodeSelectorService<S> {
-    inner: S,
-    node: Arc<Node>,
+    inner: Arc<S>,
+    node: LimitedNode,
 }
 
-impl<S, B> Service<Request<B>> for SingleNodeSelectorService<S>
+impl<S, B1, B2> Service<Request<B1>> for SingleNodeSelectorService<S>
 where
-    S: Service<Request<B>>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = SingleNodeSelectorFuture<S::Future>;
+    type Future = SingleNodeSelectorFuture<S, B1>;
 
-    fn call(&self, mut req: Request<B>) -> Self::Future {
-        req.extensions_mut().insert(self.node.clone());
-        self.inner.call(req)
+    fn call(&self, req: Request<B1>) -> Self::Future {
+        self.node.wrap(&self.inner, req)
     }
 }
 
-pub type SingleNodeSelectorFuture<F> = F;
+pub type SingleNodeSelectorFuture<S, B> = Wrap<S, B>;

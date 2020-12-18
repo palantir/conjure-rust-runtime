@@ -34,6 +34,7 @@ rand_pcg = "0.2"
 refreshable = "1.0"
 regex = "1.0"
 serde = "1.0"
+serde-value = "0.7"
 witchcraft-log = "0.3"
 witchcraft-metrics = "0.2"
 tokio = { version = "0.2", features = ["io-util", "rt-threaded", "time"] }
@@ -47,6 +48,7 @@ conjure-runtime-config = { version = "0.2.1", path = "../conjure-runtime-config"
 [dev-dependencies]
 tokio = { version = "0.2", features = ["full"] }
 flate2 = "1.0"
+futures-test = "0.3"
 tokio-openssl = "0.4"
 tokio-test = "0.2"
 serde_yaml = "0.8"

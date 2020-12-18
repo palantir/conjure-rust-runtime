@@ -75,7 +75,7 @@ mod test {
 
         let req = Request::builder()
             .uri("/fizz/buzz?hello=true")
-            .extension(Arc::new(Node::test("https://foobar.fizz:1234/")))
+            .extension(Node::test("https://foobar.fizz:1234/"))
             .body(())
             .unwrap();
         let out = service.call(req).await.unwrap();
@@ -89,7 +89,7 @@ mod test {
 
         let req = Request::builder()
             .uri("/fizz/buzz?hello=true")
-            .extension(Arc::new(Node::test("https://foobar.fizz:1234/foo/bar")))
+            .extension(Node::test("https://foobar.fizz:1234/foo/bar"))
             .body(())
             .unwrap();
         let out = service.call(req).await.unwrap();

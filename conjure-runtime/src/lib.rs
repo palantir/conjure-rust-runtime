@@ -135,6 +135,11 @@
 //! * `conjure-runtime: get /widget-service/{widgetId}` - The name of this span is built from the request's method and
 //!     path pattern.
 //!     * `conjure-runtime: attempt 1`
+//!         * `conjure-runtime: acquire-permit` - If client QoS is enabled and the node selection strategy is not
+//!             [`Balanced`], this span covers the time spent acquiring a concurrency limiter permit.
+//!         * `conjure-runtime: balanced-node-selection` - If the node selection strategy is [`Balanced`], this span
+//!             covers the time spent selecting a node and (if client QoS is enabled) acquiring a concurrency limiter
+//!             permit.
 //!         * `conjure-runtime: wait-for-headers` - This span is sent to the server, and lasts until the server sends
 //!             the headers of the response.
 //!         * `conjure-runtime: wait-for-body` - This span is tracked along with the response body, and lasts until the
@@ -179,6 +184,10 @@
 //! * `tls.handshake (context: <service_name>, protocol: <protocol_version>, cipher: <cipher_name>)` - A `Meter`
 //!     tracking the rate of TLS handshakes, tagged by the service, TLS protocol version (e.g. `TLSv1.3`), and cipher
 //!     name (e.g. `TLS_CHACHA20_POLY1305_SHA256`).
+//! * `conjure-runtime.concurrencylimiter.max (service: <service_name>, hostIndex: <host_index>)` - A `Gauge` reporting
+//!     the maximum number of concurrent requests which are currently permitted to be made to a specific host.
+//! * `conjure-runtime.concurrencylimiter.in-flight (service: <service_name>, hostIndex: <host_index>)` - A `Gauge`
+//!     reporting the current number of requests being made to a specific host.
 //!
 //! ### Host Metrics
 //!
@@ -188,6 +197,7 @@
 //! [Conjure]: https://github.com/palantir/conjure
 //! [`dialogue`]: https://github.com/palantir/dialogue
 //! [`zipkin`]: https://docs.rs/zipkin
+//! [`Balanced`]:(NodeSelectionStrategy::Balanced)
 #![doc(html_root_url = "https://docs.rs/conjure-runtime/0.2")]
 #![warn(missing_docs, clippy::all)]
 
@@ -218,6 +228,7 @@ mod service;
 #[cfg(test)]
 mod test;
 mod user_agent;
+mod util;
 
 /// Client configuration.
 ///

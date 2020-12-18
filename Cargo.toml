@@ -7,5 +7,8 @@ members = [
     "simulation",
 ]
 
-[patch.crates-io]
-hyper = { git = "https://github.com/hyperium/hyper" }
+[profile.release]
+debug = 1
+
+[profile.bench]
+debug = 1

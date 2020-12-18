@@ -13,10 +13,11 @@
 // limitations under the License.
 use crate::raw::Service;
 use crate::rng::ConjureRng;
-use crate::service::node::Node;
+use crate::service::node::{LimitedNode, Wrap};
 use crate::service::Layer;
 use crate::Builder;
 use arc_swap::ArcSwap;
+use conjure_error::Error;
 use futures::ready;
 use http::{Request, Response};
 use pin_project::pin_project;
@@ -57,23 +58,23 @@ impl Entropy for RandEntropy {
     }
 }
 
-pub trait Nodes {
+pub trait Nodes<T> {
     fn len(&self) -> usize;
 
-    fn get(&self, idx: usize) -> Arc<Node>;
+    fn get(&self, idx: usize) -> &T;
 }
 
 /// A nodes implementation which shuffles nodes when initializing, but not afterwards.
-pub struct FixedNodes {
-    nodes: Vec<Arc<Node>>,
+pub struct FixedNodes<T = LimitedNode> {
+    nodes: Vec<T>,
 }
 
-impl FixedNodes {
-    pub fn new<T>(nodes: Vec<Arc<Node>>, builder: &Builder<T>) -> Self {
+impl<T> FixedNodes<T> {
+    pub fn new<U>(nodes: Vec<T>, builder: &Builder<U>) -> Self {
         Self::with_entropy(nodes, RandEntropy(ConjureRng::new(builder)))
     }
 
-    fn with_entropy<E>(mut nodes: Vec<Arc<Node>>, entropy: E) -> Self
+    fn with_entropy<E>(mut nodes: Vec<T>, entropy: E) -> Self
     where
         E: Entropy,
     {
@@ -83,43 +84,46 @@ impl FixedNodes {
     }
 }
 
-impl Nodes for FixedNodes {
+impl<T> Nodes<T> for FixedNodes<T> {
     fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    fn get(&self, idx: usize) -> Arc<Node> {
-        self.nodes[idx].clone()
+    fn get(&self, idx: usize) -> &T {
+        &self.nodes[idx]
     }
 }
 
 /// A nodes implementation which periodically reshuffles nodes.
-pub struct ReshufflingNodes<E = RandEntropy> {
-    nodes: ArcSwap<Vec<Arc<Node>>>,
+pub struct ReshufflingNodes<T = LimitedNode, E = RandEntropy> {
+    nodes: Vec<T>,
+    shuffle: ArcSwap<Vec<usize>>,
     start: Instant,
     interval_with_jitter: Duration,
     next_reshuffle_nanos: AtomicU64,
     entropy: E,
 }
 
-impl ReshufflingNodes {
-    pub fn new<T>(nodes: Vec<Arc<Node>>, builder: &Builder<T>) -> Self {
+impl<T> ReshufflingNodes<T> {
+    pub fn new<U>(nodes: Vec<T>, builder: &Builder<U>) -> Self {
         Self::with_entropy(nodes, RandEntropy(ConjureRng::new(builder)))
     }
 }
 
-impl<E> ReshufflingNodes<E>
+impl<T, E> ReshufflingNodes<T, E>
 where
     E: Entropy,
 {
-    fn with_entropy(mut nodes: Vec<Arc<Node>>, entropy: E) -> Self {
-        entropy.shuffle(&mut nodes);
+    fn with_entropy(nodes: Vec<T>, entropy: E) -> Self {
+        let mut shuffle = (0..nodes.len()).collect::<Vec<_>>();
+        entropy.shuffle(&mut shuffle);
 
         let interval_with_jitter =
             RESHUFFLE_EVERY + entropy.gen_range(Duration::from_secs(0), RESHUFFLE_JITTER);
 
         ReshufflingNodes {
-            nodes: ArcSwap::new(Arc::new(nodes)),
+            nodes,
+            shuffle: ArcSwap::from_pointee(shuffle),
             start: Instant::now(),
             interval_with_jitter,
             next_reshuffle_nanos: AtomicU64::new(interval_with_jitter.as_nanos() as u64),
@@ -150,23 +154,24 @@ where
             return;
         }
 
-        let mut new_nodes = self.nodes.load().to_vec();
-        self.entropy.shuffle(&mut new_nodes);
-        self.nodes.store(Arc::new(new_nodes));
+        let mut new_shuffle = self.shuffle.load().to_vec();
+        self.entropy.shuffle(&mut new_shuffle);
+        self.shuffle.store(Arc::new(new_shuffle));
     }
 }
 
-impl<E> Nodes for ReshufflingNodes<E>
+impl<T, E> Nodes<T> for ReshufflingNodes<T, E>
 where
     E: Entropy,
 {
     fn len(&self) -> usize {
-        self.nodes.load().len()
+        self.nodes.len()
     }
 
-    fn get(&self, idx: usize) -> Arc<Node> {
+    fn get(&self, idx: usize) -> &T {
         self.reshuffle_if_necessary();
-        self.nodes.load()[idx].clone()
+        let shuffled_idx = self.shuffle.load()[idx];
+        &self.nodes[shuffled_idx]
     }
 }
 
@@ -183,7 +188,7 @@ pub struct PinUntilErrorNodeSelectorLayer<T> {
 
 impl<T> PinUntilErrorNodeSelectorLayer<T>
 where
-    T: Nodes,
+    T: Nodes<LimitedNode>,
 {
     pub fn new(nodes: T) -> PinUntilErrorNodeSelectorLayer<T> {
         PinUntilErrorNodeSelectorLayer {
@@ -201,32 +206,31 @@ impl<T, S> Layer<S> for PinUntilErrorNodeSelectorLayer<T> {
     fn layer(self, inner: S) -> Self::Service {
         PinUntilErrorNodeSelectorService {
             state: self.state,
-            inner,
+            inner: Arc::new(inner),
         }
     }
 }
 
 pub struct PinUntilErrorNodeSelectorService<T, S> {
     state: Arc<State<T>>,
-    inner: S,
+    inner: Arc<S>,
 }
 
 impl<T, S, B1, B2> Service<Request<B1>> for PinUntilErrorNodeSelectorService<T, S>
 where
-    T: Nodes,
-    S: Service<Request<B1>, Response = Response<B2>>,
+    T: Nodes<LimitedNode>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = PinUntilErrorNodeSelectorFuture<T, S::Future>;
+    type Future = PinUntilErrorNodeSelectorFuture<T, S, B1>;
 
-    fn call(&self, mut req: Request<B1>) -> Self::Future {
+    fn call(&self, req: Request<B1>) -> Self::Future {
         let pin = self.state.current_pin.load(Ordering::SeqCst);
         let node = self.state.nodes.get(pin);
-        req.extensions_mut().insert(node);
 
         PinUntilErrorNodeSelectorFuture {
-            future: self.inner.call(req),
+            future: node.wrap(&self.inner, req),
             state: self.state.clone(),
             pin,
         }
@@ -234,19 +238,22 @@ where
 }
 
 #[pin_project]
-pub struct PinUntilErrorNodeSelectorFuture<T, F> {
+pub struct PinUntilErrorNodeSelectorFuture<T, S, B>
+where
+    S: Service<Request<B>>,
+{
     #[pin]
-    future: F,
+    future: Wrap<S, B>,
     state: Arc<State<T>>,
     pin: usize,
 }
 
-impl<T, F, B, E> Future for PinUntilErrorNodeSelectorFuture<T, F>
+impl<T, S, B1, B2> Future for PinUntilErrorNodeSelectorFuture<T, S, B1>
 where
-    T: Nodes,
-    F: Future<Output = Result<Response<B>, E>>,
+    T: Nodes<LimitedNode>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
-    type Output = Result<Response<B>, E>;
+    type Output = Result<S::Response, S::Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -276,6 +283,8 @@ where
 mod test {
     use super::*;
     use crate::service;
+    use crate::service::node::Node;
+    use crate::service::request::Pattern;
     use http::StatusCode;
     use tokio::time;
 
@@ -293,58 +302,59 @@ mod test {
 
     #[tokio::test]
     async fn fixed_nodes_shuffle_on_construction() {
-        let nodes = vec![
-            Arc::new(Node::test("http://a/")),
-            Arc::new(Node::test("http://b/")),
-        ];
+        let nodes = vec![0, 1];
 
         let nodes = FixedNodes::with_entropy(nodes, TestEntropy);
         assert_eq!(nodes.len(), 2);
-        assert_eq!(nodes.get(0).url.as_str(), "http://b/");
-        assert_eq!(nodes.get(1).url.as_str(), "http://a/");
+        assert_eq!(nodes.get(0), &1);
+        assert_eq!(nodes.get(1), &0);
     }
 
     #[tokio::test]
     async fn reshuffling_nodes_shuffle_perodically() {
         time::pause();
 
-        let nodes = vec![
-            Arc::new(Node::test("http://a/")),
-            Arc::new(Node::test("http://b/")),
-        ];
+        let nodes = vec![0, 1];
 
         let nodes = ReshufflingNodes::with_entropy(nodes, TestEntropy);
         assert_eq!(nodes.len(), 2);
-        assert_eq!(nodes.get(0).url.as_str(), "http://b/");
-        assert_eq!(nodes.get(1).url.as_str(), "http://a/");
+        assert_eq!(nodes.get(0), &1);
+        assert_eq!(nodes.get(1), &0);
 
         time::advance(RESHUFFLE_EVERY).await;
 
         assert_eq!(nodes.len(), 2);
-        assert_eq!(nodes.get(0).url.as_str(), "http://a/");
-        assert_eq!(nodes.get(1).url.as_str(), "http://b/");
+        assert_eq!(nodes.get(0), &0);
+        assert_eq!(nodes.get(1), &1);
     }
 
     struct TestNodes {
-        nodes: Vec<Arc<Node>>,
+        nodes: Vec<LimitedNode>,
     }
 
-    impl Nodes for TestNodes {
+    impl Nodes<LimitedNode> for TestNodes {
         fn len(&self) -> usize {
             self.nodes.len()
         }
 
-        fn get(&self, idx: usize) -> Arc<Node> {
-            self.nodes[idx].clone()
+        fn get(&self, idx: usize) -> &LimitedNode {
+            &self.nodes[idx]
         }
+    }
+
+    fn request() -> Request<()> {
+        Request::builder()
+            .extension(Pattern { pattern: "foo" })
+            .body(())
+            .unwrap()
     }
 
     #[tokio::test]
     async fn pin_on_success() {
         let service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
             nodes: vec![
-                Arc::new(Node::test("http://a/")),
-                Arc::new(Node::test("http://a/")),
+                LimitedNode::test("http://a/"),
+                LimitedNode::test("http://b/"),
             ],
         })
         .layer(service::service_fn(|req: Request<()>| async move {
@@ -353,19 +363,19 @@ mod test {
                 "http://a/"
             );
 
-            Ok::<_, ()>(Response::new(()))
+            Ok::<_, Error>(Response::new(()))
         }));
 
-        service.call(Request::new(())).await.unwrap();
-        service.call(Request::new(())).await.unwrap();
+        service.call(request()).await.unwrap();
+        service.call(request()).await.unwrap();
     }
 
     #[tokio::test]
     async fn pin_on_4xx() {
         let service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
             nodes: vec![
-                Arc::new(Node::test("http://a/")),
-                Arc::new(Node::test("http://b/")),
+                LimitedNode::test("http://a/"),
+                LimitedNode::test("http://b/"),
             ],
         })
         .layer(service::service_fn(|req: Request<()>| async move {
@@ -374,7 +384,7 @@ mod test {
                 "http://a/"
             );
 
-            Ok::<_, ()>(
+            Ok::<_, Error>(
                 Response::builder()
                     .status(StatusCode::BAD_REQUEST)
                     .body(())
@@ -382,16 +392,16 @@ mod test {
             )
         }));
 
-        service.call(Request::new(())).await.unwrap();
-        service.call(Request::new(())).await.unwrap();
+        service.call(request()).await.unwrap();
+        service.call(request()).await.unwrap();
     }
 
     #[tokio::test]
     async fn rotate_on_io_error() {
         let service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
             nodes: vec![
-                Arc::new(Node::test("http://a/")),
-                Arc::new(Node::test("http://b/")),
+                LimitedNode::test("http://a/"),
+                LimitedNode::test("http://b/"),
             ],
         })
         .layer(service::service_fn({
@@ -405,7 +415,7 @@ mod test {
                                 req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
                                 "http://a/"
                             );
-                            Err(())
+                            Err(Error::internal_safe("uh oh"))
                         }
                         1 => {
                             assert_eq!(
@@ -420,16 +430,16 @@ mod test {
             }
         }));
 
-        service.call(Request::new(())).await.err().unwrap();
-        service.call(Request::new(())).await.unwrap();
+        service.call(request()).await.err().unwrap();
+        service.call(request()).await.unwrap();
     }
 
     #[tokio::test]
     async fn rotate_on_5xx() {
         let service = PinUntilErrorNodeSelectorLayer::new(TestNodes {
             nodes: vec![
-                Arc::new(Node::test("http://a/")),
-                Arc::new(Node::test("http://b/")),
+                LimitedNode::test("http://a/"),
+                LimitedNode::test("http://b/"),
             ],
         })
         .layer(service::service_fn({
@@ -443,7 +453,7 @@ mod test {
                                 req.extensions().get::<Arc<Node>>().unwrap().url.as_str(),
                                 "http://a/"
                             );
-                            Ok::<_, ()>(
+                            Ok::<_, Error>(
                                 Response::builder()
                                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                                     .body(())
@@ -463,7 +473,7 @@ mod test {
             }
         }));
 
-        service.call(Request::new(())).await.unwrap();
-        service.call(Request::new(())).await.unwrap();
+        service.call(request()).await.unwrap();
+        service.call(request()).await.unwrap();
     }
 }

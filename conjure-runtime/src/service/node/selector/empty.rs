@@ -14,6 +14,7 @@
 use crate::raw::Service;
 use crate::service::Layer;
 use conjure_error::Error;
+use http::Request;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -49,15 +50,15 @@ pub struct EmptyNodeSelectorService<S> {
     _p: PhantomData<S>,
 }
 
-impl<S, R> Service<R> for EmptyNodeSelectorService<S>
+impl<S, B> Service<Request<B>> for EmptyNodeSelectorService<S>
 where
-    S: Service<R, Error = Error>,
+    S: Service<Request<B>, Error = Error>,
 {
     type Response = S::Response;
     type Error = Error;
-    type Future = EmptyNodeSelectorFuture<S::Future>;
+    type Future = EmptyNodeSelectorFuture<S, B>;
 
-    fn call(&self, _: R) -> Self::Future {
+    fn call(&self, _: Request<B>) -> Self::Future {
         EmptyNodeSelectorFuture {
             service: self.service.clone(),
             _p: PhantomData,
@@ -65,16 +66,16 @@ where
     }
 }
 
-pub struct EmptyNodeSelectorFuture<F> {
+pub struct EmptyNodeSelectorFuture<S, B> {
     service: Arc<str>,
-    _p: PhantomData<F>,
+    _p: PhantomData<(S, B)>,
 }
 
-impl<F, R> Future for EmptyNodeSelectorFuture<F>
+impl<S, B> Future for EmptyNodeSelectorFuture<S, B>
 where
-    F: Future<Output = Result<R, Error>>,
+    S: Service<Request<B>, Error = Error>,
 {
-    type Output = F::Output;
+    type Output = Result<S::Response, S::Error>;
 
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
         Poll::Ready(Err(Error::internal_safe("service configured with no URIs")

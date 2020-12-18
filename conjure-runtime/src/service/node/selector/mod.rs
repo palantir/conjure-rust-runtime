@@ -25,7 +25,7 @@ use crate::service::node::selector::pin_until_error::{
 use crate::service::node::selector::single::{
     SingleNodeSelectorFuture, SingleNodeSelectorLayer, SingleNodeSelectorService,
 };
-use crate::service::node::Node;
+use crate::service::node::LimitedNode;
 use crate::service::Layer;
 use crate::{Builder, NodeSelectionStrategy};
 use conjure_error::Error;
@@ -33,7 +33,6 @@ use http::{Request, Response};
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 mod balanced;
@@ -58,22 +57,8 @@ impl NodeSelectorLayer {
         let mut nodes = builder
             .get_uris()
             .iter()
-            .map(|url| {
-                // normalize by stripping a trailing `/` if present
-                let mut url = url.clone();
-                url.path_segments_mut().unwrap().pop_if_empty();
-
-                Arc::new(Node {
-                    host_metrics: builder.get_host_metrics().map(|m| {
-                        m.get(
-                            service,
-                            url.host_str().unwrap(),
-                            url.port_or_known_default().unwrap(),
-                        )
-                    }),
-                    url,
-                })
-            })
+            .enumerate()
+            .map(|(i, url)| LimitedNode::new(i, url, service, builder))
             .collect::<Vec<_>>();
 
         if nodes.is_empty() {
@@ -130,7 +115,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = NodeSelectorFuture<S::Future>;
+    type Future = NodeSelectorFuture<S, B1>;
 
     fn call(&self, req: Request<B1>) -> Self::Future {
         match self {
@@ -146,19 +131,22 @@ where
 }
 
 #[pin_project(project = Projection)]
-pub enum NodeSelectorFuture<F> {
-    Empty(#[pin] EmptyNodeSelectorFuture<F>),
-    Single(#[pin] SingleNodeSelectorFuture<F>),
-    PinUntilError(#[pin] PinUntilErrorNodeSelectorFuture<ReshufflingNodes, F>),
-    PinUntilErrorWithoutReshuffle(#[pin] PinUntilErrorNodeSelectorFuture<FixedNodes, F>),
-    Balanced(#[pin] BalancedNodeSelectorFuture<F>),
+pub enum NodeSelectorFuture<S, B>
+where
+    S: Service<Request<B>>,
+{
+    Empty(#[pin] EmptyNodeSelectorFuture<S, B>),
+    Single(#[pin] SingleNodeSelectorFuture<S, B>),
+    PinUntilError(#[pin] PinUntilErrorNodeSelectorFuture<ReshufflingNodes, S, B>),
+    PinUntilErrorWithoutReshuffle(#[pin] PinUntilErrorNodeSelectorFuture<FixedNodes, S, B>),
+    Balanced(#[pin] BalancedNodeSelectorFuture<S, B>),
 }
 
-impl<F, B> Future for NodeSelectorFuture<F>
+impl<S, B1, B2> Future for NodeSelectorFuture<S, B1>
 where
-    F: Future<Output = Result<Response<B>, Error>>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
-    type Output = F::Output;
+    type Output = Result<S::Response, S::Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {

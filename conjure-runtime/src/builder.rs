@@ -35,6 +35,7 @@ pub struct Builder<T = DefaultRawClientBuilder> {
     write_timeout: Duration,
     backoff_slot_size: Duration,
     max_num_retries: u32,
+    client_qos: ClientQos,
     server_qos: ServerQos,
     service_error: ServiceError,
     idempotency: Idempotency,
@@ -65,6 +66,7 @@ impl Builder {
             write_timeout: Duration::from_secs(5 * 60),
             backoff_slot_size: Duration::from_millis(250),
             max_num_retries: 4,
+            client_qos: ClientQos::Enabled,
             server_qos: ServerQos::AutomaticRetry,
             service_error: ServiceError::WrapInNewError,
             idempotency: Idempotency::ByMethod,
@@ -260,6 +262,19 @@ impl<T> Builder<T> {
         self.max_num_retries
     }
 
+    /// Sets the client's internal rate limiting behavior.
+    ///
+    /// Defaults to `ClientQos::Enabled`.
+    pub fn client_qos(&mut self, client_qos: ClientQos) -> &mut Self {
+        self.client_qos = client_qos;
+        self
+    }
+
+    /// Returns the builder's configured internal rate limiting behavior.
+    pub fn get_client_qos(&self) -> ClientQos {
+        self.client_qos
+    }
+
     /// Sets the client's behavior in response to a QoS error from the server.
     ///
     /// Defaults to `ServerQos::AutomaticRetry`.
@@ -375,6 +390,7 @@ impl<T> Builder<T> {
             write_timeout: self.write_timeout,
             backoff_slot_size: self.backoff_slot_size,
             max_num_retries: self.max_num_retries,
+            client_qos: self.client_qos,
             server_qos: self.server_qos,
             service_error: self.service_error,
             idempotency: self.idempotency,
@@ -414,6 +430,22 @@ where
     pub fn build_blocking(&self) -> Result<blocking::Client<T::RawClient>, Error> {
         self.build().map(blocking::Client)
     }
+}
+
+/// Specifies the beahavior of client-side sympathetic rate limiting.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ClientQos {
+    /// Enable client side rate limiting.
+    ///
+    /// This is the default behavior.
+    Enabled,
+
+    /// Disables client-side rate limiting.
+    ///
+    /// This should only be used when there are known issues with the interaction between a service's rate limiting
+    /// implementation and the client's.
+    DangerousDisableSympatheticClientQos,
 }
 
 /// Specifies the behavior of a client in response to a `QoS` error from a server.
