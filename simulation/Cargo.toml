@@ -15,7 +15,7 @@ futures = "0.3"
 http = "0.2"
 http-body = "0.3"
 parking_lot = "0.11"
-rand = "0.7"
+rand = "0.8"
 rand_pcg = "0.2"
 tempfile = "3.0"
 tokio = { version = "0.2", features = ["test-util"] }
