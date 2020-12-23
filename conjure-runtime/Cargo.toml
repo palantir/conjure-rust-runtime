@@ -13,7 +13,7 @@ arc-swap = "1.0"
 async-compression = { version = "0.3", default-features = false, features = ["zlib", "gzip", "stream"] }
 async-trait = "0.1"
 base64 = "0.13"
-bytes = "0.5"
+bytes = "1.0"
 conjure-error = "0.7"
 conjure-http = "0.7"
 conjure-object = "0.7"
