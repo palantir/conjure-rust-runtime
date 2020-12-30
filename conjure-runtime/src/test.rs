@@ -728,7 +728,7 @@ security:
   ca-file: "{{ca_file}}"
         "#,
         1,
-        |req| async move { Ok(Response::new(hyper::Body::empty())) },
+        |_| async move { Ok(Response::new(hyper::Body::empty())) },
         |builder| async move {
             builder.build().unwrap().get("/").send().await.unwrap();
         },

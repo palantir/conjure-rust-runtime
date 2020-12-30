@@ -413,8 +413,7 @@ impl<T> Builder<T> {
     pub(crate) fn mesh_mode(&self) -> bool {
         self.uris
             .iter()
-            .find(|uri| uri.scheme().starts_with(MESH_PREFIX))
-            .is_some()
+            .any(|uri| uri.scheme().starts_with(MESH_PREFIX))
     }
 
     pub(crate) fn postprocessed_uris(&self) -> Result<Cow<'_, [Url]>, Error> {
