@@ -718,3 +718,20 @@ impl Body for InfiniteBody {
         panic!("should not reset");
     }
 }
+
+#[tokio::test]
+async fn mesh_mode() {
+    test(
+        r#"
+uris: ["mesh-https://localhost:{{port}}"]
+security:
+  ca-file: "{{ca_file}}"
+        "#,
+        1,
+        |req| async move { Ok(Response::new(hyper::Body::empty())) },
+        |builder| async move {
+            builder.build().unwrap().get("/").send().await.unwrap();
+        },
+    )
+    .await
+}

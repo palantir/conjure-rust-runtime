@@ -18,10 +18,13 @@ use crate::raw::{BuildRawClient, DefaultRawClientBuilder};
 use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
 use witchcraft_metrics::MetricRegistry;
+
+const MESH_PREFIX: &str = "mesh-";
 
 /// A builder to construct `Client`s and `blocking::Client`s.
 pub struct Builder<T = DefaultRawClientBuilder> {
@@ -405,6 +408,33 @@ impl<T> Builder<T> {
     /// Returns the builder's configured raw client builder.
     pub fn get_raw_client_builder(&self) -> &T {
         &self.raw_client_builder
+    }
+
+    pub(crate) fn mesh_mode(&self) -> bool {
+        self.uris
+            .iter()
+            .find(|uri| uri.scheme().starts_with(MESH_PREFIX))
+            .is_some()
+    }
+
+    pub(crate) fn postprocessed_uris(&self) -> Result<Cow<'_, [Url]>, Error> {
+        if self.mesh_mode() {
+            if self.uris.len() != 1 {
+                return Err(Error::internal_safe("mesh mode expects exactly one URI")
+                    .with_safe_param("uris", &self.uris));
+            }
+
+            let uri = self.uris[0]
+                .as_str()
+                .strip_prefix(MESH_PREFIX)
+                .unwrap()
+                .parse()
+                .unwrap();
+
+            Ok(Cow::Owned(vec![uri]))
+        } else {
+            Ok(Cow::Borrowed(&self.uris))
+        }
     }
 }
 

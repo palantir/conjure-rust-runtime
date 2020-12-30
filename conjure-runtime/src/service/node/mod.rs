@@ -62,9 +62,13 @@ impl LimitedNode {
                     )
                 }),
             }),
-            limiter: match builder.get_client_qos() {
-                ClientQos::Enabled => Some(Limiter::new()),
-                ClientQos::DangerousDisableSympatheticClientQos => None,
+            limiter: if builder.mesh_mode() {
+                None
+            } else {
+                match builder.get_client_qos() {
+                    ClientQos::Enabled => Some(Limiter::new()),
+                    ClientQos::DangerousDisableSympatheticClientQos => None,
+                }
             },
         };
 

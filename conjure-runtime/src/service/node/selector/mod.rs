@@ -53,15 +53,15 @@ pub enum NodeSelectorLayer {
 }
 
 impl NodeSelectorLayer {
-    pub fn new<T>(service: &str, builder: &Builder<T>) -> NodeSelectorLayer {
+    pub fn new<T>(service: &str, builder: &Builder<T>) -> Result<NodeSelectorLayer, Error> {
         let mut nodes = builder
-            .get_uris()
+            .postprocessed_uris()?
             .iter()
             .enumerate()
             .map(|(i, url)| LimitedNode::new(i, url, service, builder))
             .collect::<Vec<_>>();
 
-        if nodes.is_empty() {
+        let layer = if nodes.is_empty() {
             NodeSelectorLayer::Empty(EmptyNodeSelectorLayer::new(service))
         } else if nodes.len() == 1 {
             NodeSelectorLayer::Single(SingleNodeSelectorLayer::new(nodes.pop().unwrap()))
@@ -79,7 +79,9 @@ impl NodeSelectorLayer {
                     NodeSelectorLayer::Balanced(BalancedNodeSelectorLayer::new(nodes, builder))
                 }
             }
-        }
+        };
+
+        Ok(layer)
     }
 }
 
