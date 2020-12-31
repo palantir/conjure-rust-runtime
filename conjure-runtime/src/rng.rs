@@ -13,7 +13,7 @@
 // limitations under the License.
 use crate::Builder;
 use parking_lot::Mutex;
-use rand::RngCore;
+use rand::{RngCore, SeedableRng};
 use rand_pcg::Pcg64;
 
 // One layer of indirection to avoid having to lock around thread_rng when a custom RNG isn't used.
@@ -24,14 +24,9 @@ pub enum ConjureRng {
 
 impl ConjureRng {
     pub fn new<T>(builder: &Builder<T>) -> Self {
-        if builder.get_deterministic() {
-            // fixed seed from https://docs.rs/rand_pcg/0.2.1/rand_pcg/struct.Lcg128Xsl64.html
-            ConjureRng::Deterministic(Mutex::new(Pcg64::new(
-                0xcafef00dd15ea5e5,
-                0xa02bdbf7bb3c0a7ac28fa16a64abf96,
-            )))
-        } else {
-            ConjureRng::Thread
+        match builder.get_rng_seed() {
+            Some(rng_seed) => ConjureRng::Deterministic(Mutex::new(Pcg64::seed_from_u64(rng_seed))),
+            None => ConjureRng::Thread,
         }
     }
 

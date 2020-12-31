@@ -109,8 +109,7 @@ impl SimulationBuilder1 {
         builder
             .service(SERVICE)
             .user_agent(UserAgent::new(Agent::new("simulation", "0.0.0")))
-            .metrics(self.metrics.clone())
-            .deterministic(true);
+            .metrics(self.metrics.clone());
         for server in &self.servers {
             builder.uri(format!("http://{}", server.name()).parse().unwrap());
         }
@@ -185,15 +184,17 @@ impl SimulationBuilder3 {
     }
 
     pub fn clients(self, clients: u32) -> Simulation {
+        let runtime = self.runtime;
+        let mut builder = self.builder;
         let clients = (0..clients)
-            .map(|_| self.runtime.enter(|| self.builder.build().unwrap()))
+            .map(|i| runtime.enter(|| builder.rng_seed(u64::from(i)).build().unwrap()))
             .collect::<Vec<_>>();
         let mut rng = crate::rng();
 
         let client_provider = move || clients.choose(&mut rng).unwrap().clone();
 
         Simulation {
-            runtime: self.runtime,
+            runtime,
             metrics: self.metrics,
             recorder: self.recorder,
             requests: self.requests,
