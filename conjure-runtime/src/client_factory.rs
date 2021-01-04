@@ -139,6 +139,7 @@ impl ClientFactory {
             move |c| c.merged_service(&service).unwrap_or_default()
         });
 
+        let service = service.to_string();
         let user_agent = self.user_agent.clone();
         let metrics = self.metrics.clone();
         let host_metrics = self.host_metrics.clone();
@@ -150,7 +151,7 @@ impl ClientFactory {
 
         let make_state = move |config: &ServiceConfig| {
             let mut builder = Client::builder();
-            builder.from_config(config);
+            builder.from_config(config).service(&service);
             if let Some(user_agent) = user_agent.clone() {
                 builder.user_agent(user_agent);
             }
