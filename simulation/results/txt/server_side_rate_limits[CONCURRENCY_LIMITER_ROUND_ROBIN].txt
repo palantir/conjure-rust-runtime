@@ -1,1 +1,1 @@
-success=99.7%	client_mean=0ns	server_cpu=43180600s	client_received=150000/150000	server_resps=215903	codes={200=149611, 429=389}
+success=99.8%	client_mean=39463.622891037s	server_cpu=41223400s	client_received=150000/150000	server_resps=206117	codes={200=149767, 429=233}
