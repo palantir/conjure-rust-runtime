@@ -89,7 +89,7 @@ impl<T> ClientState<T> {
             .layer(RetryLayer::new(builder))
             .layer(HttpErrorLayer::new(builder))
             .layer(SpanLayer)
-            .layer(NodeSelectorLayer::new(service, builder))
+            .layer(NodeSelectorLayer::new(service, builder)?)
             .layer(NodeUriLayer)
             .layer(NodeMetricsLayer)
             .layer(ProxyLayer::new(&proxy))

@@ -60,7 +60,11 @@ impl RetryLayer {
     pub fn new<T>(builder: &Builder<T>) -> RetryLayer {
         RetryLayer {
             idempotency: builder.get_idempotency(),
-            max_num_retries: builder.get_max_num_retries(),
+            max_num_retries: if builder.mesh_mode() {
+                0
+            } else {
+                builder.get_max_num_retries()
+            },
             backoff_slot_size: builder.get_backoff_slot_size(),
             rng: Arc::new(ConjureRng::new(builder)),
         }
@@ -300,7 +304,7 @@ where
                     Duration::from_secs(0)
                 } else {
                     self.rng
-                        .with(|rng| rng.gen_range(Duration::from_secs(0), max))
+                        .with(|rng| rng.gen_range(Duration::from_secs(0)..max))
                 }
             }
         };
