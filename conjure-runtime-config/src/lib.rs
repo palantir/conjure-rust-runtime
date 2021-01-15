@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //! Deserializable configuration types for `conjure_runtime` clients.
-#![doc(html_root_url = "https://docs.rs/conjure-runtime-config/0.2")]
+#![doc(html_root_url = "https://docs.rs/conjure-runtime-config/0.3")]
 #![warn(missing_docs, clippy::all)]
 
 use serde::de::{Deserializer, Error as _, Unexpected};
