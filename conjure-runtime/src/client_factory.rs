@@ -31,11 +31,11 @@ pub struct ClientFactory {
     user_agent: Option<UserAgent>,
     metrics: Option<Arc<MetricRegistry>>,
     host_metrics: Option<Arc<HostMetricsRegistry>>,
-    client_qos: Option<ClientQos>,
-    server_qos: Option<ServerQos>,
-    service_error: Option<ServiceError>,
-    idempotency: Option<Idempotency>,
-    node_selection_strategy: Option<NodeSelectionStrategy>,
+    client_qos: ClientQos,
+    server_qos: ServerQos,
+    service_error: ServiceError,
+    idempotency: Idempotency,
+    node_selection_strategy: NodeSelectionStrategy,
 }
 
 impl ClientFactory {
@@ -46,11 +46,11 @@ impl ClientFactory {
             user_agent: None,
             metrics: None,
             host_metrics: None,
-            client_qos: None,
-            server_qos: None,
-            service_error: None,
-            idempotency: None,
-            node_selection_strategy: None,
+            client_qos: ClientQos::Enabled,
+            server_qos: ServerQos::AutomaticRetry,
+            service_error: ServiceError::WrapInNewError,
+            idempotency: Idempotency::ByMethod,
+            node_selection_strategy: NodeSelectionStrategy::PinUntilError,
         }
     }
 
@@ -62,28 +62,48 @@ impl ClientFactory {
         self
     }
 
+    /// Returns the configured user agent.
+    pub fn get_user_agent(&self) -> Option<&UserAgent> {
+        self.user_agent.as_ref()
+    }
+
     /// Sets clients' rate limiting behavior.
     ///
     /// Defaults to `ClientQos::Enabled`.
     pub fn client_qos(&mut self, client_qos: ClientQos) -> &mut Self {
-        self.client_qos = Some(client_qos);
+        self.client_qos = client_qos;
         self
+    }
+
+    /// Returns the configured rate limiting behavior
+    pub fn get_client_qos(&self) -> ClientQos {
+        self.client_qos
     }
 
     /// Sets clients' behavior in response to a QoS error from the server.
     ///
     /// Defaults to `ServerQos::AutomaticRetry`.
     pub fn server_qos(&mut self, server_qos: ServerQos) -> &mut Self {
-        self.server_qos = Some(server_qos);
+        self.server_qos = server_qos;
         self
+    }
+
+    /// Returns the configured QoS behavior.
+    pub fn get_server_qos(&self) -> ServerQos {
+        self.server_qos
     }
 
     /// Sets clients' behavior in response to a service error from the server.
     ///
     /// Defaults to `ServiceError::WrapInNewError`.
     pub fn service_error(&mut self, service_error: ServiceError) -> &mut Self {
-        self.service_error = Some(service_error);
+        self.service_error = service_error;
         self
+    }
+
+    /// Returns the configured service error behavior.
+    pub fn get_service_error(&self) -> ServiceError {
+        self.service_error
     }
 
     /// Sets clients' behavior to determine if a request is idempotent or not.
@@ -92,8 +112,13 @@ impl ClientFactory {
     ///
     /// Defaults to `Idempotency::ByMethod`.
     pub fn idempotency(&mut self, idempotency: Idempotency) -> &mut Self {
-        self.idempotency = Some(idempotency);
+        self.idempotency = idempotency;
         self
+    }
+
+    /// Returns the configured idempotency behavior.
+    pub fn get_idempotency(&self) -> Idempotency {
+        self.idempotency
     }
 
     /// Sets the clients' strategy for selecting a node for a request.
@@ -103,8 +128,13 @@ impl ClientFactory {
         &mut self,
         node_selection_strategy: NodeSelectionStrategy,
     ) -> &mut Self {
-        self.node_selection_strategy = Some(node_selection_strategy);
+        self.node_selection_strategy = node_selection_strategy;
         self
+    }
+
+    /// Returns the configured node selection strategy.
+    pub fn get_node_selection_strategy(&self) -> NodeSelectionStrategy {
+        self.node_selection_strategy
     }
 
     /// Sets the metric registry used to register client metrics.
@@ -115,12 +145,22 @@ impl ClientFactory {
         self
     }
 
+    /// Returns the configured metrics registry.
+    pub fn get_metrics(&self) -> Option<&Arc<MetricRegistry>> {
+        self.metrics.as_ref()
+    }
+
     /// Sets the host metrics registry used to track host performance.
     ///
     /// Defaults to no registry.
     pub fn host_metrics(&mut self, host_metrics: Arc<HostMetricsRegistry>) -> &mut Self {
         self.host_metrics = Some(host_metrics);
         self
+    }
+
+    /// Returns the configured host metrics registry.
+    pub fn get_host_metrics(&self) -> Option<&Arc<HostMetricsRegistry>> {
+        self.host_metrics.as_ref()
     }
 
     /// Creates a new client for the specified service.
@@ -151,30 +191,25 @@ impl ClientFactory {
 
         let make_state = move |config: &ServiceConfig| {
             let mut builder = Client::builder();
-            builder.from_config(config).service(&service);
+            builder
+                .from_config(config)
+                .service(&service)
+                .client_qos(client_qos)
+                .server_qos(server_qos)
+                .service_error(service_error)
+                .idempotency(idempotency)
+                .node_selection_strategy(node_selection_strategy);
+
             if let Some(user_agent) = user_agent.clone() {
                 builder.user_agent(user_agent);
             }
+
             if let Some(metrics) = metrics.clone() {
                 builder.metrics(metrics);
             }
+
             if let Some(host_metrics) = host_metrics.clone() {
                 builder.host_metrics(host_metrics);
-            }
-            if let Some(client_qos) = client_qos {
-                builder.client_qos(client_qos);
-            }
-            if let Some(server_qos) = server_qos {
-                builder.server_qos(server_qos);
-            }
-            if let Some(service_error) = service_error {
-                builder.service_error(service_error);
-            }
-            if let Some(idempotency) = idempotency {
-                builder.idempotency(idempotency);
-            }
-            if let Some(node_selection_strategy) = node_selection_strategy {
-                builder.node_selection_strategy(node_selection_strategy);
             }
 
             ClientState::new(&builder)

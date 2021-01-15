@@ -198,7 +198,7 @@
 //! [`dialogue`]: https://github.com/palantir/dialogue
 //! [`zipkin`]: https://docs.rs/zipkin
 //! [`Balanced`]:(NodeSelectionStrategy::Balanced)
-#![doc(html_root_url = "https://docs.rs/conjure-runtime/0.2")]
+#![doc(html_root_url = "https://docs.rs/conjure-runtime/0.3")]
 #![warn(missing_docs, clippy::all)]
 
 pub use crate::body::*;
