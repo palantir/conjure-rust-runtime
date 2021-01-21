@@ -60,7 +60,8 @@ where
     /// Compared to the `Read` implementation, this method avoids some copies of the body data when working with an API
     /// that already consumes `Bytes` objects.
     pub fn read_bytes(&mut self) -> io::Result<Option<Bytes>> {
-        runtime()?.enter(|| executor::block_on(self.0.as_mut().read_bytes()))
+        let _guard = runtime()?.enter();
+        executor::block_on(self.0.as_mut().read_bytes())
     }
 }
 
@@ -70,7 +71,8 @@ where
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        runtime()?.enter(|| executor::block_on(self.0.read(buf)))
+        let _guard = runtime()?.enter();
+        executor::block_on(self.0.read(buf))
     }
 }
 
@@ -81,11 +83,10 @@ where
 {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         // lifetime shenanigans mean we can't return the value of poll_fill_buf directly
-        runtime()?.enter(|| {
-            executor::block_on(future::poll_fn(|cx| {
-                self.0.as_mut().poll_fill_buf(cx).map_ok(|_| ())
-            }))
-        })?;
+        let _guard = runtime()?.enter();
+        executor::block_on(future::poll_fn(|cx| {
+            self.0.as_mut().poll_fill_buf(cx).map_ok(|_| ())
+        }))?;
         Ok(self.0.buffer())
     }
 

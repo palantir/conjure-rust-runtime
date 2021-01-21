@@ -21,10 +21,10 @@ use pin_project::pin_project;
 use std::error;
 use std::io;
 use std::marker::PhantomPinned;
-use std::mem::{self, MaybeUninit};
+use std::mem;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncBufRead, AsyncRead};
+use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 
 /// An asynchronous HTTP response.
 pub struct Response<B = DefaultRawBody> {
@@ -111,20 +111,17 @@ where
     B: Body<Data = Bytes>,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
-    unsafe fn prepare_uninitialized_buffer(&self, _: &mut [MaybeUninit<u8>]) -> bool {
-        false
-    }
-
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
-        let read_buf = ready!(self.as_mut().poll_fill_buf(cx))?;
-        let nread = usize::min(buf.len(), read_buf.len());
-        buf[..nread].copy_from_slice(&read_buf[..nread]);
-        self.consume(nread);
-        Poll::Ready(Ok(nread))
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let in_buf = ready!(self.as_mut().poll_fill_buf(cx))?;
+        let len = usize::min(in_buf.len(), buf.remaining());
+        buf.put_slice(&in_buf[..len]);
+        self.consume(len);
+
+        Poll::Ready(Ok(()))
     }
 }
 

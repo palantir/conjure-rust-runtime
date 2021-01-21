@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::service::proxy::{HttpProxyConfig, ProxyConfig};
-use bytes::{Buf, BufMut};
 use futures::future::{self, BoxFuture};
 use futures::FutureExt;
 use http::header::{HOST, PROXY_AUTHORIZATION};
@@ -25,10 +24,9 @@ use std::convert::TryFrom;
 use std::error;
 use std::fmt;
 use std::io;
-use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tower::layer::Layer;
 use tower::Service;
 
@@ -172,28 +170,12 @@ impl<T> AsyncRead for ProxyConnection<T>
 where
     T: AsyncRead + Unpin,
 {
-    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
-        self.stream.prepare_uninitialized_buffer(buf)
-    }
-
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         Pin::new(&mut self.stream).poll_read(cx, buf)
-    }
-
-    fn poll_read_buf<B>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<io::Result<usize>>
-    where
-        Self: Sized,
-        B: BufMut,
-    {
-        Pin::new(&mut self.stream).poll_read_buf(cx, buf)
     }
 }
 
@@ -217,16 +199,16 @@ where
         Pin::new(&mut self.stream).poll_shutdown(cx)
     }
 
-    fn poll_write_buf<B>(
+    fn poll_write_vectored(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<io::Result<usize>>
-    where
-        Self: Sized,
-        B: Buf,
-    {
-        Pin::new(&mut self.stream).poll_write_buf(cx, buf)
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.stream.is_write_vectored()
     }
 }
 
@@ -261,28 +243,12 @@ mod test {
     struct MockConnection(tokio_test::io::Mock);
 
     impl AsyncRead for MockConnection {
-        unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
-            self.0.prepare_uninitialized_buffer(buf)
-        }
-
         fn poll_read(
             mut self: Pin<&mut Self>,
             cx: &mut Context<'_>,
-            buf: &mut [u8],
-        ) -> Poll<io::Result<usize>> {
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
             Pin::new(&mut self.0).poll_read(cx, buf)
-        }
-
-        fn poll_read_buf<B>(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &mut B,
-        ) -> Poll<io::Result<usize>>
-        where
-            Self: Sized,
-            B: BufMut,
-        {
-            Pin::new(&mut self.0).poll_read_buf(cx, buf)
         }
     }
 
@@ -301,18 +267,6 @@ mod test {
 
         fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
             Pin::new(&mut self.0).poll_shutdown(cx)
-        }
-
-        fn poll_write_buf<B>(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &mut B,
-        ) -> Poll<io::Result<usize>>
-        where
-            Self: Sized,
-            B: Buf,
-        {
-            Pin::new(&mut self.0).poll_write_buf(cx, buf)
         }
     }
 

@@ -3,42 +3,42 @@
 <!-- Run `cargo test -p simulation --release` to regenerate this report. -->
 
 ```
-                   all_nodes_500[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=74.2%	client_mean=6.093870532s	server_cpu=1200s	client_received=2000/2000	server_resps=2000	codes={200=1483, 500=517}
-                       all_nodes_500[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=73.7%	client_mean=4.818500678s	server_cpu=1200s	client_received=2000/2000	server_resps=2000	codes={200=1474, 500=526}
-                                 all_nodes_500[UNLIMITED_ROUND_ROBIN]:	success=50%	client_mean=600ms	server_cpu=1200s	client_received=2000/2000	server_resps=2000	codes={200=1000, 500=1000}
-                      black_hole[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=44.8%	client_mean=600.653631ms	server_cpu=537s	client_received=895/2000	server_resps=895	codes={200=895}
-                          black_hole[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=91.4%	client_mean=600ms	server_cpu=1096.2s	client_received=1827/2000	server_resps=1827	codes={200=1827}
-                                    black_hole[UNLIMITED_ROUND_ROBIN]:	success=91.4%	client_mean=600ms	server_cpu=1096.2s	client_received=1827/2000	server_resps=1827	codes={200=1827}
-                drastic_slowdown[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=8.2276685s	server_cpu=6765.659s	client_received=4000/4000	server_resps=4000	codes={200=4000}
-                    drastic_slowdown[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=260.8455ms	server_cpu=1043.382s	client_received=4000/4000	server_resps=4000	codes={200=4000}
-                              drastic_slowdown[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=260.8455ms	server_cpu=1043.382s	client_received=4000/4000	server_resps=4000	codes={200=4000}
-           fast_400s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=64.2%	client_mean=120ms	server_cpu=505.1s	client_received=6000/6000	server_resps=6000	codes={200=3851, 400=2149}
-               fast_400s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=93.6%	client_mean=120ms	server_cpu=681.7s	client_received=6000/6000	server_resps=6000	codes={200=5617, 400=383}
-                         fast_400s_then_revert[UNLIMITED_ROUND_ROBIN]:	success=93.6%	client_mean=120ms	server_cpu=681.7s	client_received=6000/6000	server_resps=6000	codes={200=5617, 400=383}
-           fast_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=120.052266ms	server_cpu=5400.1s	client_received=45000/45000	server_resps=45010	codes={200=45000}
-               fast_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=120.254822ms	server_cpu=5400.4s	client_received=45000/45000	server_resps=45040	codes={200=45000}
-                         fast_503s_then_revert[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=120.254822ms	server_cpu=5400.4s	client_received=45000/45000	server_resps=45040	codes={200=45000}
-                   one_big_spike[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=3.448671s	server_cpu=150s	client_received=1000/1000	server_resps=1000	codes={200=1000}
-                       one_big_spike[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=1.799832s	server_cpu=150s	client_received=1000/1000	server_resps=1000	codes={200=1000}
-                                 one_big_spike[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=949.87ms	server_cpu=373.201s	client_received=1000/1000	server_resps=2488	codes={200=1000}
-one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=65%	client_mean=603.724307ms	server_cpu=1500s	client_received=2500/2500	server_resps=2500	codes={200=1625, 500=875}
-    one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=84.6%	client_mean=600ms	server_cpu=1500s	client_received=2500/2500	server_resps=2500	codes={200=2116, 500=384}
-              one_endpoint_dies_on_each_server[UNLIMITED_ROUND_ROBIN]:	success=65.7%	client_mean=600ms	server_cpu=1500s	client_received=2500/2500	server_resps=2500	codes={200=1642, 500=858}
-         server_side_rate_limits[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=99.7%	client_mean=0ns	server_cpu=44360600s	client_received=150000/150000	server_resps=221803	codes={200=149544, 429=456}
-             server_side_rate_limits[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=99.8%	client_mean=39463.622891037s	server_cpu=41223400s	client_received=150000/150000	server_resps=206117	codes={200=149767, 429=233}
-                       server_side_rate_limits[UNLIMITED_ROUND_ROBIN]:	success=99%	client_mean=314.908823132s	server_cpu=48239400s	client_received=150000/150000	server_resps=241197	codes={200=148484, 429=1516}
-        short_outage_on_one_node[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=99.5%	client_mean=2s	server_cpu=3184.008s	client_received=1600/1600	server_resps=1600	codes={200=1592, 500=8}
-            short_outage_on_one_node[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=99.3%	client_mean=2s	server_cpu=3176.012s	client_received=1600/1600	server_resps=1600	codes={200=1588, 500=12}
-                      short_outage_on_one_node[UNLIMITED_ROUND_ROBIN]:	success=99.3%	client_mean=2s	server_cpu=3176.012s	client_received=1600/1600	server_resps=1600	codes={200=1588, 500=12}
-          simplest_possible_case[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=790.227272ms	server_cpu=10431s	client_received=13200/13200	server_resps=13200	codes={200=13200}
-              simplest_possible_case[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=790.121212ms	server_cpu=10429.6s	client_received=13200/13200	server_resps=13200	codes={200=13200}
-                        simplest_possible_case[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=790.121212ms	server_cpu=10429.6s	client_received=13200/13200	server_resps=13200	codes={200=13200}
-           slow_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=221.194666ms	server_cpu=311.286s	client_received=1500/1500	server_resps=1584	codes={200=1500}
-               slow_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=84.623333ms	server_cpu=121.836s	client_received=1500/1500	server_resps=1519	codes={200=1500}
-                         slow_503s_then_revert[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=84.623333ms	server_cpu=121.836s	client_received=1500/1500	server_resps=1519	codes={200=1500}
-   slowdown_and_error_thresholds[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=201.1035179s	server_cpu=36733.302s	client_received=10000/10000	server_resps=13010	codes={200=10000}
-       slowdown_and_error_thresholds[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=175.622385254s	server_cpu=38541.248s	client_received=10000/10000	server_resps=13704	codes={200=9996, 500=4}
-                 slowdown_and_error_thresholds[UNLIMITED_ROUND_ROBIN]:	success=4%	client_mean=10.49018481s	server_cpu=195762.601s	client_received=10000/10000	server_resps=49099	codes={200=395, 500=9605}
+                   all_nodes_500[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=74%	client_mean=5.898039864s	server_cpu=1202s	client_received=2000/2000	server_resps=2000	codes={200=1480, 500=520}
+                       all_nodes_500[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=73.7%	client_mean=4.316942294s	server_cpu=1202s	client_received=2000/2000	server_resps=2000	codes={200=1473, 500=527}
+                                 all_nodes_500[UNLIMITED_ROUND_ROBIN]:	success=50%	client_mean=601ms	server_cpu=1202s	client_received=2000/2000	server_resps=2000	codes={200=1000, 500=1000}
+                      black_hole[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=44.8%	client_mean=601.677094ms	server_cpu=537.895s	client_received=895/2000	server_resps=895	codes={200=895}
+                          black_hole[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=91.3%	client_mean=601ms	server_cpu=1097.426s	client_received=1826/2000	server_resps=1826	codes={200=1826}
+                                    black_hole[UNLIMITED_ROUND_ROBIN]:	success=91.3%	client_mean=601ms	server_cpu=1097.426s	client_received=1826/2000	server_resps=1826	codes={200=1826}
+                drastic_slowdown[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=8.2423105s	server_cpu=6770.04s	client_received=4000/4000	server_resps=4000	codes={200=4000}
+                    drastic_slowdown[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=267.16525ms	server_cpu=1068.661s	client_received=4000/4000	server_resps=4000	codes={200=4000}
+                              drastic_slowdown[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=267.16525ms	server_cpu=1068.661s	client_received=4000/4000	server_resps=4000	codes={200=4000}
+           fast_400s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=64.2%	client_mean=121ms	server_cpu=511.1s	client_received=6000/6000	server_resps=6000	codes={200=3851, 400=2149}
+               fast_400s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=93.5%	client_mean=121ms	server_cpu=686.8s	client_received=6000/6000	server_resps=6000	codes={200=5608, 400=392}
+                         fast_400s_then_revert[UNLIMITED_ROUND_ROBIN]:	success=93.5%	client_mean=121ms	server_cpu=686.8s	client_received=6000/6000	server_resps=6000	codes={200=5608, 400=392}
+           fast_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=121.056311ms	server_cpu=5445.121s	client_received=45000/45000	server_resps=45011	codes={200=45000}
+               fast_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=121.255711ms	server_cpu=5445.44s	client_received=45000/45000	server_resps=45040	codes={200=45000}
+                         fast_503s_then_revert[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=121.255711ms	server_cpu=5445.44s	client_received=45000/45000	server_resps=45040	codes={200=45000}
+                   one_big_spike[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=3.544863s	server_cpu=151s	client_received=1000/1000	server_resps=1000	codes={200=1000}
+                       one_big_spike[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=1.818776s	server_cpu=151s	client_received=1000/1000	server_resps=1000	codes={200=1000}
+                                 one_big_spike[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=950.83ms	server_cpu=375.537s	client_received=1000/1000	server_resps=2487	codes={200=1000}
+one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=64.6%	client_mean=604.813737ms	server_cpu=1502.5s	client_received=2500/2500	server_resps=2500	codes={200=1616, 500=884}
+    one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=84.7%	client_mean=601ms	server_cpu=1502.5s	client_received=2500/2500	server_resps=2500	codes={200=2117, 500=383}
+              one_endpoint_dies_on_each_server[UNLIMITED_ROUND_ROBIN]:	success=65.7%	client_mean=601ms	server_cpu=1502.5s	client_received=2500/2500	server_resps=2500	codes={200=1642, 500=858}
+         server_side_rate_limits[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=99.7%	client_mean=14748.691741795s	server_cpu=43824419.121s	client_received=150000/150000	server_resps=219121	codes={200=149618, 429=382}
+             server_side_rate_limits[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=99.7%	client_mean=0ns	server_cpu=43465417.326s	client_received=150000/150000	server_resps=217326	codes={200=149547, 429=453}
+                       server_side_rate_limits[UNLIMITED_ROUND_ROBIN]:	success=99.1%	client_mean=318.216570307s	server_cpu=48633643.167s	client_received=150000/150000	server_resps=243167	codes={200=148625, 429=1375}
+        short_outage_on_one_node[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=99.5%	client_mean=2.001s	server_cpu=3185.6s	client_received=1600/1600	server_resps=1600	codes={200=1592, 500=8}
+            short_outage_on_one_node[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=99.3%	client_mean=2.001s	server_cpu=3177.6s	client_received=1600/1600	server_resps=1600	codes={200=1588, 500=12}
+                      short_outage_on_one_node[UNLIMITED_ROUND_ROBIN]:	success=99.3%	client_mean=2.001s	server_cpu=3177.6s	client_received=1600/1600	server_resps=1600	codes={200=1588, 500=12}
+          simplest_possible_case[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=791.227272ms	server_cpu=10444.2s	client_received=13200/13200	server_resps=13200	codes={200=13200}
+              simplest_possible_case[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=788.257575ms	server_cpu=10405s	client_received=13200/13200	server_resps=13200	codes={200=13200}
+                        simplest_possible_case[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=788.257575ms	server_cpu=10405s	client_received=13200/13200	server_resps=13200	codes={200=13200}
+           slow_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=222.258ms	server_cpu=312.88s	client_received=1500/1500	server_resps=1584	codes={200=1500}
+               slow_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=85.636666ms	server_cpu=123.356s	client_received=1500/1500	server_resps=1519	codes={200=1500}
+                         slow_503s_then_revert[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=85.636666ms	server_cpu=123.356s	client_received=1500/1500	server_resps=1519	codes={200=1500}
+   slowdown_and_error_thresholds[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=203.8855747s	server_cpu=37183.813s	client_received=10000/10000	server_resps=13028	codes={200=10000}
+       slowdown_and_error_thresholds[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=176.1370036s	server_cpu=38481.382s	client_received=10000/10000	server_resps=13677	codes={200=9999, 500=1}
+                 slowdown_and_error_thresholds[UNLIMITED_ROUND_ROBIN]:	success=3.9%	client_mean=9.889748704s	server_cpu=195891.099s	client_received=10000/10000	server_resps=49086	codes={200=386, 500=9614}
                  uncommon_flakes[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=98.9%	client_mean=1ms	server_cpu=10s	client_received=10000/10000	server_resps=10000	codes={200=9887, 500=113}
                      uncommon_flakes[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=98.9%	client_mean=1ms	server_cpu=10s	client_received=10000/10000	server_resps=10000	codes={200=9886, 500=114}
                                uncommon_flakes[UNLIMITED_ROUND_ROBIN]:	success=98.9%	client_mean=1ms	server_cpu=10s	client_received=10000/10000	server_resps=10000	codes={200=9886, 500=114}

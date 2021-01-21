@@ -22,13 +22,14 @@ use conjure_error::{Error, ErrorKind};
 use conjure_runtime_config::ServiceConfig;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use futures::{join, pin_mut, StreamExt, TryStreamExt};
+use futures::{join, pin_mut};
+use hyper::body;
 use hyper::header::{HeaderValue, ACCEPT_ENCODING, CONTENT_ENCODING};
 use hyper::http::header::RETRY_AFTER;
 use hyper::server::conn::Http;
 use hyper::service::Service;
 use hyper::{Request, Response, StatusCode};
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use openssl::ssl::{Ssl, SslAcceptor, SslFiletype, SslMethod};
 use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -39,6 +40,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
+use tokio_openssl::SslStream;
 use zipkin::{SpanId, TraceContext, TraceId};
 
 const STOCK_CONFIG: &str = r#"
@@ -94,7 +96,7 @@ fn blocking_test<F>(
 ) where
     F: Future<Output = Result<Response<hyper::Body>, &'static str>> + 'static + Send,
 {
-    let mut runtime = Runtime::new().unwrap();
+    let runtime = Runtime::new().unwrap();
     let listener = runtime.block_on(TcpListener::bind("127.0.0.1:0")).unwrap();
     let port = listener.local_addr().unwrap().port();
 
@@ -112,7 +114,7 @@ fn blocking_test<F>(
 }
 
 async fn server<F>(
-    mut listener: TcpListener,
+    listener: TcpListener,
     requests: u32,
     mut handler: impl FnMut(Request<hyper::Body>) -> F + 'static,
 ) where
@@ -122,7 +124,11 @@ async fn server<F>(
 
     for _ in 0..requests {
         let socket = listener.accept().await.unwrap().0;
-        let socket = tokio_openssl::accept(&acceptor, socket).await.unwrap();
+
+        let ssl = Ssl::new(acceptor.context()).unwrap();
+        let mut socket = SslStream::new(ssl, socket).unwrap();
+        Pin::new(&mut socket).accept().await.unwrap();
+
         let _ = Http::new()
             .http1_keep_alive(false)
             .serve_connection(socket, TestService(&mut handler))
@@ -288,7 +294,7 @@ async fn connect_error_doesnt_reset_body() {
         }
     }
 
-    let mut listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
 
     let server = async move {
@@ -296,14 +302,7 @@ async fn connect_error_doesnt_reset_body() {
         listener.accept().await.unwrap();
 
         server(listener, 1, |req| async move {
-            let body = req
-                .into_body()
-                .try_fold(vec![], |mut buf, chunk| async move {
-                    buf.extend_from_slice(&chunk);
-                    Ok(buf)
-                })
-                .await
-                .unwrap();
+            let body = body::to_bytes(req.into_body()).await.unwrap();
             assert_eq!(&*body, b"hello world");
             Ok(Response::new(hyper::Body::empty()))
         })
@@ -528,7 +527,7 @@ async fn streaming_write_error_reporting() {
         STOCK_CONFIG,
         1,
         |req| async move {
-            req.into_body().for_each(|_| async {}).await;
+            let _ = body::to_bytes(req.into_body()).await;
             Ok(Response::new(hyper::Body::empty()))
         },
         |builder| async move {

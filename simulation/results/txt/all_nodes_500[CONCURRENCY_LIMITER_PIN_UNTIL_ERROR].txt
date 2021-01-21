@@ -1,1 +1,1 @@
-success=74.2%	client_mean=6.093870532s	server_cpu=1200s	client_received=2000/2000	server_resps=2000	codes={200=1483, 500=517}
+success=74%	client_mean=5.898039864s	server_cpu=1202s	client_received=2000/2000	server_resps=2000	codes={200=1480, 500=520}
