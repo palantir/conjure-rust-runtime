@@ -27,8 +27,8 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tower::layer::Layer;
-use tower::Service;
+use tower_layer::Layer;
+use tower_service::Service;
 
 /// A connector layer which handles socket-level setup for HTTP proxies.
 ///
@@ -238,7 +238,7 @@ impl error::Error for ProxyTunnelError {}
 mod test {
     use super::*;
     use crate::config::{self, BasicCredentials, HostAndPort};
-    use tower::ServiceExt;
+    use tower_util::ServiceExt;
 
     struct MockConnection(tokio_test::io::Mock);
 
@@ -278,7 +278,7 @@ mod test {
 
     #[tokio::test]
     async fn unproxied() {
-        let service = ProxyConnectorLayer::new(&ProxyConfig::Direct).layer(tower::service_fn(
+        let service = ProxyConnectorLayer::new(&ProxyConfig::Direct).layer(tower_util::service_fn(
             |uri: Uri| async move {
                 assert_eq!(uri, "http://foobar.com");
                 Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(
@@ -303,13 +303,14 @@ mod test {
                 .build(),
         ))
         .unwrap();
-        let service =
-            ProxyConnectorLayer::new(&config).layer(tower::service_fn(|uri: Uri| async move {
+        let service = ProxyConnectorLayer::new(&config).layer(tower_util::service_fn(
+            |uri: Uri| async move {
                 assert_eq!(uri, "http://127.0.0.1:1234");
                 Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(
                     tokio_test::io::Builder::new().build(),
                 ))
-            }));
+            },
+        ));
 
         let conn = service
             .oneshot("http://foobar.com".parse().unwrap())
@@ -328,8 +329,8 @@ mod test {
                 .build(),
         ))
         .unwrap();
-        let service =
-            ProxyConnectorLayer::new(&config).layer(tower::service_fn(|uri: Uri| async move {
+        let service = ProxyConnectorLayer::new(&config).layer(tower_util::service_fn(
+            |uri: Uri| async move {
                 assert_eq!(uri, "http://127.0.0.1:1234");
                 let mut builder = tokio_test::io::Builder::new();
                 builder.write(
@@ -339,7 +340,8 @@ mod test {
                 );
                 builder.read(b"HTTP/1.1 200 OK\r\n\r\n");
                 Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(builder.build()))
-            }));
+            },
+        ));
 
         let conn = service
             .oneshot("https://admin:hunter2@foobar.com/fizzbuzz".parse().unwrap())
@@ -357,8 +359,8 @@ mod test {
                 .build(),
         ))
         .unwrap();
-        let service =
-            ProxyConnectorLayer::new(&config).layer(tower::service_fn(|uri: Uri| async move {
+        let service = ProxyConnectorLayer::new(&config).layer(tower_util::service_fn(
+            |uri: Uri| async move {
                 assert_eq!(uri, "http://127.0.0.1:1234");
                 let mut builder = tokio_test::io::Builder::new();
                 builder.write(
@@ -367,7 +369,8 @@ mod test {
                 );
                 builder.read(b"HTTP/1.1 401 Unauthorized\r\n\r\n");
                 Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(builder.build()))
-            }));
+            },
+        ));
 
         let err = service
             .oneshot("https://admin:hunter2@foobar.com/fizzbuzz".parse().unwrap())

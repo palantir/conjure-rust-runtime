@@ -21,8 +21,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tower::layer::Layer;
-use tower::Service;
+use tower_layer::Layer;
+use tower_service::Service;
 
 /// A connector layer which wraps a stream in a `TimeoutStream`.
 pub struct TimeoutLayer {
@@ -181,7 +181,7 @@ mod test {
         time::pause();
 
         let mut service =
-            TimeoutLayer::new(&Client::builder()).layer(tower::service_fn(|_| async {
+            TimeoutLayer::new(&Client::builder()).layer(tower_util::service_fn(|_| async {
                 Ok::<_, ()>(tokio_test::io::Builder::new().read(b"hello").build())
             }));
 
@@ -197,7 +197,7 @@ mod test {
         time::pause();
 
         let mut service = TimeoutLayer::new(Client::builder().read_timeout(Duration::from_secs(9)))
-            .layer(tower::service_fn(|_| async {
+            .layer(tower_util::service_fn(|_| async {
                 Ok::<_, ()>(
                     tokio_test::io::Builder::new()
                         .wait(Duration::from_secs(10))
@@ -215,7 +215,7 @@ mod test {
         time::pause();
 
         let mut service =
-            TimeoutLayer::new(&Client::builder()).layer(tower::service_fn(|_| async {
+            TimeoutLayer::new(&Client::builder()).layer(tower_util::service_fn(|_| async {
                 Ok::<_, ()>(tokio_test::io::Builder::new().write(b"hello").build())
             }));
 
@@ -230,7 +230,7 @@ mod test {
         let mut service = TimeoutLayer::new(
             Client::builder().write_timeout(Duration::from_secs(9)),
         )
-        .layer(tower::service_fn(|_| async {
+        .layer(tower_util::service_fn(|_| async {
             Ok::<_, ()>(
                 tokio_test::io::Builder::new()
                     .wait(Duration::from_secs(10))
