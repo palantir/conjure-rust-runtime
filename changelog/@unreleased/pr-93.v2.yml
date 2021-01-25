@@ -1,0 +1,5 @@
+type: fix
+fix:
+  description: Fixed the percent-encoding logic to properly escape `#` characters.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/93
