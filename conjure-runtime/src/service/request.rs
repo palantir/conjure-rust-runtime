@@ -27,6 +27,7 @@ use zipkin::Bind;
 const QUERY: &AsciiSet = &percent_encoding::CONTROLS
     .add(b' ')
     .add(b'"')
+    .add(b'#')
     .add(b'<')
     .add(b'>');
 
