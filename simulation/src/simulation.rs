@@ -41,13 +41,9 @@ impl SimulationBuilder0 {
     pub fn strategy(self, strategy: Strategy) -> SimulationBuilder1 {
         let runtime = runtime::Builder::new_current_thread()
             .enable_time()
+            .start_paused(true)
             .build()
             .unwrap();
-        runtime.block_on(async {
-            time::pause();
-            // https://github.com/tokio-rs/tokio/issues/3179
-            time::sleep(Duration::from_millis(1)).await;
-        });
 
         let mut metrics = MetricRegistry::new();
         metrics.set_clock(Arc::new(TokioClock));
