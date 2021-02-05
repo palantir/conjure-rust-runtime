@@ -12,6 +12,3 @@ debug = 1
 
 [profile.bench]
 debug = 1
-
-[patch.crates-io]
-tokio = { git = "https://github.com/sfackler/tokio", branch = "deterministic-time" }
