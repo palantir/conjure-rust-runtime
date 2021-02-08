@@ -27,7 +27,7 @@ conjure-object = "0.7"
 conjure-error = "0.7"
 conjure-http = "0.7"
 conjure-serde = "0.7"
-tokio = { version = "0.2", features = ["full"] }
+tokio = { version = "1.2", features = ["full"] }
 witchcraft-metrics = "0.2"
 
 conjure-runtime = { path = "../conjure-runtime" }
