@@ -20,8 +20,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tower::layer::Layer;
-use tower::Service;
+use tower_layer::Layer;
+use tower_service::Service;
 use witchcraft_metrics::{MetricId, MetricRegistry};
 
 struct Shared {

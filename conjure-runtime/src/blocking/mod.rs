@@ -35,9 +35,8 @@ mod shim;
 fn runtime() -> io::Result<&'static Runtime> {
     static RUNTIME: OnceCell<Runtime> = OnceCell::new();
     RUNTIME.get_or_try_init(|| {
-        runtime::Builder::new()
+        runtime::Builder::new_multi_thread()
             .enable_all()
-            .threaded_scheduler()
             .thread_name("conjure-runtime")
             .build()
     })

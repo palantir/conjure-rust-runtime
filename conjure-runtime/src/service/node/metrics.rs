@@ -21,7 +21,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Instant;
+use tokio::time::Instant;
 
 /// A layer which updates the host metrics for the node stored in the request's extensions map.
 pub struct NodeMetricsLayer;

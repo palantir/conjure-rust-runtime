@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::Builder;
-use bytes::{Buf, BufMut};
 use futures::ready;
 use hyper::client::connect::{Connected, Connection};
 use pin_project::pin_project;
 use std::future::Future;
 use std::io;
-use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tower::layer::Layer;
-use tower::Service;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tower_layer::Layer;
+use tower_service::Service;
 
 /// A connector layer which wraps a stream in a `TimeoutStream`.
 pub struct TimeoutLayer {
@@ -105,15 +103,15 @@ where
         stream.set_read_timeout(Some(*this.read_timeout));
         stream.set_write_timeout(Some(*this.write_timeout));
 
-        Poll::Ready(Ok(TimeoutStream { stream }))
+        Poll::Ready(Ok(TimeoutStream {
+            stream: Box::pin(stream),
+        }))
     }
 }
 
-#[pin_project]
 #[derive(Debug)]
 pub struct TimeoutStream<S> {
-    #[pin]
-    stream: tokio_io_timeout::TimeoutStream<S>,
+    stream: Pin<Box<tokio_io_timeout::TimeoutStream<S>>>,
 }
 
 impl<S> AsyncRead for TimeoutStream<S>
@@ -121,26 +119,11 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     fn poll_read(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
-        self.project().stream.poll_read(cx, buf)
-    }
-
-    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
-        self.stream.prepare_uninitialized_buffer(buf)
-    }
-
-    fn poll_read_buf<B>(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<io::Result<usize>>
-    where
-        B: BufMut,
-    {
-        self.project().stream.poll_read_buf(cx, buf)
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        self.stream.as_mut().poll_read(cx, buf)
     }
 }
 
@@ -149,30 +132,31 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     fn poll_write(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        self.project().stream.poll_write(cx, buf)
+        self.stream.as_mut().poll_write(cx, buf)
     }
 
-    fn poll_write_buf<B>(
-        self: Pin<&mut Self>,
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.stream.as_mut().poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.stream.as_mut().poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<io::Result<usize>>
-    where
-        B: Buf,
-    {
-        self.project().stream.poll_write_buf(cx, buf)
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        self.stream.as_mut().poll_write_vectored(cx, bufs)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.project().stream.poll_flush(cx)
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.project().stream.poll_shutdown(cx)
+    fn is_write_vectored(&self) -> bool {
+        self.stream.is_write_vectored()
     }
 }
 
@@ -197,7 +181,7 @@ mod test {
         time::pause();
 
         let mut service =
-            TimeoutLayer::new(&Client::builder()).layer(tower::service_fn(|_| async {
+            TimeoutLayer::new(&Client::builder()).layer(tower_util::service_fn(|_| async {
                 Ok::<_, ()>(tokio_test::io::Builder::new().read(b"hello").build())
             }));
 
@@ -213,11 +197,10 @@ mod test {
         time::pause();
 
         let mut service = TimeoutLayer::new(Client::builder().read_timeout(Duration::from_secs(9)))
-            .layer(tower::service_fn(|_| async {
+            .layer(tower_util::service_fn(|_| async {
                 Ok::<_, ()>(
                     tokio_test::io::Builder::new()
                         .wait(Duration::from_secs(10))
-                        .read(b"hello")
                         .build(),
                 )
             }));
@@ -232,7 +215,7 @@ mod test {
         time::pause();
 
         let mut service =
-            TimeoutLayer::new(&Client::builder()).layer(tower::service_fn(|_| async {
+            TimeoutLayer::new(&Client::builder()).layer(tower_util::service_fn(|_| async {
                 Ok::<_, ()>(tokio_test::io::Builder::new().write(b"hello").build())
             }));
 
@@ -247,11 +230,10 @@ mod test {
         let mut service = TimeoutLayer::new(
             Client::builder().write_timeout(Duration::from_secs(9)),
         )
-        .layer(tower::service_fn(|_| async {
+        .layer(tower_util::service_fn(|_| async {
             Ok::<_, ()>(
                 tokio_test::io::Builder::new()
                     .wait(Duration::from_secs(10))
-                    .write(b"hello")
                     .build(),
             )
         }));

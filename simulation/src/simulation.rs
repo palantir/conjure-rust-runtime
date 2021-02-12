@@ -17,6 +17,7 @@ use crate::server::{
     Endpoint, Server, ServerBuilder0, ServerBuilder1, SimulationRawClient,
     SimulationRawClientBuilder,
 };
+use async_stream::stream;
 use conjure_runtime::errors::{RemoteError, ThrottledError, UnavailableError};
 use conjure_runtime::{Agent, Builder, Client, ClientQos, NodeSelectionStrategy, UserAgent};
 use futures::stream::{Stream, StreamExt};
@@ -38,26 +39,21 @@ pub struct SimulationBuilder0;
 
 impl SimulationBuilder0 {
     pub fn strategy(self, strategy: Strategy) -> SimulationBuilder1 {
-        let mut runtime = runtime::Builder::new()
+        let runtime = runtime::Builder::new_current_thread()
             .enable_time()
-            .basic_scheduler()
+            .start_paused(true)
             .build()
             .unwrap();
-        runtime.block_on(async {
-            time::pause();
-            // https://github.com/tokio-rs/tokio/issues/3179
-            time::delay_for(Duration::from_millis(1)).await;
-        });
 
         let mut metrics = MetricRegistry::new();
         metrics.set_clock(Arc::new(TokioClock));
         let metrics = Arc::new(metrics);
-        // initialize the responses timer with our custom reservoir
-        runtime.enter(|| {
-            metrics::responses_timer(&metrics, SERVICE);
-        });
 
-        let mut recorder = runtime.enter(|| SimulationMetricsRecorder::new(&metrics));
+        // initialize the responses timer with our custom reservoir
+        let _guard = runtime.enter();
+        metrics::responses_timer(&metrics, SERVICE);
+
+        let mut recorder = SimulationMetricsRecorder::new(&metrics);
         recorder.filter_metrics(|id| {
             id.name().ends_with("activeRequests") || id.name().ends_with("request")
         });
@@ -87,10 +83,10 @@ impl SimulationBuilder1 {
     where
         F: FnOnce(ServerBuilder0) -> ServerBuilder1,
     {
-        let server = self.runtime.enter({
-            let metrics = &self.metrics;
-            let recorder = &mut self.recorder;
-            move || f(ServerBuilder0 { metrics, recorder })
+        let _guard = self.runtime.enter();
+        let server = f(ServerBuilder0 {
+            metrics: &self.metrics,
+            recorder: &mut self.recorder,
         });
         self.servers.push(server.build());
         self
@@ -147,15 +143,15 @@ impl SimulationBuilder2 {
     pub fn num_requests(self, num_requests: u64) -> SimulationBuilder3 {
         let mut rng = crate::rng();
 
-        let stream = self.runtime.enter({
-            let endpoints = self.endpoints;
-            let delay_between_requests = self.delay_between_requests;
-            move || {
-                time::interval(delay_between_requests)
-                    .take(num_requests as usize)
-                    .map(move |_| endpoints.choose(&mut rng).unwrap().clone())
+        let delay_between_requests = self.delay_between_requests;
+        let endpoints = self.endpoints;
+        let stream = stream! {
+            let mut interval = time::interval(delay_between_requests);
+            for _ in 0..num_requests {
+                interval.tick().await;
+                yield endpoints.choose(&mut rng).unwrap().clone();
             }
-        });
+        };
 
         SimulationBuilder3 {
             runtime: self.runtime,
@@ -187,7 +183,10 @@ impl SimulationBuilder3 {
         let runtime = self.runtime;
         let mut builder = self.builder;
         let clients = (0..clients)
-            .map(|i| runtime.enter(|| builder.rng_seed(u64::from(i)).build().unwrap()))
+            .map(|i| {
+                let _guard = runtime.enter();
+                builder.rng_seed(u64::from(i)).build().unwrap()
+            })
             .collect::<Vec<_>>();
         let mut rng = crate::rng();
 
@@ -218,7 +217,7 @@ impl Simulation {
         SimulationBuilder0
     }
 
-    pub fn run(mut self) -> SimulationReport {
+    pub fn run(self) -> SimulationReport {
         let runner = Runner {
             metrics: self.metrics,
             recorder: self.recorder,

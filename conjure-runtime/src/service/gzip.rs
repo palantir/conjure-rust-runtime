@@ -13,8 +13,8 @@
 // limitations under the License.
 use crate::raw::Service;
 use crate::service::Layer;
-use async_compression::stream::GzipDecoder;
-use bytes::Bytes;
+use async_compression::tokio::bufread::GzipDecoder;
+use bytes::{Buf, Bytes, BytesMut};
 use futures::{ready, Stream};
 use http::header::{Entry, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
 use http::{HeaderMap, HeaderValue, Request, Response};
@@ -26,6 +26,8 @@ use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
+use tokio_util::codec::{BytesCodec, FramedRead};
 
 static GZIP: Lazy<HeaderValue> = Lazy::new(|| HeaderValue::from_static("gzip"));
 
@@ -91,7 +93,13 @@ where
                 parts.headers.remove(CONTENT_ENCODING);
                 parts.headers.remove(CONTENT_LENGTH);
                 DecodedBody::Gzip {
-                    body: GzipDecoder::new(ShimStream { body }),
+                    body: FramedRead::new(
+                        GzipDecoder::new(ShimReader {
+                            body,
+                            buf: Bytes::new(),
+                        }),
+                        BytesCodec::new(),
+                    ),
                 }
             }
             _ => DecodedBody::Identity { body },
@@ -109,7 +117,7 @@ pub enum DecodedBody<B> {
     },
     Gzip {
         #[pin]
-        body: GzipDecoder<ShimStream<B>>,
+        body: FramedRead<GzipDecoder<ShimReader<B>>, BytesCodec>,
     },
 }
 
@@ -129,7 +137,9 @@ where
             Projection::Identity { body } => body
                 .poll_data(cx)
                 .map(|o| o.map(|r| r.map_err(|e| io::Error::new(io::ErrorKind::Other, e)))),
-            Projection::Gzip { body } => body.poll_next(cx),
+            Projection::Gzip { body } => body
+                .poll_next(cx)
+                .map(|o| o.map(|r| r.map(BytesMut::freeze))),
         }
     }
 
@@ -141,7 +151,8 @@ where
             Projection::Identity { body } => body
                 .poll_trailers(cx)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
-            Projection::Gzip { body } => body
+            Projection::Gzip { body, .. } => body
+                .get_pin_mut()
                 .get_pin_mut()
                 .project()
                 .body
@@ -167,23 +178,52 @@ where
 }
 
 #[pin_project]
-pub struct ShimStream<T> {
+pub struct ShimReader<T> {
     #[pin]
     body: T,
+    buf: Bytes,
 }
 
-impl<T> Stream for ShimStream<T>
+impl<T> AsyncRead for ShimReader<T>
 where
-    T: Body,
+    T: Body<Data = Bytes>,
     T::Error: Into<Box<dyn Error + Sync + Send>>,
 {
-    type Item = io::Result<T::Data>;
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let in_buf = ready!(self.as_mut().poll_fill_buf(cx))?;
+        let len = usize::min(in_buf.len(), buf.remaining());
+        buf.put_slice(&in_buf[..len]);
+        self.consume(len);
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project()
-            .body
-            .poll_data(cx)
-            .map(|o| o.map(|r| r.map_err(|e| io::Error::new(io::ErrorKind::Other, e))))
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<T> AsyncBufRead for ShimReader<T>
+where
+    T: Body<Data = Bytes>,
+    T::Error: Into<Box<dyn Error + Sync + Send>>,
+{
+    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
+        let mut this = self.project();
+
+        while !this.buf.has_remaining() {
+            *this.buf = match ready!(this.body.as_mut().poll_data(cx)) {
+                Some(Ok(buf)) => buf,
+                Some(Err(e)) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
+                None => break,
+            }
+        }
+
+        Poll::Ready(Ok(&*this.buf))
+    }
+
+    fn consume(self: Pin<&mut Self>, amt: usize) {
+        self.project().buf.advance(amt);
     }
 }
 

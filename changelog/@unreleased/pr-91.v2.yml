@@ -1,0 +1,5 @@
+type: break
+break:
+  description: Upgraded to tokio 1.0.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/91

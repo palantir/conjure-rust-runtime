@@ -313,7 +313,7 @@ where
             .with_name("conjure-runtime: backoff-with-jitter")
             .detach();
 
-        time::delay_for(backoff).await;
+        time::sleep(backoff).await;
 
         Ok(())
     }

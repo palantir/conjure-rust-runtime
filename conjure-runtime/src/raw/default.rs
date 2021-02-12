@@ -33,7 +33,7 @@ use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tower::ServiceBuilder;
+use tower_layer::Layer;
 
 // This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
 const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
@@ -69,12 +69,12 @@ impl BuildRawClient for DefaultRawClientBuilder {
 
         let proxy = ProxyConfig::from_config(&builder.get_proxy())?;
 
-        let connector = ServiceBuilder::new()
-            .layer(TlsMetricsLayer::new(&service, builder))
-            .layer(HttpsLayer::with_connector(ssl).map_err(Error::internal_safe)?)
-            .layer(ProxyConnectorLayer::new(&proxy))
-            .layer(TimeoutLayer::new(builder))
-            .service(connector);
+        let connector = TimeoutLayer::new(builder).layer(connector);
+        let connector = ProxyConnectorLayer::new(&proxy).layer(connector);
+        let connector = HttpsLayer::with_connector(ssl)
+            .map_err(Error::internal_safe)?
+            .layer(connector);
+        let connector = TlsMetricsLayer::new(&service, builder).layer(connector);
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(HTTP_KEEPALIVE)

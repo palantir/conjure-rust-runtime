@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::service::proxy::{HttpProxyConfig, ProxyConfig};
-use bytes::{Buf, BufMut};
 use futures::future::{self, BoxFuture};
 use futures::FutureExt;
 use http::header::{HOST, PROXY_AUTHORIZATION};
@@ -25,12 +24,11 @@ use std::convert::TryFrom;
 use std::error;
 use std::fmt;
 use std::io;
-use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tower::layer::Layer;
-use tower::Service;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tower_layer::Layer;
+use tower_service::Service;
 
 /// A connector layer which handles socket-level setup for HTTP proxies.
 ///
@@ -172,28 +170,12 @@ impl<T> AsyncRead for ProxyConnection<T>
 where
     T: AsyncRead + Unpin,
 {
-    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
-        self.stream.prepare_uninitialized_buffer(buf)
-    }
-
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         Pin::new(&mut self.stream).poll_read(cx, buf)
-    }
-
-    fn poll_read_buf<B>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<io::Result<usize>>
-    where
-        Self: Sized,
-        B: BufMut,
-    {
-        Pin::new(&mut self.stream).poll_read_buf(cx, buf)
     }
 }
 
@@ -217,16 +199,16 @@ where
         Pin::new(&mut self.stream).poll_shutdown(cx)
     }
 
-    fn poll_write_buf<B>(
+    fn poll_write_vectored(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<io::Result<usize>>
-    where
-        Self: Sized,
-        B: Buf,
-    {
-        Pin::new(&mut self.stream).poll_write_buf(cx, buf)
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.stream.is_write_vectored()
     }
 }
 
@@ -256,33 +238,17 @@ impl error::Error for ProxyTunnelError {}
 mod test {
     use super::*;
     use crate::config::{self, BasicCredentials, HostAndPort};
-    use tower::ServiceExt;
+    use tower_util::ServiceExt;
 
     struct MockConnection(tokio_test::io::Mock);
 
     impl AsyncRead for MockConnection {
-        unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
-            self.0.prepare_uninitialized_buffer(buf)
-        }
-
         fn poll_read(
             mut self: Pin<&mut Self>,
             cx: &mut Context<'_>,
-            buf: &mut [u8],
-        ) -> Poll<io::Result<usize>> {
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
             Pin::new(&mut self.0).poll_read(cx, buf)
-        }
-
-        fn poll_read_buf<B>(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &mut B,
-        ) -> Poll<io::Result<usize>>
-        where
-            Self: Sized,
-            B: BufMut,
-        {
-            Pin::new(&mut self.0).poll_read_buf(cx, buf)
         }
     }
 
@@ -302,18 +268,6 @@ mod test {
         fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
             Pin::new(&mut self.0).poll_shutdown(cx)
         }
-
-        fn poll_write_buf<B>(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &mut B,
-        ) -> Poll<io::Result<usize>>
-        where
-            Self: Sized,
-            B: Buf,
-        {
-            Pin::new(&mut self.0).poll_write_buf(cx, buf)
-        }
     }
 
     impl Connection for MockConnection {
@@ -324,7 +278,7 @@ mod test {
 
     #[tokio::test]
     async fn unproxied() {
-        let service = ProxyConnectorLayer::new(&ProxyConfig::Direct).layer(tower::service_fn(
+        let service = ProxyConnectorLayer::new(&ProxyConfig::Direct).layer(tower_util::service_fn(
             |uri: Uri| async move {
                 assert_eq!(uri, "http://foobar.com");
                 Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(
@@ -349,13 +303,14 @@ mod test {
                 .build(),
         ))
         .unwrap();
-        let service =
-            ProxyConnectorLayer::new(&config).layer(tower::service_fn(|uri: Uri| async move {
+        let service = ProxyConnectorLayer::new(&config).layer(tower_util::service_fn(
+            |uri: Uri| async move {
                 assert_eq!(uri, "http://127.0.0.1:1234");
                 Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(
                     tokio_test::io::Builder::new().build(),
                 ))
-            }));
+            },
+        ));
 
         let conn = service
             .oneshot("http://foobar.com".parse().unwrap())
@@ -374,8 +329,8 @@ mod test {
                 .build(),
         ))
         .unwrap();
-        let service =
-            ProxyConnectorLayer::new(&config).layer(tower::service_fn(|uri: Uri| async move {
+        let service = ProxyConnectorLayer::new(&config).layer(tower_util::service_fn(
+            |uri: Uri| async move {
                 assert_eq!(uri, "http://127.0.0.1:1234");
                 let mut builder = tokio_test::io::Builder::new();
                 builder.write(
@@ -385,7 +340,8 @@ mod test {
                 );
                 builder.read(b"HTTP/1.1 200 OK\r\n\r\n");
                 Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(builder.build()))
-            }));
+            },
+        ));
 
         let conn = service
             .oneshot("https://admin:hunter2@foobar.com/fizzbuzz".parse().unwrap())
@@ -403,8 +359,8 @@ mod test {
                 .build(),
         ))
         .unwrap();
-        let service =
-            ProxyConnectorLayer::new(&config).layer(tower::service_fn(|uri: Uri| async move {
+        let service = ProxyConnectorLayer::new(&config).layer(tower_util::service_fn(
+            |uri: Uri| async move {
                 assert_eq!(uri, "http://127.0.0.1:1234");
                 let mut builder = tokio_test::io::Builder::new();
                 builder.write(
@@ -413,7 +369,8 @@ mod test {
                 );
                 builder.read(b"HTTP/1.1 401 Unauthorized\r\n\r\n");
                 Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(builder.build()))
-            }));
+            },
+        ));
 
         let err = service
             .oneshot("https://admin:hunter2@foobar.com/fizzbuzz".parse().unwrap())

@@ -286,7 +286,7 @@ impl Service<Request<RawBody>> for SimulationRawClient {
             let global_server_time_nanos = self.global_server_time_nanos.clone();
             let recorder = self.recorder.clone();
             async move {
-                time::delay_for(response_time).await;
+                time::sleep(response_time).await;
 
                 active_requests.dec();
                 global_responses.inc();
