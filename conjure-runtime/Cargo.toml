@@ -1,6 +1,6 @@
 [package]
 name = "conjure-runtime"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Steven Fackler <sfackler@palantir.com>"]
 edition = "2018"
 license = "Apache-2.0"
@@ -45,7 +45,7 @@ tower-service = "0.3"
 url = "2.0"
 zipkin = "0.4"
 
-conjure-runtime-config = { version = "0.3.0", path = "../conjure-runtime-config" }
+conjure-runtime-config = { version = "0.4.0", path = "../conjure-runtime-config" }
 
 [dev-dependencies]
 flate2 = "1.0"
