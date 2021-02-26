@@ -24,7 +24,7 @@ use http_body::{Body, SizeHint};
 use hyper::client::{HttpConnector, ResponseFuture};
 use hyper::Client;
 use hyper_openssl::{HttpsConnector, HttpsLayer};
-use openssl::ssl::{SslConnector, SslMethod};
+use openssl::ssl::{SslConnector, SslFiletype, SslMethod};
 use pin_project::pin_project;
 use std::error;
 use std::fmt;
@@ -65,6 +65,25 @@ impl BuildRawClient for DefaultRawClientBuilder {
 
         if let Some(ca_file) = builder.get_security().ca_file() {
             ssl.set_ca_file(ca_file).map_err(Error::internal_safe)?;
+        }
+
+        match (
+            builder.get_security().key_file(),
+            builder.get_security().cert_file(),
+        ) {
+            (Some(key_file), Some(cert_file)) => {
+                ssl.set_private_key_file(key_file, SslFiletype::PEM)
+                    .map_err(Error::internal_safe)?;
+                ssl.set_certificate_chain_file(cert_file)
+                    .map_err(Error::internal_safe)?;
+                ssl.check_private_key().map_err(Error::internal_safe)?;
+            }
+            (None, None) => {}
+            _ => {
+                return Err(Error::internal_safe(
+                    "neither or both of key-file and cert-file must be set in the client security config",
+                ));
+            }
         }
 
         let proxy = ProxyConfig::from_config(&builder.get_proxy())?;
