@@ -337,6 +337,8 @@ impl ServiceConfigBuilder {
 #[serde(rename_all = "kebab-case")]
 pub struct SecurityConfig {
     ca_file: Option<PathBuf>,
+    key_file: Option<PathBuf>,
+    cert_file: Option<PathBuf>,
 }
 
 impl SecurityConfig {
@@ -350,6 +352,21 @@ impl SecurityConfig {
     /// These certificates are used in addition to the system's root CA list.
     pub fn ca_file(&self) -> Option<&Path> {
         self.ca_file.as_deref()
+    }
+
+    /// The path to a file containing a PEM-formatted private key used for client certificate authentication.
+    ///
+    /// This key is expected to match the leaf certificate in [`Self::cert_file`].
+    pub fn key_file(&self) -> Option<&Path> {
+        self.key_file.as_deref()
+    }
+
+    /// The path to a file containing PEM-formatted certificates used for client certificate authentication.
+    ///
+    /// The file should start with the leaf certificate corresponding to the key in [`Self::key_file`], and the contain
+    /// the remainder of the certificate chain to a trusted root.
+    pub fn cert_file(&self) -> Option<&Path> {
+        self.cert_file.as_deref()
     }
 }
 
@@ -372,6 +389,18 @@ impl SecurityConfigBuilder {
     /// Sets the trusted root CA file.
     pub fn ca_file(&mut self, ca_file: Option<PathBuf>) -> &mut Self {
         self.0.ca_file = ca_file;
+        self
+    }
+
+    /// Sets the private key used for client certificate authentication.
+    pub fn key_file(&mut self, key_file: Option<PathBuf>) -> &mut Self {
+        self.0.key_file = key_file;
+        self
+    }
+
+    /// Sets the certificate chain used for client certificate authentication.
+    pub fn cert_file(&mut self, cert_file: Option<PathBuf>) -> &mut Self {
+        self.0.cert_file = cert_file;
         self
     }
 

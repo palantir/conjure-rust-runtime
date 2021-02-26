@@ -1,0 +1,5 @@
+type: feature
+feature:
+  description: Added support for client certificate authentication.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/96
