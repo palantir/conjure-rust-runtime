@@ -21,9 +21,10 @@ use crate::service::proxy::{ProxyConfig, ProxyLayer};
 use crate::service::request::RequestLayer;
 use crate::service::response::ResponseLayer;
 use crate::service::retry::RetryLayer;
-use crate::service::span::{SpanBody, SpanLayer};
+use crate::service::root_span::RootSpanLayer;
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
+use crate::service::wait_for_spans::{WaitForSpansBody, WaitForSpansLayer};
 use crate::service::{Identity, Layer, ServiceBuilder, Stack};
 use crate::{Agent, Builder, Request, RequestBuilder, Response};
 use arc_swap::ArcSwap;
@@ -44,9 +45,10 @@ type BaseLayer = layers!(
     MetricsLayer,
     RequestLayer,
     ResponseLayer,
+    RootSpanLayer,
     RetryLayer,
     HttpErrorLayer,
-    SpanLayer,
+    WaitForSpansLayer,
     NodeSelectorLayer,
     NodeUriLayer,
     NodeMetricsLayer,
@@ -59,7 +61,7 @@ type BaseLayer = layers!(
 
 type BaseService<T> = <BaseLayer as Layer<T>>::Service;
 
-pub(crate) type BaseBody<B> = SpanBody<DecodedBody<B>>;
+pub(crate) type BaseBody<B> = WaitForSpansBody<DecodedBody<B>>;
 
 pub(crate) struct ClientState<T> {
     service: BaseService<T>,
@@ -86,9 +88,10 @@ impl<T> ClientState<T> {
             .layer(MetricsLayer::new(service, builder))
             .layer(RequestLayer)
             .layer(ResponseLayer)
+            .layer(RootSpanLayer)
             .layer(RetryLayer::new(builder))
             .layer(HttpErrorLayer::new(builder))
-            .layer(SpanLayer)
+            .layer(WaitForSpansLayer)
             .layer(NodeSelectorLayer::new(service, builder)?)
             .layer(NodeUriLayer)
             .layer(NodeMetricsLayer)
@@ -178,7 +181,7 @@ where
     T: Service<http::Request<RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
-    B: http_body::Body<Data = Bytes> + Send,
+    B: http_body::Body<Data = Bytes> + 'static + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     pub(crate) async fn send(&self, request: Request<'_>) -> Result<Response<B>, Error> {

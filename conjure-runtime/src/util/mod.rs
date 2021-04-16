@@ -13,4 +13,5 @@
 // limitations under the License.
 
 pub mod atomic_f64;
+pub mod spans;
 pub mod weak_reducing_gauge;

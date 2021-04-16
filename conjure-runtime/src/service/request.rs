@@ -21,7 +21,6 @@ use http::Uri;
 use percent_encoding::AsciiSet;
 use std::collections::HashMap;
 use std::pin::Pin;
-use zipkin::Bind;
 
 // https://url.spec.whatwg.org/#query-percent-encode-set
 const QUERY: &AsciiSet = &percent_encoding::CONTROLS
@@ -76,13 +75,9 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = Bind<S::Future>;
+    type Future = S::Future;
 
     fn call(&self, req: Request<'a>) -> Self::Future {
-        let span = zipkin::next_span()
-            .with_name(&format!("conjure-runtime: {} {}", req.method, req.pattern))
-            .detach();
-
         let mut new_req = http::Request::new(req.body);
         *new_req.method_mut() = req.method;
         *new_req.uri_mut() = build_url(req.pattern, req.params);
@@ -94,7 +89,7 @@ where
             new_req.extensions_mut().insert(RetryConfig { idempotent });
         }
 
-        span.bind(self.inner.call(new_req))
+        self.inner.call(new_req)
     }
 }
 

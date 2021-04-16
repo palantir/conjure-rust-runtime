@@ -23,11 +23,12 @@ pub mod proxy;
 pub mod request;
 pub mod response;
 pub mod retry;
-pub mod span;
+pub mod root_span;
 pub mod timeout;
 pub mod tls_metrics;
 pub mod trace_propagation;
 pub mod user_agent;
+pub mod wait_for_spans;
 
 /// A function from one service type to another.
 ///

@@ -19,11 +19,12 @@ use crate::rng::ConjureRng;
 use crate::service::map_error::RawClientError;
 use crate::service::request::Pattern;
 use crate::service::Layer;
+use crate::util::spans::{self, HttpSpanFuture};
 use crate::{Body, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
 use futures::future::{self, BoxFuture};
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
-use http::{HeaderValue, Request, StatusCode};
+use http::{HeaderValue, Request, Response, StatusCode};
 use rand::Rng;
 use std::error;
 use std::pin::Pin;
@@ -96,14 +97,15 @@ pub struct RetryService<S> {
     rng: Arc<ConjureRng>,
 }
 
-impl<'a, S> Service<Request<RetryBody<'a>>> for RetryService<S>
+impl<'a, S, B> Service<Request<RetryBody<'a>>> for RetryService<S>
 where
-    S: Service<Request<RawBody>, Error = Error> + 'a + Sync + Send,
+    S: Service<Request<RawBody>, Response = Response<B>, Error = Error> + 'a + Sync + Send,
     S::Response: Send,
     S::Future: Send,
+    B: 'static,
 {
     type Response = S::Response;
-    type Error = Error;
+    type Error = S::Error;
     type Future = BoxFuture<'a, Result<Self::Response, Error>>;
 
     fn call(&self, req: Request<RetryBody<'a>>) -> Self::Future {
@@ -138,18 +140,14 @@ struct State<S> {
     attempt: u32,
 }
 
-impl<S> State<S>
+impl<S, B> State<S>
 where
-    S: Service<Request<RawBody>, Error = Error>,
+    S: Service<Request<RawBody>, Response = Response<B>, Error = Error>,
 {
     async fn call(mut self, mut req: Request<RetryBody<'_>>) -> Result<S::Response, Error> {
         loop {
-            let span = zipkin::next_span()
-                .with_name(&format!("conjure-runtime: attempt {}", self.attempt))
-                .detach();
             let attempt_req = self.clone_request(&mut req);
-            let future = self.send_attempt(attempt_req);
-            let (error, retry_after) = match span.bind(future).await? {
+            let (error, retry_after) = match self.send_attempt(attempt_req).await? {
                 AttemptOutcome::Ok(response) => return Ok(response),
                 AttemptOutcome::Retry { error, retry_after } => (error, retry_after),
             };
@@ -186,7 +184,13 @@ where
         &mut self,
         req: Request<RetryBodyRef<'_, '_>>,
     ) -> Result<AttemptOutcome<S::Response>, Error> {
-        match self.send_raw(req).await {
+        let mut span = zipkin::next_span()
+            .with_name("conjure-runtime: attempt")
+            .with_tag("failures", &self.attempt.to_string())
+            .detach();
+        spans::add_request_tags(&mut span, &req);
+
+        match HttpSpanFuture::new(self.send_raw(req), span).await {
             Ok(response) => Ok(AttemptOutcome::Ok(response)),
             Err(error) => {
                 // we don't want to retry after propagated QoS errors
@@ -351,11 +355,14 @@ mod test {
                     _ => panic!("expected empty body"),
                 }
 
-                Ok(())
+                Ok(Response::new(()))
             },
         ));
 
-        let request = Request::new(None);
+        let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
+            .body(None)
+            .unwrap();
         service.call(request).await.unwrap();
     }
 
@@ -376,14 +383,17 @@ mod test {
                     _ => panic!("expected single chunk body"),
                 }
 
-                Ok(())
+                Ok(Response::new(()))
             },
         ));
 
-        let request = Request::new(Some(Box::pin(ResetTrackingBody::new(BytesBody::new(
-            body,
-            HeaderValue::from_static("text/plain"),
-        ))) as _));
+        let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
+            .body(Some(Box::pin(ResetTrackingBody::new(BytesBody::new(
+                body,
+                HeaderValue::from_static("text/plain"),
+            ))) as _))
+            .unwrap();
         service.call(request).await.unwrap();
     }
 
@@ -425,11 +435,14 @@ mod test {
                 let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
                 assert_eq!(body, "hello world");
 
-                Ok(())
+                Ok(Response::new(()))
             },
         ));
 
-        let request = Request::new(Some(Box::pin(ResetTrackingBody::new(StreamedBody)) as _));
+        let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
+            .body(Some(Box::pin(ResetTrackingBody::new(StreamedBody)) as _))
+            .unwrap();
         service.call(request).await.unwrap();
     }
 
@@ -465,13 +478,16 @@ mod test {
                 pin_mut!(body);
                 body.data().await.unwrap().unwrap();
 
-                Err::<(), _>(Error::internal_safe("blammo"))
+                Err::<Response<()>, _>(Error::internal_safe("blammo"))
             },
         ));
 
-        let request = Request::new(Some(
-            Box::pin(ResetTrackingBody::new(StreamedInfiniteBody)) as _
-        ));
+        let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(StreamedInfiniteBody)) as _
+            ))
+            .unwrap();
         let err = service.call(request).await.err().unwrap();
 
         assert_eq!(err.cause().to_string(), "blammo");
@@ -508,13 +524,16 @@ mod test {
                     .await
                     .map_err(Error::internal_safe)?;
 
-                Ok(())
+                Ok(Response::new(()))
             },
         ));
 
-        let request = Request::new(Some(
-            Box::pin(ResetTrackingBody::new(StreamedErrorBody)) as _
-        ));
+        let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(StreamedErrorBody)) as _
+            ))
+            .unwrap();
         let err = service.call(request).await.err().unwrap();
 
         assert_eq!(err.cause().to_string(), "uh oh");
@@ -582,7 +601,7 @@ mod test {
 
                     match attempt {
                         0 => Err(Error::internal_safe(RawClientError("blammo".into()))),
-                        1 => Ok(()),
+                        1 => Ok(Response::new(())),
                         _ => panic!(),
                     }
                 }
@@ -590,6 +609,7 @@ mod test {
         }));
 
         let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
             .extension(RetryConfig { idempotent: true })
             .body(Some(
                 Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
@@ -615,7 +635,7 @@ mod test {
 
                     match attempt {
                         0 => Err(Error::internal_safe(UnavailableError(()))),
-                        1 => Ok(()),
+                        1 => Ok(Response::new(())),
                         _ => panic!(),
                     }
                 }
@@ -623,6 +643,7 @@ mod test {
         }));
 
         let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
             .extension(RetryConfig { idempotent: true })
             .body(Some(
                 Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
@@ -648,16 +669,19 @@ mod test {
 
                     match attempt {
                         0 => Err(Error::internal_safe(ThrottledError { retry_after: None })),
-                        1 => Ok(()),
+                        1 => Ok(Response::new(())),
                         _ => panic!(),
                     }
                 }
             }
         }));
 
-        let request = Request::new(Some(
-            Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
-        ));
+        let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
+            ))
+            .unwrap();
         service.call(request).await.unwrap();
     }
 
@@ -678,16 +702,19 @@ mod test {
 
                     match attempt {
                         0 => Err(Error::throttle_safe(UnavailableError(()))),
-                        1 => Ok(()),
+                        1 => Ok(Response::new(())),
                         _ => panic!(),
                     }
                 }
             }
         }));
 
-        let request = Request::new(Some(
-            Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
-        ));
+        let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
+            ))
+            .unwrap();
         service.call(request).await.err().unwrap();
     }
 
@@ -708,16 +735,19 @@ mod test {
 
                     match attempt {
                         0 => Err(Error::throttle_safe(ThrottledError { retry_after: None })),
-                        1 => Ok(()),
+                        1 => Ok(Response::new(())),
                         _ => panic!(),
                     }
                 }
             }
         }));
 
-        let request = Request::new(Some(
-            Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
-        ));
+        let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
+            ))
+            .unwrap();
         service.call(request).await.err().unwrap();
     }
 
@@ -735,7 +765,7 @@ mod test {
                 async move {
                     match attempt {
                         0 => Err(Error::internal_safe("blammo")),
-                        1 => Ok(()),
+                        1 => Ok(Response::new(())),
                         _ => panic!(),
                     }
                 }
@@ -743,6 +773,7 @@ mod test {
         }));
 
         let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
             .extension(RetryConfig { idempotent: false })
             .body(None)
             .unwrap();
@@ -764,7 +795,7 @@ mod test {
                 async move {
                     match attempt {
                         0 => Err(Error::internal_safe(UnavailableError(()))),
-                        1 => Ok(()),
+                        1 => Ok(Response::new(())),
                         _ => panic!(),
                     }
                 }
@@ -772,6 +803,7 @@ mod test {
         }));
 
         let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
             .extension(RetryConfig { idempotent: false })
             .body(None)
             .unwrap();
@@ -796,7 +828,7 @@ mod test {
                             let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
                             assert_eq!(body, "hello world");
 
-                            Ok(())
+                            Ok(Response::new(()))
                         }
                         _ => panic!(),
                     }
@@ -804,9 +836,12 @@ mod test {
             }
         }));
 
-        let request = Request::new(Some(
-            Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
-        ));
+        let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
+            ))
+            .unwrap();
         service.call(request).await.unwrap();
     }
 
@@ -826,16 +861,19 @@ mod test {
                     assert_eq!(body, "hello world");
 
                     match attempt {
-                        0 | 1 => Err::<(), _>(Error::internal_safe(UnavailableError(()))),
+                        0 | 1 => Err::<Response<()>, _>(Error::internal_safe(UnavailableError(()))),
                         _ => panic!(),
                     }
                 }
             }
         }));
 
-        let request = Request::new(Some(
-            Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
-        ));
+        let request = Request::builder()
+            .extension(Pattern { pattern: "/test" })
+            .body(Some(
+                Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
+            ))
+            .unwrap();
         service.call(request).await.err().unwrap();
     }
 }
