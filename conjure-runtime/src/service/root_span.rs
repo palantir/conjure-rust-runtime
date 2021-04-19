@@ -13,6 +13,7 @@
 // limitations under the License.
 use crate::service::{Layer, Service};
 use crate::util::spans::{self, HttpSpanFuture};
+use conjure_error::Error;
 use http::{Request, Response};
 
 /// A layer which manages the root level request span.
@@ -32,7 +33,7 @@ pub struct RootSpanService<S> {
 
 impl<S, B1, B2> Service<Request<B1>> for RootSpanService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
     type Response = S::Response;
     type Error = S::Error;

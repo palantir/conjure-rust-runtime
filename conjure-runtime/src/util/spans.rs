@@ -11,9 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::errors::{RemoteError, ThrottledError, UnavailableError};
 use crate::service::request::Pattern;
+use conjure_error::Error;
 use futures::ready;
-use http::{Request, Response};
+use http::{Request, Response, StatusCode};
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
@@ -48,9 +50,9 @@ impl<F> HttpSpanFuture<F> {
     }
 }
 
-impl<F, B, E> Future for HttpSpanFuture<F>
+impl<F, B> Future for HttpSpanFuture<F>
 where
-    F: Future<Output = Result<Response<B>, E>>,
+    F: Future<Output = Result<Response<B>, Error>>,
 {
     type Output = F::Output;
 
@@ -72,7 +74,23 @@ where
                 // StatusCode::as_str returns the numeric representation, not the canonical reason.
                 span.tag("status", response.status().as_str());
             }
-            Err(_) => span.tag("outcome", "failure"),
+            Err(e) => {
+                span.tag("outcome", "failure");
+
+                let status = if e.cause().is::<ThrottledError>() {
+                    Some(&StatusCode::TOO_MANY_REQUESTS)
+                } else if e.cause().is::<UnavailableError>() {
+                    Some(&StatusCode::SERVICE_UNAVAILABLE)
+                } else if let Some(e) = e.cause().downcast_ref::<RemoteError>() {
+                    Some(e.status())
+                } else {
+                    None
+                };
+
+                if let Some(status) = status {
+                    span.tag("status", status.as_str());
+                }
+            }
         }
 
         *this.span = None;
