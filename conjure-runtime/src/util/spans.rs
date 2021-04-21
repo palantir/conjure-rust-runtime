@@ -23,9 +23,9 @@ use std::task::{Context, Poll};
 use zipkin::{Detached, OpenSpan};
 
 pub fn add_request_tags<A, B>(span: &mut OpenSpan<A>, request: &Request<B>) {
-    span.tag("method", request.method().as_str());
+    span.tag("http.method", request.method().as_str());
     span.tag(
-        "pattern",
+        "http.url_details.path",
         request
             .extensions()
             .get::<Pattern>()
@@ -72,7 +72,7 @@ where
                 };
                 span.tag("outcome", outcome);
                 // StatusCode::as_str returns the numeric representation, not the canonical reason.
-                span.tag("status", response.status().as_str());
+                span.tag("http.status_code", response.status().as_str());
             }
             Err(e) => {
                 span.tag("outcome", "failure");
@@ -88,7 +88,7 @@ where
                 };
 
                 if let Some(status) = status {
-                    span.tag("status", status.as_str());
+                    span.tag("http.status_code", status.as_str());
                 }
             }
         }
