@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::{env, fs};
 use tar::Archive;
 
-const VERSION: &str = "0.18.3";
+const VERSION: &str = "0.19.0";
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
@@ -30,7 +30,7 @@ fn main() {
 
 fn download(name: &str, classifier: &str, extension: &str) -> Vec<u8> {
     let url = format!(
-        "https://palantir.bintray.com/releases/com/palantir/conjure/verification/{name}/{version}/{name}-{version}{classifier}.{extension}",
+        "https://repo1.maven.org/maven2/com/palantir/conjure/verification/{name}/{version}/{name}-{version}{classifier}.{extension}",
         name = name,
         version = VERSION,
         classifier = classifier,

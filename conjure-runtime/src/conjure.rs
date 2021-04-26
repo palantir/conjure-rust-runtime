@@ -41,7 +41,7 @@ where
     T: Service<http::Request<raw::RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
-    B: http_body::Body<Data = Bytes> + Send,
+    B: http_body::Body<Data = Bytes> + 'static + Sync + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     #[allow(clippy::too_many_arguments)]
@@ -85,7 +85,7 @@ where
     T: Service<http::Request<raw::RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
     T::Future: Send,
-    B: http_body::Body<Data = Bytes> + Sync + Send,
+    B: http_body::Body<Data = Bytes> + 'static + Sync + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     type BinaryWriter = BodyWriter;

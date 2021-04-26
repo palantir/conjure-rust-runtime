@@ -10,6 +10,7 @@ client:
       - '[]'
       - '[100, 10.0, "NaN", "Infinity", "-Infinity"]'
       - 'null'
+      - '{}'
     receiveMapDoubleAliasExample:
       - '{}'
       - '{"10": true}'
@@ -20,6 +21,8 @@ client:
       - '{"Infinity": true}'
       - '{"-Infinity": true}'
       - '{"10": true, "3e2": true}'
+      - 'null'
+      - '[]'
       - '{"10": true, "10e0": false}'
       - '{"10": true, "10.0": false}'
 
@@ -31,6 +34,7 @@ client:
     # serde_json follows Go's lead and only supports numeric non-string map keys
     receiveMapBooleanAliasExample:
       - '{"true": true}'
+      - 'null'
 
     # https://github.com/palantir/conjure-rust/issues/4
     receiveAnyExample:
@@ -94,6 +98,24 @@ client:
     receiveSetStringAliasExample:
       - 'null'
     receiveSetUuidAliasExample:
+      - 'null'
+    receiveMapBearerTokenAliasExample:
+      - 'null'
+    receiveMapBinaryAliasExample:
+      - 'null'
+    receiveMapDateTimeAliasExample:
+      - 'null'
+    receiveMapEnumExampleAlias:
+      - 'null'
+    receiveMapIntegerAliasExample:
+      - 'null'
+    receiveMapRidAliasExample:
+      - 'null'
+    receiveMapSafeLongAliasExample:
+      - 'null'
+    receiveMapStringAliasExample:
+      - 'null'
+    receiveMapUuidAliasExample:
       - 'null'
 
   singlePathParamService:

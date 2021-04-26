@@ -20,36 +20,37 @@ use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use zipkin::{Bind, Detached, OpenSpan};
+use zipkin::{Bind, Detached, Kind, OpenSpan};
 
 /// A layer which wraps the request future in a `conjure-runtime: wait-for-headers` span, and the response's body in a
 /// `conjure-runtime: wait-for-body` span.
-pub struct SpanLayer;
+pub struct WaitForSpansLayer;
 
-impl<S> Layer<S> for SpanLayer {
-    type Service = SpanService<S>;
+impl<S> Layer<S> for WaitForSpansLayer {
+    type Service = WaitForSpansService<S>;
 
-    fn layer(self, inner: S) -> SpanService<S> {
-        SpanService { inner }
+    fn layer(self, inner: S) -> WaitForSpansService<S> {
+        WaitForSpansService { inner }
     }
 }
 
-pub struct SpanService<S> {
+pub struct WaitForSpansService<S> {
     inner: S,
 }
 
-impl<S, R, B> Service<R> for SpanService<S>
+impl<S, R, B> Service<R> for WaitForSpansService<S>
 where
     S: Service<R, Response = Response<B>>,
 {
-    type Response = Response<SpanBody<B>>;
+    type Response = Response<WaitForSpansBody<B>>;
     type Error = S::Error;
-    type Future = SpanFuture<S::Future>;
+    type Future = WaitForSpansFuture<S::Future>;
 
     fn call(&self, req: R) -> Self::Future {
-        SpanFuture {
+        WaitForSpansFuture {
             future: zipkin::next_span()
                 .with_name("conjure-runtime: wait-for-headers")
+                .with_kind(Kind::Client)
                 .detach()
                 .bind(self.inner.call(req)),
         }
@@ -57,21 +58,21 @@ where
 }
 
 #[pin_project]
-pub struct SpanFuture<F> {
+pub struct WaitForSpansFuture<F> {
     #[pin]
     future: Bind<F>,
 }
 
-impl<F, B, E> Future for SpanFuture<F>
+impl<F, B, E> Future for WaitForSpansFuture<F>
 where
     F: Future<Output = Result<Response<B>, E>>,
 {
-    type Output = Result<Response<SpanBody<B>>, E>;
+    type Output = Result<Response<WaitForSpansBody<B>>, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let response = ready!(self.project().future.poll(cx))?;
 
-        Poll::Ready(Ok(response.map(|body| SpanBody {
+        Poll::Ready(Ok(response.map(|body| WaitForSpansBody {
             body,
             _span: zipkin::next_span()
                 .with_name("conjure-runtime: wait-for-body")
@@ -81,13 +82,13 @@ where
 }
 
 #[pin_project]
-pub struct SpanBody<B> {
+pub struct WaitForSpansBody<B> {
     #[pin]
     body: B,
     _span: OpenSpan<Detached>,
 }
 
-impl<B> Body for SpanBody<B>
+impl<B> Body for WaitForSpansBody<B>
 where
     B: Body,
 {
