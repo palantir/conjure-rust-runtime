@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::service::request::Pattern;
 use crate::service::{Layer, Service};
 use crate::util::spans::{self, HttpSpanFuture};
 use conjure_error::Error;
@@ -41,7 +42,11 @@ where
 
     fn call(&self, req: Request<B1>) -> Self::Future {
         let mut span = zipkin::next_span()
-            .with_name("conjure-runtime: request")
+            .with_name(&format!(
+                "conjure-runtime: {} {}",
+                req.method(),
+                req.extensions().get::<Pattern>().unwrap().pattern
+            ))
             .detach();
         spans::add_request_tags(&mut span, &req);
 
