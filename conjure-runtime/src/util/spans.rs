@@ -77,6 +77,7 @@ where
             Err(e) => {
                 span.tag("outcome", "failure");
 
+                #[allow(clippy::manual_map)] // cleaner as-is
                 let status = if e.cause().is::<ThrottledError>() {
                     Some(&StatusCode::TOO_MANY_REQUESTS)
                 } else if e.cause().is::<UnavailableError>() {

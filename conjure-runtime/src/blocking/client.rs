@@ -15,16 +15,23 @@ use crate::blocking::RequestBuilder;
 use crate::raw::DefaultRawClient;
 use crate::Builder;
 use http::Method;
+use tokio::runtime::Handle;
 
 /// A blocking HTTP client to a remote service.
 ///
 /// It implements the Conjure `Client` trait, but also offers a "raw" request interface for use with services that don't
 /// provide Conjure service definitions.
-pub struct Client<T = DefaultRawClient>(pub(crate) crate::Client<T>);
+pub struct Client<T = DefaultRawClient> {
+    pub(crate) client: crate::Client<T>,
+    pub(crate) handle: Option<Handle>,
+}
 
 impl<T> Clone for Client<T> {
     fn clone(&self) -> Self {
-        Client(self.0.clone())
+        Client {
+            client: self.client.clone(),
+            handle: self.handle.clone(),
+        }
     }
 }
 

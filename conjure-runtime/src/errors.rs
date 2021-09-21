@@ -29,7 +29,7 @@ pub struct RemoteError {
 impl fmt::Display for RemoteError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.error() {
-            Some(ref error) => write!(
+            Some(error) => write!(
                 fmt,
                 "remote error: {} ({}) with instance ID {}",
                 error.error_code(),

@@ -109,7 +109,7 @@ impl LimitedNode {
             acquire: self
                 .limiter
                 .as_ref()
-                .map(|l| l.acquire(request.method(), &pattern.pattern)),
+                .map(|l| l.acquire(request.method(), pattern.pattern)),
             node: self.node.clone(),
         }
     }

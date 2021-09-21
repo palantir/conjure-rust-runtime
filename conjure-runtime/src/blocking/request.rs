@@ -128,14 +128,18 @@ where
     /// Makes the request.
     pub fn send(self) -> Result<Response<B>, Error> {
         let (sender, receiver) = oneshot::channel();
-        let client = self.client.0.clone();
+        let client = self.client.client.clone();
         let request = self.request;
-        runtime()
-            .map_err(Error::internal_safe)?
-            .spawn(ContextFuture::new(async move {
-                let r = client.send(request).await;
-                let _ = sender.send(r);
-            }));
+
+        let handle = match &self.client.handle {
+            Some(handle) => handle,
+            None => runtime().map_err(Error::internal_safe)?.handle(),
+        };
+
+        handle.spawn(ContextFuture::new(async move {
+            let r = client.send(request).await;
+            let _ = sender.send(r);
+        }));
 
         if let Some(streamer) = self.streamer {
             streamer.stream();
