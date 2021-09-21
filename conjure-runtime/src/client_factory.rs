@@ -166,6 +166,21 @@ impl ClientFactory {
         self.host_metrics.as_ref()
     }
 
+    /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
+    ///
+    /// This has no effect on async clients.
+    ///
+    /// Defaults to a `conjure-runtime` internal `Runtime`.
+    pub fn blocking_handle(&mut self, blocking_handle: Handle) -> &mut Self {
+        self.blocking_handle = Some(blocking_handle);
+        self
+    }
+
+    /// Returns the configured blocking handle.
+    pub fn get_blocking_handle(&self) -> Option<&Handle> {
+        self.blocking_handle.as_ref()
+    }
+
     /// Creates a new client for the specified service.
     ///
     /// The client's configuration will automatically refresh to track changes in the factory's `ServicesConfig`.

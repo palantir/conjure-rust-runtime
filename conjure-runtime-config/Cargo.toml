@@ -10,7 +10,7 @@ readme = "../README.md"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde-humantime = "0.1.1"
+humantime-serde = "1.0"
 url = { version = "2.0", features = ["serde"] }
 
 [dev-dependencies]
