@@ -72,7 +72,7 @@ impl<'a> ServerBuilder0<'a> {
     pub fn name(self, name: &str) -> ServerBuilder1<'a> {
         ServerBuilder1 {
             name: name.to_string(),
-            active_requests: metrics::active_requests(&self.metrics, name),
+            active_requests: metrics::active_requests(self.metrics, name),
             handlers: vec![],
             recorder: self.recorder,
         }
