@@ -1,0 +1,5 @@
+type: feature
+feature:
+  description: The `tokio` runtime used by blocking clients can now be configured.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/103
