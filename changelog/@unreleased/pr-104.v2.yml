@@ -1,0 +1,5 @@
+type: fix
+fix:
+  description: Added getter and setter methods to `ClientFactory`'s blocking handle.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/104
