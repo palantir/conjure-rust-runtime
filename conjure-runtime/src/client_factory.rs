@@ -22,6 +22,7 @@ use arc_swap::ArcSwap;
 use conjure_error::Error;
 use refreshable::Refreshable;
 use std::sync::Arc;
+use tokio::runtime::Handle;
 use witchcraft_metrics::MetricRegistry;
 
 /// A factory type which can create clients that will live-reload in response to configuration updates.
@@ -36,6 +37,7 @@ pub struct ClientFactory {
     service_error: ServiceError,
     idempotency: Idempotency,
     node_selection_strategy: NodeSelectionStrategy,
+    blocking_handle: Option<Handle>,
 }
 
 impl ClientFactory {
@@ -51,6 +53,7 @@ impl ClientFactory {
             service_error: ServiceError::WrapInNewError,
             idempotency: Idempotency::ByMethod,
             node_selection_strategy: NodeSelectionStrategy::PinUntilError,
+            blocking_handle: None,
         }
     }
 
@@ -241,6 +244,9 @@ impl ClientFactory {
     ///
     /// Panics if `user_agent` is not set.
     pub fn blocking_client(&self, service: &str) -> Result<blocking::Client, Error> {
-        self.client(service).map(blocking::Client)
+        self.client(service).map(|client| blocking::Client {
+            client,
+            handle: self.blocking_handle.clone(),
+        })
     }
 }

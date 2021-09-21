@@ -21,6 +21,7 @@ use conjure_error::Error;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::runtime::Handle;
 use url::Url;
 use witchcraft_metrics::MetricRegistry;
 
@@ -46,6 +47,7 @@ pub struct Builder<T = DefaultRawClientBuilder> {
     metrics: Option<Arc<MetricRegistry>>,
     host_metrics: Option<Arc<HostMetricsRegistry>>,
     rng_seed: Option<u64>,
+    blocking_handle: Option<Handle>,
     raw_client_builder: T,
 }
 
@@ -77,6 +79,7 @@ impl Builder {
             metrics: None,
             host_metrics: None,
             rng_seed: None,
+            blocking_handle: None,
             raw_client_builder: DefaultRawClientBuilder,
         }
     }
@@ -378,6 +381,21 @@ impl<T> Builder<T> {
         self.rng_seed
     }
 
+    /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
+    ///
+    /// This has no effect on async clients.
+    ///
+    /// Defaults to a `conjure-runtime` internal `Runtime`.
+    pub fn blocking_handle(&mut self, blocking_handle: Handle) -> &mut Self {
+        self.blocking_handle = Some(blocking_handle);
+        self
+    }
+
+    /// Returns the builder's configured blocking handle.
+    pub fn get_blocking_handle(&self) -> Option<&Handle> {
+        self.blocking_handle.as_ref()
+    }
+
     /// Sets the raw client builder.
     ///
     /// Defaults to `DefaultRawClientBuilder`.
@@ -401,6 +419,7 @@ impl<T> Builder<T> {
             metrics: self.metrics,
             host_metrics: self.host_metrics,
             rng_seed: self.rng_seed,
+            blocking_handle: self.blocking_handle,
             raw_client_builder,
         }
     }
@@ -457,7 +476,10 @@ where
     ///
     /// Panics if `service` or `user_agent` is not set.
     pub fn build_blocking(&self) -> Result<blocking::Client<T::RawClient>, Error> {
-        self.build().map(blocking::Client)
+        self.build().map(|client| blocking::Client {
+            client,
+            handle: self.blocking_handle.clone(),
+        })
     }
 }
 
