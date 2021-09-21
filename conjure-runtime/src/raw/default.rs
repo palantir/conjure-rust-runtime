@@ -86,14 +86,14 @@ impl BuildRawClient for DefaultRawClientBuilder {
             }
         }
 
-        let proxy = ProxyConfig::from_config(&builder.get_proxy())?;
+        let proxy = ProxyConfig::from_config(builder.get_proxy())?;
 
         let connector = TimeoutLayer::new(builder).layer(connector);
         let connector = ProxyConnectorLayer::new(&proxy).layer(connector);
         let connector = HttpsLayer::with_connector(ssl)
             .map_err(Error::internal_safe)?
             .layer(connector);
-        let connector = TlsMetricsLayer::new(&service, builder).layer(connector);
+        let connector = TlsMetricsLayer::new(service, builder).layer(connector);
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(HTTP_KEEPALIVE)
