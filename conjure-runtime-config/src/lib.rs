@@ -588,5 +588,5 @@ fn de_opt_duration<'de, D>(d: D) -> Result<Option<Duration>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    serde_humantime::De::deserialize(d).map(serde_humantime::De::into_inner)
+    humantime_serde::Serde::deserialize(d).map(humantime_serde::Serde::into_inner)
 }
