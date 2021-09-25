@@ -19,9 +19,9 @@
 //! # Configuration
 //!
 //! While a `conjure_runtime` client can be built up programmatically, the more common approach is for the configuration
-//! to be deserialized from a service's runtime-reloadable configuration file. The `ServicesConfig` supports
-//! configuration for multiple downstream services, as well as allowing for both global and per-service configuration
-//! overrides:
+//! to be deserialized from a service's runtime-reloadable configuration file. The
+//! [`ServicesConfig`](config::ServicesConfig) supports configuration for multiple downstream services, as well as
+//! allowing for both global and per-service configuration overrides:
 //!
 //! ```yaml
 //! services:
@@ -38,12 +38,12 @@
 //!   ca-file: var/security/ca.pem
 //! ```
 //!
-//! Using the `refreshable` crate, a live-updating config file can be used with the `ClientFactory` type to create
+//! Using the [`refreshable`] crate, a live-updating config file can be used with the [`ClientFactory`] type to create
 //! live-updating clients for the configured services.
 //!
 //! # Usage
 //!
-//! First construct a raw `conjure_runtime::Client`:
+//! First construct a raw [`Client`]:
 //!
 //! ```
 //! use conjure_runtime::{UserAgent, Agent, Client};
@@ -68,6 +68,7 @@
 //!
 //! ```
 //! use conjure_codegen::example_types::another::TestServiceAsyncClient;
+//! use conjure_http::client::AsyncService;
 //! use conjure_object::BearerToken;
 //!
 //! # async fn foo(client: conjure_runtime::Client) -> Result<(), conjure_error::Error> {
@@ -78,21 +79,11 @@
 //! # Ok(()) }
 //! ```
 //!
-//! Or manually if a service does not provide a Conjure API:
-//!
-//! ```
-//! # async fn foo(client: conjure_runtime::Client) -> Result<(), conjure_error::Error> {
-//! let response = client.delete("/widgets/{widgetId}")
-//!     .param("widgetId", 12345)
-//!     .send()
-//!     .await?;
-//! # Ok(()) }
-//! ```
-//!
-//! The `blocking::Client`'s API is identical, with the exception that you don't `.await` on methods:
+//! The [`blocking::Client`]'s API is identical, with the exception that you don't `.await` on methods:
 //!
 //! ```
 //! use conjure_codegen::example_types::another::TestServiceClient;
+//! use conjure_http::client::Service;
 //! use conjure_object::BearerToken;
 //!
 //! # fn foo(client: conjure_runtime::blocking::Client) -> Result<(), conjure_error::Error> {
@@ -103,38 +94,29 @@
 //! # Ok(()) }
 //! ```
 //!
-//! ```
-//! # fn foo(client: conjure_runtime::blocking::Client) -> Result<(), conjure_error::Error> {
-//! let response = client.delete("/widgets/{widgetId}")
-//!     .param("widgetId", 12345)
-//!     .send()?;
-//! # Ok(()) }
-//! ```
-//!
 //! # Behavior
 //!
-//! `conjure_runtime` wraps the `hyper` HTTP library with opinionated behavior designed to more effectively communicate
-//! between services in a distributed system. It is broadly designed to align with the [`dialogue`] Java library, though
-//! it does differ in various ways.
+//! `conjure_runtime` wraps the [`hyper`] HTTP library with opinionated behavior designed to more effectively
+//! communicate between services in a distributed system. It is broadly designed to align with the [`dialogue`] Java
+//! library, though it does differ in various ways.
 //!
 //! ## Error Propagation
 //!
 //! Servers should use the standard Conjure error format to propagate application-specific errors to callers. Non-QoS
 //! (see below) errors received from the server are treated as fatal. By default, `conjure_runtime` will return a
-//! `conjure_error::Error` that will generate a generic 500 Internal Server Error response. Its cause will be a
-//! `RemoteError` object that contains the serialized Conjure error information sent by the server. The
-//! `Client::set_propagate_service_errors` method can be used to change that behavior to instead transparently propagate
-//! the error received from the server. Rather than producing a generic 500 response, the returned
-//! `conjure_error::Error` will produce the same response the client received from the server.
+//! [`conjure_error::Error`] that will generate a generic 500 Internal Server Error response. Its cause will be a
+//! [`RemoteError`](errors::RemoteError) object that contains the serialized Conjure error information sent by the
+//! server. The [`Builder::service_error()`] and [`ClientFactory::service_error()`] methods can be used to change that
+//! behavior to instead transparently propagate the error received from the server. Rather than producing a generic 500
+//! response, the returned [`conjure_error::Error`] will produce the same response the client received from the server.
 //!
 //! ## Call Tracing
 //!
 //! The client propagates trace information via the [`zipkin`] crate using the traditional `X-B3-*` HTTP headers. It
 //! also creates local spans covering various stages of request processing:
 //!
-//! * `conjure-runtime: get /widget-service/{widgetId}` - The name of this span is built from the request's method and
-//!     path pattern.
-//!     * `conjure-runtime: attempt 1`
+//! * `conjure-runtime: request`
+//!     * `conjure-runtime: attempt`
 //!         * `conjure-runtime: acquire-permit` - If client QoS is enabled and the node selection strategy is not
 //!             [`Balanced`], this span covers the time spent acquiring a concurrency limiter permit.
 //!         * `conjure-runtime: balanced-node-selection` - If the node selection strategy is [`Balanced`], this span
@@ -143,12 +125,12 @@
 //!         * `conjure-runtime: wait-for-headers` - This span is sent to the server, and lasts until the server sends
 //!             the headers of the response.
 //!         * `conjure-runtime: wait-for-body` - This span is tracked along with the response body, and lasts until the
-//!             `ResponseBody` object is dropped. It is "detached" from the zipkin tracer so new spans created outside
+//!             [`ResponseBody`] object is dropped. It is "detached" from the zipkin tracer so new spans created outside
 //!             of `conjure-runtime` will not be parented to it, and can outlive the parent `conjure-runtime` spans. It
 //!             will not be created if an IO error occurs before headers are received.
 //!     * `conjure-runtime: backoff-with-jitter` - If the request is retried, this span tracks the time spent waiting
 //!         between attempts.
-//!     * `conjure-runtime: attempt 2`
+//!     * `conjure-runtime: attempt`
 //!         * ...
 //!
 //! ## Quality of Service: Retry, Failover, Throttling, and Backpressure
@@ -165,13 +147,15 @@
 //! Only some requests can be retried. By default, `conjure_runtime` will only retry requests with HTTP methods
 //! identified as idempotent - `GET`, `PUT`, `DELETE`, `HEAD`, `TRACE`, and `OPTIONS`. Non-idempotent requests cannot be
 //! safely retried to avoid the risk of unexpected behavior if the request ends up being applied twice. The
-//! `Client::set_assume_idempotent` method can be used to override this behavior and have the client assume all requests
-//! are idempotent. In addition, requests with streaming request bodies can only be retried if the body had either not
-//! started to be written when the error occurred or if it was successfully reset for another attempt.
+//! [`Builder::idempotency()`] and [`ClientFactory::idempotency()`] methods can be used to override this behavior and
+//! have the client assume all or no requests are idempotent. In addition, requests with streaming request bodies can
+//! only be retried if the body had either not started to be written when the error occurred or if it was successfully
+//! reset for another attempt.
 //!
 //! ## Metrics
 //!
-//! Clients record metrics to both a standard `MetricsRegistry` and a `conjure_runtime`-specific `HostMetricsRegistry`.
+//! Clients record metrics to both a standard [`MetricRegistry`](witchcraft_metrics::MetricRegistry) and a
+//! `conjure_runtime`-specific [`HostMetricsRegistry`].
 //!
 //! ### Standard Metrics
 //!
@@ -180,7 +164,7 @@
 //!     records the time until response headers are received, not until the entire response body is read.
 //! * `client.request.error (service: <service_name>, reason: IOException)` - A `Meter` tracking the rate of IO errors,
 //!     tagged by service. Like the `client.request` metric, this tracks overall user-perceived request. The `reason`
-//!     tag has a value of `IOException` to align with [`conjure-java-runtime`]'s metric.
+//!     tag has a value of `IOException` to align with [`dialogue`]'s metric.
 //! * `tls.handshake (context: <service_name>, protocol: <protocol_version>, cipher: <cipher_name>)` - A `Meter`
 //!     tracking the rate of TLS handshakes, tagged by the service, TLS protocol version (e.g. `TLSv1.3`), and cipher
 //!     name (e.g. `TLS_CHACHA20_POLY1305_SHA256`).
@@ -191,10 +175,11 @@
 //!
 //! ### Host Metrics
 //!
-//! The `HostMetricsRegistry` contains metrics for every host of every service being actively used by a
+//! The [`HostMetricsRegistry`] contains metrics for every host of every service being actively used by a
 //! `conjure_runtime` client.
 //!
 //! [Conjure]: https://github.com/palantir/conjure
+//! [`hyper`]: https://docs.rs/hyper
 //! [`dialogue`]: https://github.com/palantir/dialogue
 //! [`zipkin`]: https://docs.rs/zipkin
 //! [`Balanced`]:(NodeSelectionStrategy::Balanced)
@@ -206,23 +191,16 @@ pub use crate::builder::*;
 pub use crate::client::*;
 pub use crate::client_factory::*;
 pub use crate::host_metrics::*;
-pub use crate::request::*;
-pub use crate::response::*;
 pub use crate::user_agent::*;
-use hyper::header::HeaderValue;
-use once_cell::sync::Lazy;
 
 pub mod blocking;
 mod body;
 mod builder;
 mod client;
 mod client_factory;
-mod conjure;
 pub mod errors;
 mod host_metrics;
 pub mod raw;
-mod request;
-mod response;
 mod rng;
 mod service;
 #[cfg(test)]
@@ -237,8 +215,3 @@ pub mod config {
     #[doc(inline)]
     pub use conjure_runtime_config::*;
 }
-
-static APPLICATION_JSON: Lazy<HeaderValue> =
-    Lazy::new(|| HeaderValue::from_static("application/json"));
-static APPLICATION_OCTET_STREAM: Lazy<HeaderValue> =
-    Lazy::new(|| HeaderValue::from_static("application/octet-stream"));

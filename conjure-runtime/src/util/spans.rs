@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{RemoteError, ThrottledError, UnavailableError};
-use crate::service::request::Pattern;
 use conjure_error::Error;
+use conjure_http::client::Endpoint;
 use futures::ready;
 use http::{Request, Response, StatusCode};
 use pin_project::pin_project;
@@ -23,15 +23,15 @@ use std::task::{Context, Poll};
 use zipkin::{Detached, OpenSpan};
 
 pub fn add_request_tags<A, B>(span: &mut OpenSpan<A>, request: &Request<B>) {
+    let endpoint = request
+        .extensions()
+        .get::<Endpoint>()
+        .expect("Endpoint missing from request extensions");
+
+    span.tag("endpointService", endpoint.service());
+    span.tag("endpointName", endpoint.name());
     span.tag("http.method", request.method().as_str());
-    span.tag(
-        "http.url_details.path",
-        request
-            .extensions()
-            .get::<Pattern>()
-            .expect("Pattern missing from request extensions")
-            .pattern,
-    );
+    span.tag("http.url_details.path", endpoint.path());
 }
 
 #[pin_project]

@@ -87,7 +87,7 @@ impl UserAgent {
     }
 }
 
-/// A component of a `UserAgent`.
+/// A component of a [`UserAgent`].
 #[derive(Debug, Clone)]
 pub struct Agent {
     name: String,

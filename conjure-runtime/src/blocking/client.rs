@@ -11,11 +11,22 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::blocking::RequestBuilder;
-use crate::raw::DefaultRawClient;
+use crate::blocking::{body, runtime, BodyWriter, BodyWriterShim, ResponseBody};
+use crate::raw::{DefaultRawClient, RawBody, Service};
 use crate::Builder;
-use http::Method;
+use bytes::Bytes;
+use conjure_error::Error;
+use conjure_http::client::{AsyncBody, AsyncClient, Body};
+use futures::channel::oneshot;
+use futures::executor;
+use http::{Request, Response};
+use pin_project::pin_project;
+use std::error;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio::runtime::Handle;
+use zipkin::TraceContext;
 
 /// A blocking HTTP client to a remote service.
 ///
@@ -42,37 +53,107 @@ impl Client {
     }
 }
 
-impl<T> Client<T> {
-    /// Returns a new request builder.
-    ///
-    /// The `pattern` argument is a template for the request path. The `param` method on the builder is used to fill
-    /// in the parameters in the pattern with dynamic values.
-    pub fn request(&self, method: Method, pattern: &'static str) -> RequestBuilder<'_, T> {
-        RequestBuilder::new(self, method, pattern)
-    }
+impl<T, B> conjure_http::client::Client for Client<T>
+where
+    T: Service<Request<RawBody>, Response = Response<B>> + 'static + Sync + Send,
+    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    T::Future: Send,
+    B: http_body::Body<Data = Bytes> + 'static + Send,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
+    type BodyWriter = BodyWriter;
 
-    /// Returns a new builder for a GET request.
-    pub fn get(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
-        self.request(Method::GET, pattern)
-    }
+    type ResponseBody = ResponseBody<B>;
 
-    /// Returns a new builder for a POST request.
-    pub fn post(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
-        self.request(Method::POST, pattern)
-    }
+    fn send(
+        &self,
+        req: Request<Body<'_, Self::BodyWriter>>,
+    ) -> Result<Response<Self::ResponseBody>, Error> {
+        let mut streamer = None;
+        let req = req.map(|body| match body {
+            Body::Empty => ShimBody::Empty,
+            Body::Fixed(bytes) => ShimBody::Fixed(bytes),
+            Body::Streaming(body_writer) => {
+                let shim = body::shim(body_writer);
+                streamer = Some(shim.1);
+                ShimBody::Streaming(shim.0)
+            }
+        });
 
-    /// Returns a new builder for a PUT request.
-    pub fn put(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
-        self.request(Method::PUT, pattern)
-    }
+        let handle = match &self.handle {
+            Some(handle) => handle,
+            None => runtime().map_err(Error::internal_safe)?.handle(),
+        };
 
-    /// Returns a new builder for a DELETE request.
-    pub fn delete(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
-        self.request(Method::DELETE, pattern)
-    }
+        let (sender, receiver) = oneshot::channel();
 
-    /// Returns a new builder for a PATCH request.
-    pub fn patch(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
-        self.request(Method::PATCH, pattern)
+        handle.spawn(ContextFuture::new({
+            let client = self.client.clone();
+            async move {
+                let (parts, body) = req.into_parts();
+                let mut body_writer;
+                let body = match body {
+                    ShimBody::Empty => AsyncBody::Empty,
+                    ShimBody::Fixed(bytes) => AsyncBody::Fixed(bytes),
+                    ShimBody::Streaming(writer) => {
+                        body_writer = writer;
+                        let writer = Pin::new(&mut body_writer);
+                        AsyncBody::Streaming(writer)
+                    }
+                };
+                let req = Request::from_parts(parts, body);
+
+                let r = client.send(req).await;
+                let _ = sender.send(r);
+            }
+        }));
+
+        if let Some(streamer) = streamer {
+            streamer.stream();
+        }
+
+        match executor::block_on(receiver) {
+            Ok(Ok(r)) => Ok(r.map(|body| ResponseBody::new(body, handle.clone()))),
+            Ok(Err(e)) => Err(e.with_backtrace()),
+            Err(e) => Err(Error::internal_safe(e)),
+        }
+    }
+}
+
+enum ShimBody {
+    Empty,
+    Fixed(Bytes),
+    Streaming(BodyWriterShim),
+}
+
+#[pin_project]
+struct ContextFuture<F> {
+    #[pin]
+    future: F,
+    context: Option<TraceContext>,
+}
+
+impl<F> ContextFuture<F>
+where
+    F: Future,
+{
+    fn new(future: F) -> ContextFuture<F> {
+        ContextFuture {
+            future,
+            context: zipkin::current(),
+        }
+    }
+}
+
+impl<F> Future for ContextFuture<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
+        let this = self.project();
+        let _guard = this.context.map(zipkin::set_current);
+        this.future.poll(cx)
     }
 }

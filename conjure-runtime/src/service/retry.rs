@@ -11,20 +11,20 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::body::ResetTrackingBody;
 use crate::errors::{RemoteError, ThrottledError, UnavailableError};
 use crate::raw::Service;
 use crate::raw::{BodyError, RawBody};
 use crate::rng::ConjureRng;
 use crate::service::map_error::RawClientError;
-use crate::service::request::Pattern;
 use crate::service::Layer;
 use crate::util::spans::{self, HttpSpanFuture};
-use crate::{Body, Builder, Idempotency};
+use crate::{BodyWriter, Builder, Idempotency};
+use async_trait::async_trait;
 use conjure_error::{Error, ErrorKind};
+use conjure_http::client::{AsyncBody, AsyncWriteBody, Endpoint};
 use futures::future::{self, BoxFuture};
-use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
-use http::{HeaderValue, Request, Response, StatusCode};
+use http::request::Parts;
+use http::{Request, Response, StatusCode};
 use rand::Rng;
 use std::error;
 use std::pin::Pin;
@@ -32,24 +32,17 @@ use std::sync::Arc;
 use tokio::time::{self, Duration};
 use witchcraft_log::info;
 
-#[derive(Copy, Clone)]
-pub struct RetryConfig {
-    pub idempotent: bool,
-}
-
 /// A layer which retries failed requests in certain cases.
 ///
 /// All requests that fail with a cause of `ThrottledError` or `UnavailableError` will be retried. Requests failing with
 /// a cause of `RawClientError` or `RemoteError` and a status code of `INTERNAL_SERVER_ERROR` will be retried if the
-/// request is considered idempotent. This is configured by the `Idempotency` enum, and can be overridden on a
-/// request-by-request basis by passing the `RetryConfig` type in the request's extensions map.
+/// request is considered idempotent. This is configured by the `Idempotency` enum.
 ///
 /// The layer retries up to a specified maximum number of times, applying exponential backoff with full jitter in
 /// between each attempt.
 ///
 /// Due to https://github.com/rust-lang/rust/issues/71462, this layer also converts the Conjure `Body` into an
-/// `http_body::Body` and sets the `Content-Length` and `Content-Type` headers based off the `Body` implementation, but
-/// this should be factored out to a separate layer when the compiler bug has been fixed.
+/// `http_body::Body`, but this should be factored out to a separate layer when the compiler bug has been fixed.
 pub struct RetryLayer {
     idempotency: Idempotency,
     max_num_retries: u32,
@@ -86,9 +79,6 @@ impl<S> Layer<S> for RetryLayer {
     }
 }
 
-type RetryBody<'a> = Option<Pin<Box<ResetTrackingBody<dyn Body + 'a + Sync + Send>>>>;
-type RetryBodyRef<'a, 'b> = Option<Pin<&'a mut ResetTrackingBody<dyn Body + 'b + Sync + Send>>>;
-
 pub struct RetryService<S> {
     inner: Arc<S>,
     idempotency: Idempotency,
@@ -97,7 +87,7 @@ pub struct RetryService<S> {
     rng: Arc<ConjureRng>,
 }
 
-impl<'a, S, B> Service<Request<RetryBody<'a>>> for RetryService<S>
+impl<'a, S, B> Service<Request<AsyncBody<'a, BodyWriter>>> for RetryService<S>
 where
     S: Service<Request<RawBody>, Response = Response<B>, Error = Error> + 'a + Sync + Send,
     S::Response: Send,
@@ -108,14 +98,11 @@ where
     type Error = S::Error;
     type Future = BoxFuture<'a, Result<Self::Response, Error>>;
 
-    fn call(&self, req: Request<RetryBody<'a>>) -> Self::Future {
-        let idempotent = match req.extensions().get::<RetryConfig>() {
-            Some(config) => config.idempotent,
-            None => match self.idempotency {
-                Idempotency::Always => true,
-                Idempotency::ByMethod => req.method().is_idempotent(),
-                Idempotency::Never => false,
-            },
+    fn call(&self, req: Request<AsyncBody<'a, BodyWriter>>) -> Self::Future {
+        let idempotent = match self.idempotency {
+            Idempotency::Always => true,
+            Idempotency::ByMethod => req.method().is_idempotent(),
+            Idempotency::Never => false,
         };
 
         let state = State {
@@ -144,45 +131,55 @@ impl<S, B> State<S>
 where
     S: Service<Request<RawBody>, Response = Response<B>, Error = Error>,
 {
-    async fn call(mut self, mut req: Request<RetryBody<'_>>) -> Result<S::Response, Error> {
+    async fn call(mut self, req: Request<AsyncBody<'_, BodyWriter>>) -> Result<S::Response, Error> {
+        let (parts, mut body) = req.into_parts();
+
         loop {
-            let attempt_req = self.clone_request(&mut req);
+            let mut tracked = None;
+            let body: AsyncBody<'_, BodyWriter> = match &mut body {
+                AsyncBody::Empty => AsyncBody::Empty,
+                AsyncBody::Fixed(bytes) => AsyncBody::Fixed(bytes.clone()),
+                AsyncBody::Streaming(writer) => {
+                    let body =
+                        Pin::new(tracked.insert(ResetTrackingBodyWriter::new(writer.as_mut())));
+                    AsyncBody::Streaming(body)
+                }
+            };
+
+            let attempt_req = self.clone_request(&parts, body);
             let (error, retry_after) = match self.send_attempt(attempt_req).await? {
                 AttemptOutcome::Ok(response) => return Ok(response),
                 AttemptOutcome::Retry { error, retry_after } => (error, retry_after),
             };
 
-            self.prepare_for_retry(
-                req.body_mut().as_mut().map(|b| b.as_mut()),
-                error,
-                retry_after,
-            )
-            .await?;
+            self.prepare_for_retry(tracked.as_mut(), error, retry_after)
+                .await?;
         }
     }
 
     // Request.extensions isn't clone, so we need to handle this manually
-    fn clone_request<'a, 'b>(
+    fn clone_request<'a>(
         &self,
-        req: &'a mut Request<RetryBody<'b>>,
-    ) -> Request<RetryBodyRef<'a, 'b>> {
+        parts: &Parts,
+        body: AsyncBody<'a, BodyWriter>,
+    ) -> Request<AsyncBody<'a, BodyWriter>> {
         let mut new_req = Request::new(());
 
-        *new_req.method_mut() = req.method().clone();
-        *new_req.uri_mut() = req.uri().clone();
-        *new_req.headers_mut() = req.headers().clone();
+        *new_req.method_mut() = parts.method.clone();
+        *new_req.uri_mut() = parts.uri.clone();
+        *new_req.headers_mut() = parts.headers.clone();
 
-        if let Some(pattern) = req.extensions().get::<Pattern>() {
-            new_req.extensions_mut().insert(*pattern);
+        if let Some(endpoint) = parts.extensions.get::<Endpoint>() {
+            new_req.extensions_mut().insert(endpoint.clone());
         }
 
         let parts = new_req.into_parts().0;
-        Request::from_parts(parts, req.body_mut().as_mut().map(|r| r.as_mut()))
+        Request::from_parts(parts, body)
     }
 
     async fn send_attempt(
         &mut self,
-        req: Request<RetryBodyRef<'_, '_>>,
+        req: Request<AsyncBody<'_, BodyWriter>>,
     ) -> Result<AttemptOutcome<S::Response>, Error> {
         let mut span = zipkin::next_span()
             .with_name("conjure-runtime: attempt")
@@ -233,16 +230,11 @@ where
     }
 
     // As noted above, this should be a separate layer!
-    async fn send_raw(&mut self, req: Request<RetryBodyRef<'_, '_>>) -> Result<S::Response, Error> {
-        let (mut parts, body) = req.into_parts();
-        if let Some(body) = &body {
-            if let Some(length) = body.content_length() {
-                parts
-                    .headers
-                    .insert(CONTENT_LENGTH, HeaderValue::from(length));
-            }
-            parts.headers.insert(CONTENT_TYPE, body.content_type());
-        }
+    async fn send_raw(
+        &mut self,
+        req: Request<AsyncBody<'_, BodyWriter>>,
+    ) -> Result<S::Response, Error> {
+        let (parts, body) = req.into_parts();
         let (body, writer) = RawBody::new(body);
         let req = Request::from_parts(parts, body);
 
@@ -280,7 +272,7 @@ where
 
     async fn prepare_for_retry(
         &mut self,
-        body: RetryBodyRef<'_, '_>,
+        body: Option<&mut ResetTrackingBodyWriter<'_>>,
         error: Error,
         retry_after: Option<Duration>,
     ) -> Result<(), Error> {
@@ -291,8 +283,8 @@ where
         }
 
         if let Some(body) = body {
-            let needs_reset = body.needs_reset();
-            if needs_reset && !body.reset().await {
+            let needs_reset = body.needs_reset;
+            if needs_reset && !body.body_writer.as_mut().reset().await {
                 info!("unable to reset body when retrying request");
                 return Err(error);
             }
@@ -323,6 +315,38 @@ where
     }
 }
 
+struct ResetTrackingBodyWriter<'a> {
+    needs_reset: bool,
+    body_writer: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>,
+}
+
+impl<'a> ResetTrackingBodyWriter<'a> {
+    fn new(
+        body_writer: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>,
+    ) -> ResetTrackingBodyWriter<'a> {
+        ResetTrackingBodyWriter {
+            needs_reset: false,
+            body_writer,
+        }
+    }
+}
+
+#[async_trait]
+impl AsyncWriteBody<BodyWriter> for ResetTrackingBodyWriter<'_> {
+    async fn write_body(mut self: Pin<&mut Self>, w: Pin<&mut BodyWriter>) -> Result<(), Error> {
+        self.needs_reset = true;
+        self.body_writer.as_mut().write_body(w).await
+    }
+
+    async fn reset(mut self: Pin<&mut Self>) -> bool {
+        let ok = self.body_writer.as_mut().reset().await;
+        if ok {
+            self.needs_reset = false;
+        }
+        ok
+    }
+}
+
 enum AttemptOutcome<R> {
     Ok(R),
     Retry {
@@ -336,20 +360,23 @@ mod test {
     use super::*;
     use crate::raw::RawBodyInner;
     use crate::service;
-    use crate::{BodyWriter, BytesBody};
+    use crate::BodyWriter;
     use async_trait::async_trait;
+    use bytes::Bytes;
     use futures::pin_mut;
+    use http::Method;
     use http_body::Body as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::AsyncWriteExt;
+
+    fn endpoint() -> Endpoint {
+        Endpoint::new("service", None, "name", "path")
+    }
 
     #[tokio::test]
     async fn no_body() {
         let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
-                assert_eq!(req.headers().get(CONTENT_LENGTH), None);
-                assert_eq!(req.headers().get(CONTENT_TYPE), None);
-
                 match req.body().inner {
                     RawBodyInner::Empty => {}
                     _ => panic!("expected empty body"),
@@ -360,8 +387,8 @@ mod test {
         ));
 
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .body(None)
+            .extension(endpoint())
+            .body(AsyncBody::Empty)
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -372,12 +399,6 @@ mod test {
 
         let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
-                assert_eq!(
-                    req.headers().get(CONTENT_LENGTH).unwrap(),
-                    &*body.len().to_string()
-                );
-                assert_eq!(req.headers().get(CONTENT_TYPE).unwrap(), "text/plain");
-
                 match &req.body().inner {
                     RawBodyInner::Single(chunk) => assert_eq!(chunk, body),
                     _ => panic!("expected single chunk body"),
@@ -388,11 +409,8 @@ mod test {
         ));
 
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .body(Some(Box::pin(ResetTrackingBody::new(BytesBody::new(
-                body,
-                HeaderValue::from_static("text/plain"),
-            ))) as _))
+            .extension(endpoint())
+            .body(AsyncBody::Fixed(Bytes::from(body)))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -400,16 +418,11 @@ mod test {
     struct StreamedBody;
 
     #[async_trait]
-    impl Body for StreamedBody {
-        fn content_length(&self) -> Option<u64> {
-            None
-        }
-
-        fn content_type(&self) -> HeaderValue {
-            HeaderValue::from_static("text/plain")
-        }
-
-        async fn write(self: Pin<&mut Self>, mut w: Pin<&mut BodyWriter>) -> Result<(), Error> {
+    impl AsyncWriteBody<BodyWriter> for StreamedBody {
+        async fn write_body(
+            self: Pin<&mut Self>,
+            mut w: Pin<&mut BodyWriter>,
+        ) -> Result<(), Error> {
             w.write_all(b"hello ").await.unwrap();
             w.flush().await.unwrap();
             w.write_all(b"world").await.unwrap();
@@ -425,9 +438,6 @@ mod test {
     async fn streamed_body() {
         let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
-                assert_eq!(req.headers().get(CONTENT_LENGTH), None);
-                assert_eq!(req.headers().get(CONTENT_TYPE).unwrap(), "text/plain");
-
                 match req.body().inner {
                     RawBodyInner::Stream { .. } => {}
                     _ => panic!("expected streaming body"),
@@ -439,9 +449,11 @@ mod test {
             },
         ));
 
+        let body = StreamedBody;
+        pin_mut!(body);
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .body(Some(Box::pin(ResetTrackingBody::new(StreamedBody)) as _))
+            .extension(endpoint())
+            .body(AsyncBody::Streaming(body))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -449,16 +461,11 @@ mod test {
     struct StreamedInfiniteBody;
 
     #[async_trait]
-    impl Body for StreamedInfiniteBody {
-        fn content_length(&self) -> Option<u64> {
-            None
-        }
-
-        fn content_type(&self) -> HeaderValue {
-            HeaderValue::from_static("text/plain")
-        }
-
-        async fn write(self: Pin<&mut Self>, mut w: Pin<&mut BodyWriter>) -> Result<(), Error> {
+    impl AsyncWriteBody<BodyWriter> for StreamedInfiniteBody {
+        async fn write_body(
+            self: Pin<&mut Self>,
+            mut w: Pin<&mut BodyWriter>,
+        ) -> Result<(), Error> {
             loop {
                 w.write_all(b"hello").await.map_err(Error::internal_safe)?;
                 w.flush().await.map_err(Error::internal_safe)?;
@@ -482,11 +489,11 @@ mod test {
             },
         ));
 
+        let body = StreamedInfiniteBody;
+        pin_mut!(body);
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .body(Some(
-                Box::pin(ResetTrackingBody::new(StreamedInfiniteBody)) as _
-            ))
+            .extension(endpoint())
+            .body(AsyncBody::Streaming(body))
             .unwrap();
         let err = service.call(request).await.err().unwrap();
 
@@ -496,16 +503,11 @@ mod test {
     struct StreamedErrorBody;
 
     #[async_trait]
-    impl Body for StreamedErrorBody {
-        fn content_length(&self) -> Option<u64> {
-            None
-        }
-
-        fn content_type(&self) -> HeaderValue {
-            HeaderValue::from_static("text/plain")
-        }
-
-        async fn write(self: Pin<&mut Self>, mut w: Pin<&mut BodyWriter>) -> Result<(), Error> {
+    impl AsyncWriteBody<BodyWriter> for StreamedErrorBody {
+        async fn write_body(
+            self: Pin<&mut Self>,
+            mut w: Pin<&mut BodyWriter>,
+        ) -> Result<(), Error> {
             w.write_all(b"hello ").await.unwrap();
             w.flush().await.unwrap();
             Err(Error::internal_safe("uh oh"))
@@ -528,11 +530,11 @@ mod test {
             },
         ));
 
+        let body = StreamedErrorBody;
+        pin_mut!(body);
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .body(Some(
-                Box::pin(ResetTrackingBody::new(StreamedErrorBody)) as _
-            ))
+            .extension(endpoint())
+            .body(AsyncBody::Streaming(body))
             .unwrap();
         let err = service.call(request).await.err().unwrap();
 
@@ -554,16 +556,11 @@ mod test {
     }
 
     #[async_trait]
-    impl Body for RetryingBody {
-        fn content_length(&self) -> Option<u64> {
-            None
-        }
-
-        fn content_type(&self) -> HeaderValue {
-            HeaderValue::from_static("text/plain")
-        }
-
-        async fn write(mut self: Pin<&mut Self>, mut w: Pin<&mut BodyWriter>) -> Result<(), Error> {
+    impl AsyncWriteBody<BodyWriter> for RetryingBody {
+        async fn write_body(
+            mut self: Pin<&mut Self>,
+            mut w: Pin<&mut BodyWriter>,
+        ) -> Result<(), Error> {
             assert!(!self.needs_reset);
             self.needs_reset = true;
 
@@ -608,12 +605,11 @@ mod test {
             }
         }));
 
+        let body = RetryingBody::new(1);
+        pin_mut!(body);
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .extension(RetryConfig { idempotent: true })
-            .body(Some(
-                Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
-            ))
+            .extension(endpoint())
+            .body(AsyncBody::Streaming(body))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -642,12 +638,11 @@ mod test {
             }
         }));
 
+        let body = RetryingBody::new(1);
+        pin_mut!(body);
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .extension(RetryConfig { idempotent: true })
-            .body(Some(
-                Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
-            ))
+            .extension(endpoint())
+            .body(AsyncBody::Streaming(body))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -676,11 +671,11 @@ mod test {
             }
         }));
 
+        let body = RetryingBody::new(1);
+        pin_mut!(body);
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .body(Some(
-                Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
-            ))
+            .extension(endpoint())
+            .body(AsyncBody::Streaming(body))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -709,11 +704,11 @@ mod test {
             }
         }));
 
+        let body = RetryingBody::new(0);
+        pin_mut!(body);
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .body(Some(
-                Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
-            ))
+            .extension(endpoint())
+            .body(AsyncBody::Streaming(body))
             .unwrap();
         service.call(request).await.err().unwrap();
     }
@@ -742,11 +737,11 @@ mod test {
             }
         }));
 
+        let body = RetryingBody::new(0);
+        pin_mut!(body);
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .body(Some(
-                Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
-            ))
+            .extension(endpoint())
+            .body(AsyncBody::Streaming(body))
             .unwrap();
         service.call(request).await.err().unwrap();
     }
@@ -773,9 +768,9 @@ mod test {
         }));
 
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .extension(RetryConfig { idempotent: false })
-            .body(None)
+            .method(Method::POST)
+            .extension(endpoint())
+            .body(AsyncBody::Empty)
             .unwrap();
         let err = service.call(request).await.err().unwrap();
         assert_eq!(err.cause().to_string(), "blammo");
@@ -803,9 +798,9 @@ mod test {
         }));
 
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .extension(RetryConfig { idempotent: false })
-            .body(None)
+            .method(Method::POST)
+            .extension(endpoint())
+            .body(AsyncBody::Empty)
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -836,11 +831,11 @@ mod test {
             }
         }));
 
+        let body = RetryingBody::new(0);
+        pin_mut!(body);
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .body(Some(
-                Box::pin(ResetTrackingBody::new(RetryingBody::new(0))) as _
-            ))
+            .extension(endpoint())
+            .body(AsyncBody::Streaming(body))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -868,11 +863,11 @@ mod test {
             }
         }));
 
+        let body = RetryingBody::new(1);
+        pin_mut!(body);
         let request = Request::builder()
-            .extension(Pattern { pattern: "/test" })
-            .body(Some(
-                Box::pin(ResetTrackingBody::new(RetryingBody::new(1))) as _
-            ))
+            .extension(endpoint())
+            .body(AsyncBody::Streaming(body))
             .unwrap();
         service.call(request).await.err().unwrap();
     }

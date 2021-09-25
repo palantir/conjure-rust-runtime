@@ -319,7 +319,7 @@ mod test {
     use super::*;
     use crate::service;
     use crate::service::node::Node;
-    use crate::service::request::Pattern;
+    use conjure_http::client::Endpoint;
     use futures::channel::mpsc;
     use futures::future;
     use futures::{SinkExt, StreamExt};
@@ -330,7 +330,7 @@ mod test {
 
     fn request() -> Request<()> {
         Request::builder()
-            .extension(Pattern { pattern: "/foo" })
+            .extension(Endpoint::new("service", None, "endpoint", "/foo"))
             .body(())
             .unwrap()
     }

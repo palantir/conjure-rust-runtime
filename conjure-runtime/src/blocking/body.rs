@@ -11,101 +11,219 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::blocking::BodyWriter;
-use bytes::Bytes;
+use crate::raw::DefaultRawBody;
+use async_trait::async_trait;
+use bytes::{Bytes, BytesMut};
 use conjure_error::Error;
-use hyper::header::HeaderValue;
+use conjure_http::client::{AsyncWriteBody, WriteBody};
+use futures::channel::{mpsc, oneshot};
+use futures::{executor, SinkExt, Stream, StreamExt};
+use http_body::Body;
+use std::error;
+use std::io::{self, BufRead, Read, Write};
+use std::pin::Pin;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+use tokio::runtime::Handle;
 
-/// A synchronous request body.
-pub trait Body {
-    /// Returns the length of the body if known.
-    fn content_length(&self) -> Option<u64>;
-
-    /// Returns the content type of the body.
-    fn content_type(&self) -> HeaderValue;
-
-    /// Returns the entire body if it is fully buffered.
-    ///
-    /// `write` will only be called if this method returns `None`.
-    fn full_body(&self) -> Option<Bytes> {
-        None
-    }
-
-    /// Writes the body data out.
-    fn write(&mut self, w: &mut BodyWriter) -> Result<(), Error>;
-
-    /// Resets the body to its start.
-    ///
-    /// Returns `true` iff the body was successfully reset.
-    ///
-    /// Requests with non-resettable bodies cannot be retried.
-    fn reset(&mut self) -> bool;
+pub(crate) fn shim(
+    body_writer: &mut dyn WriteBody<BodyWriter>,
+) -> (BodyWriterShim, BodyStreamer<'_>) {
+    let (sender, receiver) = mpsc::channel(1);
+    (
+        BodyWriterShim { sender },
+        BodyStreamer {
+            body_writer,
+            receiver,
+        },
+    )
 }
 
-impl<T> Body for Box<T>
-where
-    T: ?Sized + Body,
-{
-    fn content_length(&self) -> Option<u64> {
-        (**self).content_length()
-    }
-
-    fn content_type(&self) -> HeaderValue {
-        (**self).content_type()
-    }
-
-    fn full_body(&self) -> Option<Bytes> {
-        (**self).full_body()
-    }
-
-    fn write(&mut self, w: &mut BodyWriter) -> Result<(), Error> {
-        (**self).write(w)
-    }
-
-    fn reset(&mut self) -> bool {
-        (**self).reset()
-    }
+enum ShimRequest {
+    Write(mpsc::Sender<BodyPart>),
+    Reset(oneshot::Sender<bool>),
 }
 
-/// A simple type implementing `Body` which consists of a byte buffer and a content type.
-///
-/// It reports its content length and is resettable.
-pub struct BytesBody {
-    body: Bytes,
-    content_type: HeaderValue,
+pub(crate) struct BodyWriterShim {
+    sender: mpsc::Sender<ShimRequest>,
 }
 
-impl BytesBody {
-    /// Creates a new `BytesBody`.
-    pub fn new<T>(body: T, content_type: HeaderValue) -> BytesBody
+#[async_trait]
+impl AsyncWriteBody<crate::BodyWriter> for BodyWriterShim {
+    async fn write_body(
+        mut self: Pin<&mut Self>,
+        mut w: Pin<&mut crate::BodyWriter>,
+    ) -> Result<(), Error> {
+        let (sender, mut receiver) = mpsc::channel(1);
+        self.sender
+            .send(ShimRequest::Write(sender))
+            .await
+            .map_err(Error::internal_safe)?;
+
+        loop {
+            match receiver.next().await {
+                Some(BodyPart::Data(bytes)) => w
+                    .as_mut()
+                    .write_bytes(bytes)
+                    .await
+                    .map_err(Error::internal_safe)?,
+                Some(BodyPart::Error(error)) => return Err(error),
+                Some(BodyPart::Done) => return Ok(()),
+                None => return Err(Error::internal_safe("body write aborted")),
+            }
+        }
+    }
+
+    async fn reset(mut self: Pin<&mut Self>) -> bool
     where
-        T: Into<Bytes>,
+        crate::BodyWriter: 'async_trait,
     {
-        BytesBody {
-            body: body.into(),
-            content_type,
+        let (sender, receiver) = oneshot::channel();
+        if self.sender.send(ShimRequest::Reset(sender)).await.is_err() {
+            return false;
+        }
+
+        receiver.await.unwrap_or(false)
+    }
+}
+
+pub(crate) struct BodyStreamer<'a> {
+    body_writer: &'a mut dyn WriteBody<BodyWriter>,
+    receiver: mpsc::Receiver<ShimRequest>,
+}
+
+impl BodyStreamer<'_> {
+    pub fn stream(mut self) {
+        while let Some(request) = executor::block_on(self.receiver.next()) {
+            match request {
+                ShimRequest::Write(sender) => {
+                    let mut writer = BodyWriter::new(sender);
+                    let _ = match self.body_writer.write_body(&mut writer) {
+                        Ok(()) => writer.finish(),
+                        Err(e) => writer.send(BodyPart::Error(e)),
+                    };
+                }
+                ShimRequest::Reset(sender) => {
+                    let reset = self.body_writer.reset();
+                    let _ = sender.send(reset);
+                }
+            }
         }
     }
 }
 
-impl Body for BytesBody {
-    fn content_length(&self) -> Option<u64> {
-        Some(self.body.len() as u64)
+enum BodyPart {
+    Data(Bytes),
+    Error(Error),
+    Done,
+}
+
+/// The blocking writer passed to [`WriteBody::write_body`].
+pub struct BodyWriter {
+    sender: mpsc::Sender<BodyPart>,
+    buf: BytesMut,
+}
+
+impl BodyWriter {
+    fn new(sender: mpsc::Sender<BodyPart>) -> BodyWriter {
+        BodyWriter {
+            sender,
+            buf: BytesMut::new(),
+        }
     }
 
-    fn content_type(&self) -> HeaderValue {
-        self.content_type.clone()
+    fn finish(mut self) -> io::Result<()> {
+        self.flush()?;
+        self.send(BodyPart::Done)
     }
 
-    fn full_body(&self) -> Option<Bytes> {
-        Some(self.body.clone())
+    fn send(&mut self, message: BodyPart) -> io::Result<()> {
+        executor::block_on(self.sender.send(message))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
-    fn write(&mut self, _: &mut BodyWriter) -> Result<(), Error> {
-        unreachable!()
+    /// Writes a block of body bytes.
+    ///
+    /// Compared to the [`Write`] implementation, this method avoids some copies if the caller already has the body in
+    /// [`Bytes`] objects.
+    pub fn write_bytes(&mut self, buf: Bytes) -> io::Result<()> {
+        self.flush()?;
+        self.send(BodyPart::Data(buf))
+    }
+}
+
+impl Write for BodyWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.buf.extend_from_slice(buf);
+        if buf.len() > 4906 {
+            self.flush()?;
+        }
+
+        Ok(buf.len())
     }
 
-    fn reset(&mut self) -> bool {
-        true
+    fn flush(&mut self) -> io::Result<()> {
+        if self.buf.is_empty() {
+            return Ok(());
+        }
+
+        let bytes = self.buf.split().freeze();
+        self.send(BodyPart::Data(bytes))
+    }
+}
+
+/// A blocking streaming response body.
+pub struct ResponseBody<B = DefaultRawBody> {
+    inner: Pin<Box<crate::ResponseBody<B>>>,
+    handle: Handle,
+}
+
+impl<B> ResponseBody<B> {
+    pub(crate) fn new(inner: crate::ResponseBody<B>, handle: Handle) -> Self {
+        ResponseBody {
+            inner: Box::pin(inner),
+            handle,
+        }
+    }
+}
+
+impl<B> Iterator for ResponseBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
+    type Item = Result<Bytes, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.handle.block_on(self.inner.as_mut().next())
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<B> Read for ResponseBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.handle.block_on(self.inner.as_mut().read(buf))
+    }
+}
+
+impl<B> BufRead for ResponseBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
+{
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        // lifetime shenanigans mean we can't return the value of fill_buf directly
+        self.handle.block_on(self.inner.as_mut().fill_buf())?;
+        Ok(self.inner.buffer())
+    }
+
+    fn consume(&mut self, amt: usize) {
+        self.inner.as_mut().consume(amt)
     }
 }

@@ -11,9 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::{Body, BodyWriter};
+use crate::BodyWriter;
 use bytes::Bytes;
 use conjure_error::Error;
+use conjure_http::client::{AsyncBody, AsyncWriteBody};
 use futures::channel::{mpsc, oneshot};
 use futures::{pin_mut, Stream};
 use hyper::HeaderMap;
@@ -60,32 +61,23 @@ pub struct RawBody {
 }
 
 impl RawBody {
-    pub(crate) fn new<T>(body: Option<Pin<&mut T>>) -> (RawBody, Writer<'_, T>)
-    where
-        T: ?Sized + Body,
-    {
-        let body = match body {
-            Some(body) => body,
-            None => {
-                return (
-                    RawBody {
-                        inner: RawBodyInner::Empty,
-                        _p: PhantomPinned,
-                    },
-                    Writer::Nop,
-                )
-            }
-        };
-
-        match body.full_body() {
-            Some(body) => (
+    pub(crate) fn new(body: AsyncBody<'_, BodyWriter>) -> (RawBody, Writer<'_>) {
+        match body {
+            AsyncBody::Empty => (
+                RawBody {
+                    inner: RawBodyInner::Empty,
+                    _p: PhantomPinned,
+                },
+                Writer::Nop,
+            ),
+            AsyncBody::Fixed(body) => (
                 RawBody {
                     inner: RawBodyInner::Single(body),
                     _p: PhantomPinned,
                 },
                 Writer::Nop,
             ),
-            None => {
+            AsyncBody::Streaming(body) => {
                 let (body_sender, body_receiver) = mpsc::channel(1);
                 let (polled_sender, polled_receiver) = oneshot::channel();
                 (
@@ -156,22 +148,16 @@ impl http_body::Body for RawBody {
     }
 }
 
-pub(crate) enum Writer<'a, T>
-where
-    T: ?Sized,
-{
+pub(crate) enum Writer<'a> {
     Nop,
     Streaming {
         polled: oneshot::Receiver<()>,
-        body: Pin<&'a mut T>,
+        body: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>,
         sender: mpsc::Sender<BodyPart>,
     },
 }
 
-impl<'a, T> Writer<'a, T>
-where
-    T: ?Sized + Body,
-{
+impl<'a> Writer<'a> {
     pub async fn write(self) -> Result<(), Error> {
         match self {
             Writer::Nop => Ok(()),
@@ -188,7 +174,7 @@ where
 
                 let writer = BodyWriter::new(sender);
                 pin_mut!(writer);
-                body.write(writer.as_mut()).await?;
+                body.write_body(writer.as_mut()).await?;
                 writer.finish().await.map_err(Error::internal_safe)?;
 
                 Ok(())

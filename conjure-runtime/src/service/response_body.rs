@@ -11,11 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::client::BaseBody;
 use crate::raw::Service;
 use crate::service::Layer;
-use crate::Response;
+use crate::{BaseBody, ResponseBody};
 use bytes::Bytes;
+use http::Response;
 use http_body::Body;
 use pin_project::pin_project;
 use std::error;
@@ -23,55 +23,58 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-/// A layer which converts a hyper `Response` to a conjure-runtime `Response`.
-pub struct ResponseLayer;
+/// A layer which wraps the response body in the conjure-runtime public `ResponseBody` type.
+pub struct ResponseBodyLayer;
 
-impl<S> Layer<S> for ResponseLayer {
-    type Service = ResponseService<S>;
+impl<S> Layer<S> for ResponseBodyLayer {
+    type Service = ResponseBodyService<S>;
 
-    fn layer(self, inner: S) -> ResponseService<S> {
-        ResponseService { inner }
+    fn layer(self, inner: S) -> Self::Service {
+        ResponseBodyService { inner }
     }
 }
 
-pub struct ResponseService<S> {
+pub struct ResponseBodyService<S> {
     inner: S,
 }
 
-impl<S, R, B> Service<R> for ResponseService<S>
+impl<S, R, B> Service<R> for ResponseBodyService<S>
 where
-    S: Service<R, Response = http::Response<BaseBody<B>>>,
+    S: Service<R, Response = Response<BaseBody<B>>>,
     B: Body<Data = Bytes>,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
-    type Response = Response<B>;
+    type Response = Response<ResponseBody<B>>;
+
     type Error = S::Error;
-    type Future = ResponseFuture<S::Future>;
+
+    type Future = ResponseBodyFuture<S::Future>;
 
     fn call(&self, req: R) -> Self::Future {
-        ResponseFuture {
+        ResponseBodyFuture {
             future: self.inner.call(req),
         }
     }
 }
 
 #[pin_project]
-pub struct ResponseFuture<F> {
+pub struct ResponseBodyFuture<F> {
     #[pin]
     future: F,
 }
 
-impl<F, B, E> Future for ResponseFuture<F>
+impl<F, B, E> Future for ResponseBodyFuture<F>
 where
-    F: Future<Output = Result<http::Response<BaseBody<B>>, E>>,
+    F: Future<Output = Result<Response<BaseBody<B>>, E>>,
     B: Body<Data = Bytes>,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
-    type Output = Result<Response<B>, E>;
+    type Output = Result<Response<ResponseBody<B>>, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-
-        this.future.poll(cx).map_ok(Response::new)
+        self.project()
+            .future
+            .poll(cx)
+            .map_ok(|res| res.map(ResponseBody::new))
     }
 }

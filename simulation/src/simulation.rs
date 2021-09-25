@@ -18,6 +18,7 @@ use crate::server::{
     SimulationRawClientBuilder,
 };
 use async_stream::stream;
+use conjure_http::client::AsyncClient;
 use conjure_runtime::errors::{RemoteError, ThrottledError, UnavailableError};
 use conjure_runtime::{Agent, Builder, Client, ClientQos, NodeSelectionStrategy, UserAgent};
 use futures::stream::{Stream, StreamExt};
@@ -296,10 +297,7 @@ struct RequestRunner {
 impl RequestRunner {
     async fn run(&self, client: Client<Arc<SimulationRawClient>>, endpoint: Endpoint) {
         self.num_sent.set(self.num_sent.get() + 1);
-        let response = client
-            .request(endpoint.method().clone(), endpoint.path())
-            .send()
-            .await;
+        let response = client.send(endpoint.request()).await;
         self.num_received.set(self.num_received.get() + 1);
 
         let status = match response {

@@ -12,3 +12,10 @@ debug = 1
 
 [profile.bench]
 debug = 1
+
+[patch.crates-io]
+conjure-http = { path = "../conjure-rust/conjure-http" }
+conjure-error = { path = "../conjure-rust/conjure-error" }
+conjure-object = { path = "../conjure-rust/conjure-object" }
+conjure-serde = { path = "../conjure-rust/conjure-serde" }
+conjure-codegen = { path = "../conjure-rust/conjure-codegen" }

@@ -41,7 +41,7 @@ pub struct ClientFactory {
 }
 
 impl ClientFactory {
-    /// Creates a new client factory based off of a refreshable `ServicesConfig`.
+    /// Creates a new client factory based off of a refreshable [`ServicesConfig`].
     pub fn new(config: Refreshable<ServicesConfig, Error>) -> ClientFactory {
         ClientFactory {
             config: Arc::new(config),

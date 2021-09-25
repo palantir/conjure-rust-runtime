@@ -16,10 +16,10 @@ use crate::service::node::limiter::{InFlightReducer, LimitReducer, Limiter, Perm
 pub use crate::service::node::metrics::NodeMetricsLayer;
 pub use crate::service::node::selector::NodeSelectorLayer;
 pub use crate::service::node::uri::NodeUriLayer;
-use crate::service::request::Pattern;
 use crate::util::weak_reducing_gauge::WeakReducingGauge;
 use crate::{Builder, ClientQos, HostMetrics};
 use conjure_error::Error;
+use conjure_http::client::Endpoint;
 use futures::ready;
 use http::{Request, Response};
 use pin_project::pin_project;
@@ -100,16 +100,16 @@ impl LimitedNode {
     }
 
     pub fn acquire<B>(&self, request: &Request<B>) -> Acquire {
-        let pattern = request
+        let endpoint = request
             .extensions()
-            .get::<Pattern>()
-            .expect("Pattern extension missing from request");
+            .get::<Endpoint>()
+            .expect("Endpoint extension missing from request");
 
         Acquire {
             acquire: self
                 .limiter
                 .as_ref()
-                .map(|l| l.acquire(request.method(), pattern.pattern)),
+                .map(|l| l.acquire(request.method(), endpoint.path())),
             node: self.node.clone(),
         }
     }
