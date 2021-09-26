@@ -146,7 +146,7 @@ where
         }
 
         match executor::block_on(receiver) {
-            Ok(Ok(r)) => Ok(Response::new(r)),
+            Ok(Ok(r)) => Ok(Response::new(r, handle.clone())),
             Ok(Err(e)) => Err(e.with_backtrace()),
             Err(e) => Err(Error::internal_safe(e)),
         }
