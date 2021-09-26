@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::blocking::{body, runtime, BodyWriter, BodyWriterShim, ResponseBody};
+use crate::blocking::{body, BodyWriter, BodyWriterShim, ResponseBody};
 use crate::raw::{DefaultRawClient, RawBody, Service};
 use crate::Builder;
 use bytes::Bytes;
@@ -20,13 +20,26 @@ use conjure_http::client::{AsyncBody, AsyncClient, Body};
 use futures::channel::oneshot;
 use futures::executor;
 use http::{Request, Response};
+use once_cell::sync::OnceCell;
 use pin_project::pin_project;
-use std::error;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::runtime::Handle;
+use std::{error, io};
+use tokio::runtime::{self, Handle, Runtime};
 use zipkin::TraceContext;
+
+fn default_handle() -> io::Result<&'static Handle> {
+    static RUNTIME: OnceCell<Runtime> = OnceCell::new();
+    RUNTIME
+        .get_or_try_init(|| {
+            runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("conjure-runtime")
+                .build()
+        })
+        .map(Runtime::handle)
+}
 
 /// A blocking HTTP client to a remote service.
 ///
@@ -82,7 +95,7 @@ where
 
         let handle = match &self.handle {
             Some(handle) => handle,
-            None => runtime().map_err(Error::internal_safe)?.handle(),
+            None => default_handle().map_err(Error::internal_safe)?,
         };
 
         let (sender, receiver) = oneshot::channel();

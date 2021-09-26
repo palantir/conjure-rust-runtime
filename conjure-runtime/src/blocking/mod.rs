@@ -18,19 +18,6 @@
 
 pub use crate::blocking::body::*;
 pub use crate::blocking::client::*;
-use once_cell::sync::OnceCell;
-use std::io;
-use tokio::runtime::{self, Runtime};
 
 mod body;
 mod client;
-
-fn runtime() -> io::Result<&'static Runtime> {
-    static RUNTIME: OnceCell<Runtime> = OnceCell::new();
-    RUNTIME.get_or_try_init(|| {
-        runtime::Builder::new_multi_thread()
-            .enable_all()
-            .thread_name("conjure-runtime")
-            .build()
-    })
-}
