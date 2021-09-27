@@ -1,0 +1,6 @@
+type: break
+break:
+  description: Updated to the new Conjure API. The old manual request builder interface
+    has been removed.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/106
