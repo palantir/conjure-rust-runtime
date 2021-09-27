@@ -1,0 +1,6 @@
+type: fix
+fix:
+  description: Fixed usage of the configured runtime `Handle` in blocking response
+    bodies.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/105
