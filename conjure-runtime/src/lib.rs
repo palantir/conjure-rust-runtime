@@ -94,6 +94,9 @@
 //! # Ok(()) }
 //! ```
 //!
+//! The client can be used to communicate with non-Conjure APIs by directly using the low level
+//! [`Client`](conjure_http::client::Client) and [`AsyncClient`](conjure_http::client::AsyncClient) traits.
+//!
 //! # Behavior
 //!
 //! `conjure_runtime` wraps the [`hyper`] HTTP library with opinionated behavior designed to more effectively
@@ -105,10 +108,10 @@
 //! Servers should use the standard Conjure error format to propagate application-specific errors to callers. Non-QoS
 //! (see below) errors received from the server are treated as fatal. By default, `conjure_runtime` will return a
 //! [`conjure_error::Error`] that will generate a generic 500 Internal Server Error response. Its cause will be a
-//! [`RemoteError`](errors::RemoteError) object that contains the serialized Conjure error information sent by the
-//! server. The [`Builder::service_error()`] and [`ClientFactory::service_error()`] methods can be used to change that
-//! behavior to instead transparently propagate the error received from the server. Rather than producing a generic 500
-//! response, the returned [`conjure_error::Error`] will produce the same response the client received from the server.
+//! [`RemoteError`] object that contains the serialized Conjure error information sent by the server. The
+//! [`Builder::service_error()`] and [`ClientFactory::service_error()`] methods can be used to change that behavior to
+//! instead transparently propagate the error received from the server. Rather than producing a generic 500 response,
+//! the returned [`conjure_error::Error`] will produce the same response the client received from the server.
 //!
 //! ## Call Tracing
 //!
@@ -154,8 +157,8 @@
 //!
 //! ## Metrics
 //!
-//! Clients record metrics to both a standard [`MetricRegistry`](witchcraft_metrics::MetricRegistry) and a
-//! `conjure_runtime`-specific [`HostMetricsRegistry`].
+//! Clients record metrics to both a standard [`MetricRegistry`] and a `conjure_runtime`-specific
+//! [`HostMetricsRegistry`].
 //!
 //! ### Standard Metrics
 //!
@@ -180,9 +183,11 @@
 //!
 //! [Conjure]: https://github.com/palantir/conjure
 //! [`hyper`]: https://docs.rs/hyper
+//! [`RemoteError`]: errors::RemoteError
 //! [`dialogue`]: https://github.com/palantir/dialogue
 //! [`zipkin`]: https://docs.rs/zipkin
-//! [`Balanced`]:(NodeSelectionStrategy::Balanced)
+//! [`Balanced`]: NodeSelectionStrategy::Balanced
+//! [`MetricRegistry`]: witchcraft_metrics::MetricRegistry
 #![doc(html_root_url = "https://docs.rs/conjure-runtime/0.3")]
 #![warn(missing_docs, clippy::all)]
 
