@@ -15,6 +15,7 @@ use crate::blocking::Body;
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use conjure_error::Error;
+use conjure_http::client::AsyncWriteBody;
 use futures::channel::{mpsc, oneshot};
 use futures::{executor, SinkExt, StreamExt};
 use hyper::header::HeaderValue;
@@ -60,26 +61,8 @@ impl BodyShim {
 }
 
 #[async_trait]
-impl crate::Body for BodyShim {
-    fn content_length(&self) -> Option<u64> {
-        match &self.kind {
-            BodyKind::Fixed(bytes) => Some(bytes.len() as u64),
-            BodyKind::Streaming { content_length, .. } => *content_length,
-        }
-    }
-
-    fn content_type(&self) -> HeaderValue {
-        self.content_type.clone()
-    }
-
-    fn full_body(&self) -> Option<Bytes> {
-        match &self.kind {
-            BodyKind::Fixed(bytes) => Some(bytes.clone()),
-            BodyKind::Streaming { .. } => None,
-        }
-    }
-
-    async fn write(
+impl AsyncWriteBody<crate::BodyWriter> for BodyShim {
+    async fn write_body(
         mut self: Pin<&mut Self>,
         mut w: Pin<&mut crate::BodyWriter>,
     ) -> Result<(), Error> {

@@ -27,7 +27,7 @@ use witchcraft_metrics::MetricRegistry;
 
 const MESH_PREFIX: &str = "mesh-";
 
-/// A builder to construct `Client`s and `blocking::Client`s.
+/// A builder to construct [`Client`]s and [`blocking::Client`]s.
 pub struct Builder<T = DefaultRawClientBuilder> {
     service: Option<String>,
     user_agent: Option<UserAgent>,

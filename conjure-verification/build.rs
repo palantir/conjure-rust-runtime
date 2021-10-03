@@ -91,6 +91,7 @@ fn generate_tests(out_dir: &Path, test_cases: &Path) {
 
     let module = quote! {
         use crate::{BlockingTest, AsyncTest};
+        use conjure_http::client::{Service, AsyncService};
         use conjure_runtime::blocking;
         use conjure_runtime::Client;
         use conjure_verification_api::server::{

@@ -18,20 +18,21 @@ use crate::service::map_error::MapErrorLayer;
 use crate::service::metrics::MetricsLayer;
 use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
 use crate::service::proxy::{ProxyConfig, ProxyLayer};
-use crate::service::request::RequestLayer;
-use crate::service::response::ResponseLayer;
+use crate::service::response_body::ResponseBodyLayer;
 use crate::service::retry::RetryLayer;
 use crate::service::root_span::RootSpanLayer;
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
 use crate::service::wait_for_spans::{WaitForSpansBody, WaitForSpansLayer};
 use crate::service::{Identity, Layer, ServiceBuilder, Stack};
-use crate::{Agent, Builder, Request, RequestBuilder, Response};
+use crate::{BodyWriter, Builder, ResponseBody};
 use arc_swap::ArcSwap;
+use async_trait::async_trait;
 use bytes::Bytes;
 use conjure_error::Error;
+use conjure_http::client::{AsyncBody, AsyncClient};
 use conjure_runtime_config::ServiceConfig;
-use http::Method;
+use http::{Request, Response};
 use refreshable::Subscription;
 use std::error;
 use std::sync::Arc;
@@ -42,9 +43,8 @@ macro_rules! layers {
 }
 
 type BaseLayer = layers!(
+    ResponseBodyLayer,
     MetricsLayer,
-    RequestLayer,
-    ResponseLayer,
     RootSpanLayer,
     RetryLayer,
     HttpErrorLayer,
@@ -74,20 +74,13 @@ impl<T> ClientState<T> {
     {
         let service = builder.get_service().expect("service not set");
 
-        let mut user_agent = builder
-            .get_user_agent()
-            .cloned()
-            .expect("user agent not set");
-        user_agent.push_agent(Agent::new("conjure-runtime", env!("CARGO_PKG_VERSION")));
-
         let client = builder.get_raw_client_builder().build_raw_client(builder)?;
 
         let proxy = ProxyConfig::from_config(builder.get_proxy())?;
 
         let service = ServiceBuilder::new()
+            .layer(ResponseBodyLayer)
             .layer(MetricsLayer::new(service, builder))
-            .layer(RequestLayer)
-            .layer(ResponseLayer)
             .layer(RootSpanLayer)
             .layer(RetryLayer::new(builder))
             .layer(HttpErrorLayer::new(builder))
@@ -97,7 +90,7 @@ impl<T> ClientState<T> {
             .layer(NodeMetricsLayer)
             .layer(ProxyLayer::new(&proxy))
             .layer(TracePropagationLayer)
-            .layer(UserAgentLayer::new(&user_agent))
+            .layer(UserAgentLayer::new(builder))
             .layer(GzipLayer)
             .layer(MapErrorLayer)
             .service(client);
@@ -141,42 +134,10 @@ impl<T> Client<T> {
             subscription: subscription.map(Arc::new),
         }
     }
-
-    /// Returns a new request builder.
-    ///
-    /// The `pattern` argument is a template for the request path. The `param` method on the builder is used to fill
-    /// in the parameters in the pattern with dynamic values.
-    pub fn request(&self, method: Method, pattern: &'static str) -> RequestBuilder<'_, T> {
-        RequestBuilder::new(self, method, pattern)
-    }
-
-    /// Returns a new builder for a GET request.
-    pub fn get(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
-        self.request(Method::GET, pattern)
-    }
-
-    /// Returns a new builder for a POST request.
-    pub fn post(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
-        self.request(Method::POST, pattern)
-    }
-
-    /// Returns a new builder for a PUT request.
-    pub fn put(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
-        self.request(Method::PUT, pattern)
-    }
-
-    /// Returns a new builder for a DELETE request.
-    pub fn delete(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
-        self.request(Method::DELETE, pattern)
-    }
-
-    /// Returns a new builder for a PATCH request.
-    pub fn patch(&self, pattern: &'static str) -> RequestBuilder<'_, T> {
-        self.request(Method::PATCH, pattern)
-    }
 }
 
-impl<T, B> Client<T>
+#[async_trait]
+impl<T, B> AsyncClient for Client<T>
 where
     T: Service<http::Request<RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
@@ -184,7 +145,14 @@ where
     B: http_body::Body<Data = Bytes> + 'static + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
-    pub(crate) async fn send(&self, request: Request<'_>) -> Result<Response<B>, Error> {
+    type BodyWriter = BodyWriter;
+
+    type ResponseBody = ResponseBody<B>;
+
+    async fn send(
+        &self,
+        request: Request<AsyncBody<'_, Self::BodyWriter>>,
+    ) -> Result<Response<Self::ResponseBody>, Error> {
         // split into 2 statements to avoid holding onto the state while awaiting the future
         let future = self.state.load().service.call(request);
         future.await

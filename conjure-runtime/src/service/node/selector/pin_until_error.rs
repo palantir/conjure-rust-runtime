@@ -284,7 +284,7 @@ mod test {
     use super::*;
     use crate::service;
     use crate::service::node::Node;
-    use crate::service::request::Pattern;
+    use conjure_http::client::Endpoint;
     use http::StatusCode;
     use tokio::time;
 
@@ -344,7 +344,7 @@ mod test {
 
     fn request() -> Request<()> {
         Request::builder()
-            .extension(Pattern { pattern: "foo" })
+            .extension(Endpoint::new("service", None, "endpoint", "/foo"))
             .body(())
             .unwrap()
     }

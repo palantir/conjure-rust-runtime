@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::RemoteError;
-use crate::{
-    blocking, Agent, Body, BodyWriter, Builder, Client, ServerQos, ServiceError, UserAgent,
-};
+use crate::{blocking, Agent, BodyWriter, Builder, Client, ServerQos, ServiceError, UserAgent};
 use async_trait::async_trait;
 use bytes::Bytes;
 use conjure_error::NotFound;
 use conjure_error::{Error, ErrorKind};
+use conjure_http::client::{AsyncBody, AsyncClient, AsyncWriteBody, Body, Client as _, Endpoint};
 use conjure_runtime_config::ServiceConfig;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures::{join, pin_mut};
+use http::{request, Method};
 use hyper::body;
-use hyper::header::{HeaderValue, ACCEPT_ENCODING, CONTENT_ENCODING};
+use hyper::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
 use hyper::http::header::RETRY_AFTER;
 use hyper::server::conn::Http;
 use hyper::service::Service;
@@ -175,6 +175,10 @@ where
     }
 }
 
+fn req() -> request::Builder {
+    Request::builder().extension(Endpoint::new("service", None, "endpoint", "/"))
+}
+
 #[tokio::test]
 async fn retry_after_503() {
     let mut first = true;
@@ -196,7 +200,12 @@ async fn retry_after_503() {
             }
         },
         |builder| async move {
-            let response = builder.build().unwrap().get("/").send().await.unwrap();
+            let response = builder
+                .build()
+                .unwrap()
+                .send(req().body(AsyncBody::Empty).unwrap())
+                .await
+                .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
         },
     )
@@ -219,8 +228,7 @@ async fn no_retry_after_404() {
             let error = builder
                 .build()
                 .unwrap()
-                .get("/")
-                .send()
+                .send(req().body(AsyncBody::Empty).unwrap())
                 .await
                 .err()
                 .unwrap();
@@ -260,7 +268,12 @@ async fn retry_after_overrides() {
         },
         |builder| async move {
             let time = Instant::now();
-            let response = builder.build().unwrap().get("/").send().await.unwrap();
+            let response = builder
+                .build()
+                .unwrap()
+                .send(req().body(AsyncBody::Empty).unwrap())
+                .await
+                .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
             assert!(time.elapsed() >= Duration::from_secs(1));
         },
@@ -273,16 +286,11 @@ async fn connect_error_doesnt_reset_body() {
     struct TestBody(bool);
 
     #[async_trait]
-    impl Body for TestBody {
-        fn content_length(&self) -> Option<u64> {
-            None
-        }
-
-        fn content_type(&self) -> HeaderValue {
-            HeaderValue::from_static("text/plain")
-        }
-
-        async fn write(mut self: Pin<&mut Self>, mut w: Pin<&mut BodyWriter>) -> Result<(), Error> {
+    impl AsyncWriteBody<BodyWriter> for TestBody {
+        async fn write_body(
+            mut self: Pin<&mut Self>,
+            mut w: Pin<&mut BodyWriter>,
+        ) -> Result<(), Error> {
             assert!(!self.0);
             self.0 = true;
             w.write_all(b"hello world").await.unwrap();
@@ -310,12 +318,17 @@ async fn connect_error_doesnt_reset_body() {
     };
 
     let client = client(STOCK_CONFIG, port, |builder| async move {
+        let body = TestBody(false);
+        pin_mut!(body);
         let response = builder
             .build()
             .unwrap()
-            .put("/")
-            .body(TestBody(false))
-            .send()
+            .send(
+                req()
+                    .method(Method::PUT)
+                    .body(AsyncBody::Streaming(body))
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -340,8 +353,7 @@ async fn propagate_429() {
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
                 .unwrap()
-                .get("/")
-                .send()
+                .send(req().body(AsyncBody::Empty).unwrap())
                 .await
                 .err()
                 .unwrap();
@@ -371,8 +383,7 @@ async fn propagate_429_with_retry_after() {
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
                 .unwrap()
-                .get("/")
-                .send()
+                .send(req().body(AsyncBody::Empty).unwrap())
                 .await
                 .err()
                 .unwrap();
@@ -401,8 +412,7 @@ async fn propagate_503() {
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
                 .unwrap()
-                .get("/")
-                .send()
+                .send(req().body(AsyncBody::Empty).unwrap())
                 .await
                 .err()
                 .unwrap();
@@ -437,8 +447,7 @@ async fn dont_propagate_protocol_errors() {
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
                 .unwrap()
-                .get("/")
-                .send()
+                .send(req().body(AsyncBody::Empty).unwrap())
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
@@ -470,7 +479,12 @@ failed-url-cooldown: 1h
             }
         },
         |builder| async move {
-            let response = builder.build().unwrap().get("/").send().await.unwrap();
+            let response = builder
+                .build()
+                .unwrap()
+                .send(req().body(AsyncBody::Empty).unwrap())
+                .await
+                .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
         },
     )
@@ -485,14 +499,19 @@ async fn body_write_ends_after_error() {
         |_| async { Ok(Response::new(hyper::Body::empty())) },
         |builder| {
             async move {
+                let body = InfiniteBody;
+                pin_mut!(body);
                 // This could succeed or fail depending on if we get an EPIPE or the response. The important thing is
                 // that we don't deadlock.
                 let _ = builder
                     .build()
                     .unwrap()
-                    .post("/")
-                    .body(InfiniteBody)
-                    .send()
+                    .send(
+                        req()
+                            .method(Method::POST)
+                            .body(AsyncBody::Streaming(body))
+                            .unwrap(),
+                    )
                     .await;
             }
         },
@@ -505,16 +524,8 @@ async fn streaming_write_error_reporting() {
     struct TestBody;
 
     #[async_trait]
-    impl Body for TestBody {
-        fn content_length(&self) -> Option<u64> {
-            None
-        }
-
-        fn content_type(&self) -> HeaderValue {
-            HeaderValue::from_static("test/plain")
-        }
-
-        async fn write(self: Pin<&mut Self>, _: Pin<&mut BodyWriter>) -> Result<(), Error> {
+    impl AsyncWriteBody<BodyWriter> for TestBody {
+        async fn write_body(self: Pin<&mut Self>, _: Pin<&mut BodyWriter>) -> Result<(), Error> {
             Err(Error::internal_safe("foobar"))
         }
 
@@ -531,12 +542,17 @@ async fn streaming_write_error_reporting() {
             Ok(Response::new(hyper::Body::empty()))
         },
         |builder| async move {
+            let body = TestBody;
+            pin_mut!(body);
             let error = builder
                 .build()
                 .unwrap()
-                .post("/")
-                .body(TestBody)
-                .send()
+                .send(
+                    req()
+                        .method(Method::POST)
+                        .body(AsyncBody::Streaming(body))
+                        .unwrap(),
+                )
                 .await
                 .err()
                 .unwrap();
@@ -565,8 +581,7 @@ async fn service_error_propagation() {
                 .service_error(ServiceError::PropagateToCaller)
                 .build()
                 .unwrap()
-                .get("/")
-                .send()
+                .send(req().body(AsyncBody::Empty).unwrap())
                 .await
                 .err()
                 .unwrap();
@@ -598,8 +613,7 @@ async fn gzip_body() {
             let body = builder
                 .build()
                 .unwrap()
-                .get("/")
-                .send()
+                .send(req().body(AsyncBody::Empty).unwrap())
                 .await
                 .unwrap()
                 .into_body();
@@ -631,7 +645,12 @@ async fn zipkin_propagation() {
                 .span_id(SpanId::from(*b"abcdefgh"))
                 .build();
             zipkin::join_trace(context).detach().bind(async move {
-                builder.build().unwrap().get("/").send().await.unwrap();
+                builder
+                    .build()
+                    .unwrap()
+                    .send(req().body(AsyncBody::Empty).unwrap())
+                    .await
+                    .unwrap();
             })
         },
     )
@@ -657,7 +676,7 @@ fn blocking_zipkin_propagation() {
                 .span_id(SpanId::from(*b"abcdefgh"))
                 .build();
             let _guard = zipkin::set_current(context);
-            client.get("/").send().unwrap();
+            client.send(req().body(Body::Empty).unwrap()).unwrap();
         },
     );
 }
@@ -679,8 +698,7 @@ async fn read_past_eof() {
             let body = builder
                 .build()
                 .unwrap()
-                .get("/")
-                .send()
+                .send(req().body(AsyncBody::Empty).unwrap())
                 .await
                 .unwrap()
                 .into_body();
@@ -697,16 +715,8 @@ async fn read_past_eof() {
 struct InfiniteBody;
 
 #[async_trait]
-impl Body for InfiniteBody {
-    fn content_length(&self) -> Option<u64> {
-        None
-    }
-
-    fn content_type(&self) -> HeaderValue {
-        HeaderValue::from_static("test/plain")
-    }
-
-    async fn write(self: Pin<&mut Self>, mut w: Pin<&mut BodyWriter>) -> Result<(), Error> {
+impl AsyncWriteBody<BodyWriter> for InfiniteBody {
+    async fn write_body(self: Pin<&mut Self>, mut w: Pin<&mut BodyWriter>) -> Result<(), Error> {
         let buf = [b'a'; 1024];
         loop {
             w.write_all(&buf).await.map_err(Error::internal_safe)?;
@@ -729,7 +739,12 @@ security:
         1,
         |_| async move { Ok(Response::new(hyper::Body::empty())) },
         |builder| async move {
-            builder.build().unwrap().get("/").send().await.unwrap();
+            builder
+                .build()
+                .unwrap()
+                .send(req().body(AsyncBody::Empty).unwrap())
+                .await
+                .unwrap();
         },
     )
     .await

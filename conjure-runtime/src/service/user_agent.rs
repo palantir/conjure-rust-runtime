@@ -13,22 +13,26 @@
 // limitations under the License.
 use crate::raw::Service;
 use crate::service::Layer;
-use crate::UserAgent;
+use crate::{Agent, Builder, UserAgent};
+use conjure_http::client::Endpoint;
 use http::header::USER_AGENT;
 use http::{HeaderValue, Request};
 use std::convert::TryFrom;
 
 /// A layer which injects a `User-Agent` header into requests.
+///
+/// It extends the configured user agent with agents identifying the service defining the endpoint and conjure-runtime.
 pub struct UserAgentLayer {
-    user_agent: HeaderValue,
+    user_agent: UserAgent,
 }
 
 impl UserAgentLayer {
-    pub fn new(user_agent: &UserAgent) -> UserAgentLayer {
-        let user_agent = user_agent.to_string();
-
+    pub fn new<B>(builder: &Builder<B>) -> UserAgentLayer {
         UserAgentLayer {
-            user_agent: HeaderValue::try_from(user_agent).unwrap(),
+            user_agent: builder
+                .get_user_agent()
+                .cloned()
+                .expect("user agent not set"),
         }
     }
 }
@@ -46,7 +50,7 @@ impl<S> Layer<S> for UserAgentLayer {
 
 pub struct UserAgentService<S> {
     inner: S,
-    user_agent: HeaderValue,
+    user_agent: UserAgent,
 }
 
 impl<S, B> Service<Request<B>> for UserAgentService<S>
@@ -58,8 +62,26 @@ where
     type Future = S::Future;
 
     fn call(&self, mut req: Request<B>) -> Self::Future {
+        let endpoint = req
+            .extensions()
+            .get::<Endpoint>()
+            .expect("Endpoint missing from request extensions");
+
+        let mut user_agent = self.user_agent.clone();
+        user_agent.push_agent(Agent::new(
+            endpoint.service(),
+            endpoint.version().unwrap_or("0.0.0"),
+        ));
+
+        user_agent.push_agent(Agent::new(
+            "conjure-rust-runtime",
+            env!("CARGO_PKG_VERSION"),
+        ));
+
+        let user_agent = user_agent.to_string();
+
         req.headers_mut()
-            .insert(USER_AGENT, self.user_agent.clone());
+            .insert(USER_AGENT, HeaderValue::try_from(user_agent).unwrap());
 
         self.inner.call(req)
     }
@@ -74,14 +96,30 @@ mod test {
 
     #[tokio::test]
     async fn basic() {
-        let user_agent = UserAgent::new(Agent::new("foobar", "1.0.0"));
-        let layer = UserAgentLayer::new(&user_agent);
+        let layer = UserAgentLayer::new(
+            Builder::new().user_agent(UserAgent::new(Agent::new("foobar", "1.0.0"))),
+        );
         let service = layer.layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
-        let out = service.call(Request::new(())).await.unwrap();
+        let request = Request::builder()
+            .extension(Endpoint::new(
+                "serviceName",
+                Some("2.3.4"),
+                "endpoint",
+                "/path",
+            ))
+            .body(())
+            .unwrap();
+        let out = service.call(request).await.unwrap();
 
         let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static("foobar/1.0.0"));
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static(concat!(
+                "foobar/1.0.0 serviceName/2.3.4 conjure-rust-runtime/",
+                env!("CARGO_PKG_VERSION")
+            )),
+        );
         assert_eq!(*out.headers(), headers);
     }
 }

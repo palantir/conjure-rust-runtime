@@ -13,23 +13,26 @@
 // limitations under the License.
 //! "Raw" HTTP client APIs.
 //!
-//! The `conjure_runtime::Client` wraps a raw HTTP client, which is used to handle the actual HTTP communication. A
+//! The [`conjure_runtime::Client`] wraps a raw HTTP client, which is used to handle the actual HTTP communication. A
 //! default raw client is provided, but this can be overridden if desired.
 //!
 //! # Behavior
 //!
-//! The raw client interacts directly with the `http` crate's `Request` and `Response` types, with a body type
-//! implementing the `http_body::Body` trait rather than the `conjure_runtime::Body` trait. The request's URI is
-//! provided in absolute-form, and all headers have already been set in the header map. The HTTP response should be
+//! The raw client interacts directly with the [`http::Request`] and [`http::Response`] types, with a body type
+//! implementing the [`http_body::Body`] trait rather than using the [`AsyncBody`] type. The request's URI is provided in
+//! absolute-form, and all headers have already been set in the header map. The HTTP response should be
 //! returned directly, without any interpretation of the status code, handling of redirects, etc.
 //!
 //! A raw client is expected to implement `Service<Request<RawBody>, Response = Response<B>>`, where `B` implements the
-//! `http_body::Body` trait. The error type returned by the client must implement `Into<Box<dyn Error + Sync + Send>>`
+//! [`http_body::Body`] trait. The error type returned by the client must implement `Into<Box<dyn Error + Sync + Send>>`
 //! and be safe-loggable.
 //!
-//! Some configuration set in the `conjure_runtime::Builder` affects the raw client, including the connect timeout,
-//! security configuration, and proxy configuration. The default raw client respects these settings, but other
-//! implementations will need to handle them on their own.
+//! Some configuration set in the [`Builder`] affects the raw client, including the connect timeout, security
+//! configuration, and proxy configuration. The default raw client respects these settings, but other implementations
+//! will need to handle them on their own.
+//!
+//! [`conjure_runtime::Client`]: crate::Client
+//! [`AsyncBody`]: conjure_http::client::AsyncBody
 pub use crate::raw::body::*;
 pub use crate::raw::default::*;
 use crate::Builder;
