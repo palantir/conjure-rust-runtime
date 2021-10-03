@@ -19,7 +19,7 @@
 //! # Behavior
 //!
 //! The raw client interacts directly with the [`http::Request`] and [`http::Response`] types, with a body type
-//! implementing the [`http_body::Body`] trait rather using the [`AsyncBody`] type. The request's URI is provided in
+//! implementing the [`http_body::Body`] trait rather than using the [`AsyncBody`] type. The request's URI is provided in
 //! absolute-form, and all headers have already been set in the header map. The HTTP response should be
 //! returned directly, without any interpretation of the status code, handling of redirects, etc.
 //!
