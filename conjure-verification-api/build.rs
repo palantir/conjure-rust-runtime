@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use flate2::read::GzDecoder;
-use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 use tar::Archive;
@@ -82,43 +81,6 @@ fn generate_api(out_dir: &Path) {
     let service_api = download("verification-server-api", "", "conjure.json");
     fs::write(&conjure_path, &service_api).unwrap();
     println!("cargo:api={}", conjure_path.display());
-
-    let mut service_api = serde_json::from_slice::<Value>(&service_api).unwrap();
-
-    // We can't even represent sets/maps with double keys, so we need to filter them out of the API before generation
-    service_api["types"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|type_| {
-            if type_["type"] == "alias" {
-                !["MapDoubleAliasExample", "SetDoubleAliasExample"]
-                    .contains(&type_["alias"]["typeName"]["name"].as_str().unwrap())
-            } else if type_["type"] == "object" {
-                !["SetDoubleExample"]
-                    .contains(&type_["object"]["typeName"]["name"].as_str().unwrap())
-            } else {
-                true
-            }
-        });
-
-    for service in service_api["services"].as_array_mut().unwrap() {
-        service["endpoints"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|endpoint| {
-                ![
-                    "receiveSetDoubleExample",
-                    "receiveSetDoubleAliasExample",
-                    "receiveMapDoubleAliasExample",
-                ]
-                .contains(&endpoint["endpointName"].as_str().unwrap())
-            });
-    }
-
-    let service_api = serde_json::to_vec(&service_api).unwrap();
-
-    let conjure_path = out_dir.join("verification-server-api-trimmed.conjure.json");
-    fs::write(&conjure_path, &service_api).unwrap();
 
     conjure_codegen::Config::new()
         .strip_prefix(Some("com.palantir.conjure.verification".to_string()))
