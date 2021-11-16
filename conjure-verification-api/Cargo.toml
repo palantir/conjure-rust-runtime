@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Steven Fackler <sfackler@palantir.com>"]
 edition = "2018"
 publish = false
-links = "conjure-verification"                       # a hack to pass info upstream to conjure-verification's build script
+links = "conjure-verification" # a hack to pass info upstream to conjure-verification's build script
 
 [build-dependencies]
 attohttpc = "0.18"
