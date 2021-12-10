@@ -15,7 +15,7 @@ use conjure_serde::json;
 use conjure_verification_api::server::{
     EndpointName, IgnoredTestCases, PositiveAndNegativeTestCases, TestCases,
 };
-use heck::SnakeCase;
+use heck::ToSnakeCase;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use std::collections::{BTreeMap, BTreeSet};
