@@ -10,7 +10,7 @@ doctest = false
 harness = false
 
 [build-dependencies]
-conjure-serde = "0.7"
+conjure-serde = "1"
 serde_yaml = "0.8"
 heck = "0.4"
 syn = "1.0"
@@ -23,11 +23,11 @@ conjure-verification-api = { path = "../conjure-verification-api" }
 conjure-verification-api = { path = "../conjure-verification-api" }
 
 [dev-dependencies]
-conjure-object = "0.7"
-conjure-error = "0.7"
-conjure-http = "0.7"
-conjure-serde = "0.7"
+conjure-object = "1"
+conjure-error = "1"
+conjure-http = "1"
+conjure-serde = "1"
 tokio = { version = "1.0", features = ["full"] }
-witchcraft-metrics = "0.2"
+witchcraft-metrics = "1"
 
 conjure-runtime = { path = "../conjure-runtime" }

@@ -1,6 +1,6 @@
 [package]
 name = "conjure-runtime"
-version = "1.2.0"
+version = "2.0.0"
 authors = ["Steven Fackler <sfackler@palantir.com>"]
 edition = "2018"
 license = "Apache-2.0"
@@ -10,14 +10,17 @@ readme = "../README.md"
 
 [dependencies]
 arc-swap = "1.0"
-async-compression = { version = "0.3", default-features = false, features = ["gzip", "tokio"] }
+async-compression = { version = "0.3", default-features = false, features = [
+    "gzip",
+    "tokio",
+] }
 async-trait = "0.1"
 base64 = "0.13"
 bytes = "1.0"
-conjure-error = "0.7"
-conjure-http = "0.7"
-conjure-object = "0.7"
-conjure-serde = "0.7"
+conjure-error = "1"
+conjure-http = "1"
+conjure-object = "1"
+conjure-serde = "1"
 futures = "0.3"
 http = "0.2"
 http-body = "0.4"
@@ -35,8 +38,8 @@ refreshable = "1.0"
 regex = "1.0"
 serde = "1.0"
 serde-value = "0.7"
-witchcraft-log = "0.3"
-witchcraft-metrics = "0.2"
+witchcraft-log = "1"
+witchcraft-metrics = "1"
 tokio = { version = "1.0", features = ["io-util", "rt-multi-thread", "time"] }
 tokio-io-timeout = "1.0"
 tokio-util = { version = "0.7", features = ["codec"] }
@@ -45,7 +48,7 @@ tower-service = "0.3"
 url = "2.0"
 zipkin = "0.4"
 
-conjure-runtime-config = { version = "1.2.0", path = "../conjure-runtime-config" }
+conjure-runtime-config = { version = "2.0.0", path = "../conjure-runtime-config" }
 
 [dev-dependencies]
 flate2 = "1.0"
@@ -59,4 +62,4 @@ tower-util = "0.3"
 
 
 # for doc examples
-conjure-codegen = { version = "0.7", features = ["example-types"] }
+conjure-codegen = { version = "1", features = ["example-types"] }

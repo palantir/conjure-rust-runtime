@@ -12,10 +12,3 @@ debug = 1
 
 [profile.bench]
 debug = 1
-
-[patch.crates-io]
-conjure-http = { git = "https://github.com/palantir/conjure-rust" }
-conjure-error = { git = "https://github.com/palantir/conjure-rust" }
-conjure-object = { git = "https://github.com/palantir/conjure-rust" }
-conjure-serde = { git = "https://github.com/palantir/conjure-rust" }
-conjure-codegen = { git = "https://github.com/palantir/conjure-rust" }
