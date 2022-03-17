@@ -28,6 +28,6 @@ conjure-error = "0.7"
 conjure-http = "0.7"
 conjure-serde = "0.7"
 tokio = { version = "1.0", features = ["full"] }
-witchcraft-metrics = "0.2"
+witchcraft-metrics = "1.0"
 
 conjure-runtime = { path = "../conjure-runtime" }
