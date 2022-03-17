@@ -35,7 +35,7 @@ refreshable = "1.0"
 regex = "1.0"
 serde = "1.0"
 serde-value = "0.7"
-witchcraft-log = "0.3"
+witchcraft-log = "1.0"
 witchcraft-metrics = "0.2"
 tokio = { version = "1.0", features = ["io-util", "rt-multi-thread", "time"] }
 tokio-io-timeout = "1.0"
