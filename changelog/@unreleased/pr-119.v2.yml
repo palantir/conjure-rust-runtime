@@ -1,0 +1,6 @@
+type: feature
+feature:
+  description: '`ClientFactory`''s `client` and `blocking_client` methods now automatically
+    wrap the client in a Conjure service.'
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/119
