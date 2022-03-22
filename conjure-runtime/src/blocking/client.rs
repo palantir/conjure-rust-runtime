@@ -16,7 +16,7 @@ use crate::raw::{DefaultRawClient, RawBody, Service};
 use crate::Builder;
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{AsyncBody, AsyncClient, Body};
+use conjure_http::client::{self, AsyncBody, AsyncClient, Body};
 use futures::channel::oneshot;
 use futures::executor;
 use http::{Request, Response};
@@ -63,6 +63,12 @@ impl Client {
     /// Returns a new `Builder` for clients.
     pub fn builder() -> Builder {
         Builder::new()
+    }
+}
+
+impl<T> client::Service<Client<T>> for Client<T> {
+    fn new(client: Client<T>) -> Self {
+        client
     }
 }
 
