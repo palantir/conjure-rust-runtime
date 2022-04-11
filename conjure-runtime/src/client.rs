@@ -30,7 +30,7 @@ use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{AsyncBody, AsyncClient};
+use conjure_http::client::{AsyncBody, AsyncClient, AsyncService};
 use conjure_runtime_config::ServiceConfig;
 use http::{Request, Response};
 use refreshable::Subscription;
@@ -133,6 +133,12 @@ impl<T> Client<T> {
             state,
             subscription: subscription.map(Arc::new),
         }
+    }
+}
+
+impl<T> AsyncService<Client<T>> for Client<T> {
+    fn new(client: Client<T>) -> Self {
+        client
     }
 }
 

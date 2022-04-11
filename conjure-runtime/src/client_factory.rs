@@ -20,6 +20,7 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use conjure_error::Error;
+use conjure_http::client::{AsyncService, Service};
 use refreshable::Refreshable;
 use std::sync::Arc;
 use tokio::runtime::Handle;
@@ -188,10 +189,20 @@ impl ClientFactory {
     /// If no configuration is present for the specified service in the `ServicesConfig`, the client will
     /// immediately return an error for all requests.
     ///
+    /// The method can return any type implementing the `conjure-http` [`AsyncService`] trait. This notably includes all
+    /// Conjure-generated client types as well as the `conjure-runtime` [`Client`] itself.
+    ///
     /// # Panics
     ///
     /// Panics if `user_agent` is not set.
-    pub fn client(&self, service: &str) -> Result<Client, Error> {
+    pub fn client<T>(&self, service: &str) -> Result<T, Error>
+    where
+        T: AsyncService<Client>,
+    {
+        self.client_inner(service).map(T::new)
+    }
+
+    fn client_inner(&self, service: &str) -> Result<Client, Error> {
         let service_config = self.config.map({
             let service = service.to_string();
             move |c| c.merged_service(&service).unwrap_or_default()
@@ -255,11 +266,21 @@ impl ClientFactory {
     /// If no configuration is present for the specified service in the `ServicesConfig`, the client will
     /// immediately return an error for all requests.
     ///
+    /// The method can return any type implementing the `conjure-http` [`Service`] trait. This notably includes all
+    /// Conjure-generated client types as well as the `conjure-runtime` [`blocking::Client`] itself.
+    ///
     /// # Panics
     ///
     /// Panics if `user_agent` is not set.
-    pub fn blocking_client(&self, service: &str) -> Result<blocking::Client, Error> {
-        self.client(service).map(|client| blocking::Client {
+    pub fn blocking_client<T>(&self, service: &str) -> Result<T, Error>
+    where
+        T: Service<blocking::Client>,
+    {
+        self.blocking_client_inner(service).map(T::new)
+    }
+
+    fn blocking_client_inner(&self, service: &str) -> Result<blocking::Client, Error> {
+        self.client_inner(service).map(|client| blocking::Client {
             client,
             handle: self.blocking_handle.clone(),
         })
