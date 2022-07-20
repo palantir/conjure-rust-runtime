@@ -62,4 +62,4 @@ tower-util = "0.3"
 
 
 # for doc examples
-conjure-codegen = { version = "1", features = ["example-types"] }
+conjure-codegen = { version = "2", features = ["example-types"] }
