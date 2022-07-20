@@ -14,5 +14,5 @@ tar = "0.4"
 
 [dependencies]
 conjure-error = "1"
-conjure-http = "1"
+conjure-http = "2"
 conjure-object = "1"

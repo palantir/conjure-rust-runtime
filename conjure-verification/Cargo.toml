@@ -25,7 +25,7 @@ conjure-verification-api = { path = "../conjure-verification-api" }
 [dev-dependencies]
 conjure-object = "1"
 conjure-error = "1"
-conjure-http = "1"
+conjure-http = "2"
 conjure-serde = "1"
 tokio = { version = "1.0", features = ["full"] }
 witchcraft-metrics = "1"
