@@ -1,6 +1,6 @@
 [package]
 name = "simulation"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["Steven Fackler <sfackler@gmail.com>"]
 edition = "2018"
 
@@ -11,8 +11,8 @@ harness = false
 [dev-dependencies]
 async-stream = "0.3"
 bytes = "1.0"
-conjure-error = "1"
-conjure-http = "1"
+conjure-error = "2"
+conjure-http = "2"
 futures = "0.3"
 http = "0.2"
 http-body = "0.4"
