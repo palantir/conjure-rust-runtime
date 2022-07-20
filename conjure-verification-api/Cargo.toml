@@ -13,6 +13,6 @@ flate2 = "1.0"
 tar = "0.4"
 
 [dependencies]
-conjure-error = "1"
+conjure-error = "2"
 conjure-http = "1"
 conjure-object = "1"

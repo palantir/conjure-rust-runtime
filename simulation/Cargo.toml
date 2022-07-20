@@ -11,7 +11,7 @@ harness = false
 [dev-dependencies]
 async-stream = "0.3"
 bytes = "1.0"
-conjure-error = "1"
+conjure-error = "2"
 conjure-http = "1"
 futures = "0.3"
 http = "0.2"
