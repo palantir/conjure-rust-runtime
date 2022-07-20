@@ -188,7 +188,6 @@
 //! [`zipkin`]: https://docs.rs/zipkin
 //! [`Balanced`]: NodeSelectionStrategy::Balanced
 //! [`MetricRegistry`]: witchcraft_metrics::MetricRegistry
-#![doc(html_root_url = "https://docs.rs/conjure-runtime/0.3")]
 #![warn(missing_docs, clippy::all)]
 
 pub use crate::body::*;
