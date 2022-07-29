@@ -26,9 +26,12 @@ http = "0.2"
 http-body = "0.4"
 http-zipkin = "0.3"
 hyper = { version = "0.14", features = ["http1", "http2", "client", "tcp"] }
-hyper-openssl = "0.9"
+hyper-rustls = { version = "0.23", default-features = false, features = [
+    "http1",
+    "http2",
+    "tls12",
+] }
 once_cell = "1.0"
-openssl = "0.10"
 parking_lot = "0.12"
 percent-encoding = "2.1"
 pin-project = "1.0"
@@ -36,6 +39,8 @@ rand = "0.8"
 rand_pcg = "0.3"
 refreshable = "1.0"
 regex = "1.0"
+rustls = "0.20"
+rustls-pemfile = "1"
 serde = "1.0"
 serde-value = "0.7"
 witchcraft-log = "2"
@@ -46,6 +51,7 @@ tokio-util = { version = "0.7", features = ["codec"] }
 tower-layer = "0.3"
 tower-service = "0.3"
 url = "2.0"
+webpki-roots = "0.22"
 zipkin = "0.4"
 
 conjure-runtime-config = { version = "3.0.0", path = "../conjure-runtime-config" }
@@ -54,6 +60,7 @@ conjure-runtime-config = { version = "3.0.0", path = "../conjure-runtime-config"
 flate2 = "1.0"
 futures-test = "0.3"
 hyper = { version = "0.14", features = ["server"] }
+openssl = "0.10"
 serde_yaml = "0.8"
 tokio-openssl = "0.6"
 tokio-test = "0.4"

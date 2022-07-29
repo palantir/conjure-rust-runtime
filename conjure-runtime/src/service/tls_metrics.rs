@@ -14,7 +14,7 @@
 use crate::Builder;
 use futures::ready;
 use http::Uri;
-use hyper_openssl::MaybeHttpsStream;
+use hyper_rustls::MaybeHttpsStream;
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
@@ -101,16 +101,20 @@ where
         let stream = ready!(this.future.poll(cx))?;
 
         if let (Some(metrics), MaybeHttpsStream::Https(s)) = (&this.shared.metrics, &stream) {
-            let cipher = s.ssl().current_cipher().expect("session is active");
+            let protocol = s.get_ref().1.protocol_version().expect("session is active");
+
+            let cipher = s
+                .get_ref()
+                .1
+                .negotiated_cipher_suite()
+                .expect("session is active");
+
             metrics
                 .meter(
                     MetricId::new("tls.handshake")
                         .with_tag("context", this.shared.service.clone())
-                        .with_tag("protocol", s.ssl().version_str())
-                        .with_tag(
-                            "cipher",
-                            cipher.standard_name().unwrap_or_else(|| cipher.name()),
-                        ),
+                        .with_tag("protocol", protocol.as_str().unwrap_or("unknown"))
+                        .with_tag("cipher", cipher.suite().as_str().unwrap_or("unknown")),
                 )
                 .mark(1);
         }
