@@ -54,7 +54,7 @@ conjure-runtime-config = { version = "3.0.0", path = "../conjure-runtime-config"
 flate2 = "1.0"
 futures-test = "0.3"
 hyper = { version = "0.14", features = ["server"] }
-serde_yaml = "0.8"
+serde_yaml = "0.9"
 tokio-openssl = "0.6"
 tokio-test = "0.4"
 tokio = { version = "1.0", features = ["full"] }
