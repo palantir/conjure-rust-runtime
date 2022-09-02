@@ -132,13 +132,8 @@ impl ServicesConfig {
 }
 
 /// A builder type for `ServiceConfig`.
+#[derive(Default)]
 pub struct ServicesConfigBuilder(ServicesConfig);
-
-impl Default for ServicesConfigBuilder {
-    fn default() -> ServicesConfigBuilder {
-        ServicesConfigBuilder(ServicesConfig::default())
-    }
-}
 
 impl From<ServicesConfig> for ServicesConfigBuilder {
     fn from(config: ServicesConfig) -> ServicesConfigBuilder {
@@ -370,13 +365,8 @@ impl SecurityConfig {
 }
 
 /// A builder type for `SecurityConfig`s.
+#[derive(Default)]
 pub struct SecurityConfigBuilder(SecurityConfig);
-
-impl Default for SecurityConfigBuilder {
-    fn default() -> SecurityConfigBuilder {
-        SecurityConfigBuilder(SecurityConfig::default())
-    }
-}
 
 impl From<SecurityConfig> for SecurityConfigBuilder {
     fn from(config: SecurityConfig) -> SecurityConfigBuilder {
@@ -452,18 +442,10 @@ impl HttpProxyConfig {
 }
 
 /// A builder for `HttpProxyConfig`s.
+#[derive(Default)]
 pub struct HttpProxyConfigBuilder {
     host_and_port: Option<HostAndPort>,
     credentials: Option<BasicCredentials>,
-}
-
-impl Default for HttpProxyConfigBuilder {
-    fn default() -> HttpProxyConfigBuilder {
-        HttpProxyConfigBuilder {
-            host_and_port: None,
-            credentials: None,
-        }
-    }
 }
 
 impl From<HttpProxyConfig> for HttpProxyConfigBuilder {

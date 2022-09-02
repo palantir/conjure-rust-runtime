@@ -22,7 +22,7 @@ version: 2
 jobs:
   build:
     docker:
-      - image: rust:1.56.0
+      - image: rust:1.62.0
     environment:
       RUSTFLAGS: -D warnings
     steps:
@@ -39,5 +39,5 @@ jobs:
       - run: cargo test -p conjure-runtime-config
       - run: cargo test -p conjure-verification
       # running unoptimized simulations is slower than building + running optimized simulations
-      - run: cargo test -p simulation --release 
+      - run: cargo test -p simulation --release
       - *SAVE_DEPS

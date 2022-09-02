@@ -14,11 +14,14 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt;
+use witchcraft_log::warn;
 
 static VALID_NODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9.\-]*$").unwrap());
 static VALID_NAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z][a-zA-Z0-9\-]*$").unwrap());
 static VALID_VERSION: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[0-9]+(\.[0-9]+)*(-rc[0-9]+)?(-[0-9]+-g[a-f0-9]+)?$").unwrap());
+
+const DEFAULT_VERSION: &str = "0.0.0";
 
 /// A representation of an HTTP `User-Agent` header value.
 #[derive(Debug, Clone)]
@@ -102,13 +105,18 @@ impl fmt::Display for Agent {
 
 impl Agent {
     /// Creates a new `Agent`.
-    pub fn new(name: &str, version: &str) -> Agent {
+    pub fn new(name: &str, mut version: &str) -> Agent {
         assert!(VALID_NAME.is_match(name), "invalid agent name `{}`", name);
-        assert!(
-            VALID_VERSION.is_match(version),
-            "invalid agent version `{}`",
-            version
-        );
+
+        if !VALID_VERSION.is_match(version) {
+            warn!(
+                "encountered invalid user agent version",
+                safe: {
+                    version: version,
+                }
+            );
+            version = DEFAULT_VERSION;
+        }
 
         Agent {
             name: name.to_string(),
@@ -141,5 +149,11 @@ mod test {
             agent.to_string(),
             "foobar/1.2.3 (nodeId:127.0.0.1) fizzbuzz/0.0.0-1-g12345 btob/1.0.0-rc1"
         );
+    }
+
+    #[test]
+    fn version_fallback() {
+        let agent = UserAgent::new(Agent::new("foobar", "some-invalid-version"));
+        assert_eq!(agent.primary().version(), "0.0.0");
     }
 }
