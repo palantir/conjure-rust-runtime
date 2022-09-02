@@ -153,7 +153,7 @@ mod test {
 
     #[test]
     fn version_fallback() {
-        let agent = UserAgent::new(Agent::new("foobar", "some-invalid-version"));
-        assert_eq!(agent.primary().version(), "0.0.0");
+        let agent = Agent::new("foobar", "some-invalid-version");
+        assert_eq!(agent.version(), "0.0.0");
     }
 }
