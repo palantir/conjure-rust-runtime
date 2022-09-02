@@ -1,0 +1,6 @@
+type: improvement
+improvement:
+  description: Invalid user agent versions are now replaced with `0.0.0` rather than
+    panicking.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/132
