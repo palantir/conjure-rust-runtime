@@ -17,10 +17,10 @@ async-compression = { version = "0.3", default-features = false, features = [
 async-trait = "0.1"
 base64 = "0.13"
 bytes = "1.0"
-conjure-error = "2"
-conjure-http = "2"
-conjure-object = "2"
-conjure-serde = "2"
+conjure-error = "3"
+conjure-http = "3"
+conjure-object = "3"
+conjure-serde = "3"
 futures = "0.3"
 http = "0.2"
 http-body = "0.4"
@@ -62,4 +62,4 @@ tower-util = "0.3"
 
 
 # for doc examples
-conjure-codegen = { version = "2", features = ["example-types"] }
+conjure-codegen = { version = "3", features = ["example-types"] }
