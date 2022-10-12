@@ -23,7 +23,7 @@ conjure-verification-api = { path = "../conjure-verification-api" }
 conjure-verification-api = { path = "../conjure-verification-api" }
 
 [dev-dependencies]
-conjure-object = "2"
+conjure-object = "3"
 conjure-error = "2"
 conjure-http = "2"
 conjure-serde = "2"
