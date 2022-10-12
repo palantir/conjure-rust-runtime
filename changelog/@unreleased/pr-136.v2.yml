@@ -1,0 +1,5 @@
+type: break
+break:
+  description: Bump to Conjure 3
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/136

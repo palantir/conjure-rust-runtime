@@ -1,6 +1,6 @@
 [package]
 name = "conjure-verification"
-version = "1.1.0"
+version = "2.0.0"
 authors = ["Steven Fackler <sfackler@palantir.com>"]
 edition = "2018"
 publish = false
@@ -10,7 +10,7 @@ doctest = false
 harness = false
 
 [build-dependencies]
-conjure-serde = "2"
+conjure-serde = "3"
 serde_yaml = "0.9"
 heck = "0.4"
 syn = "1.0"
@@ -23,10 +23,10 @@ conjure-verification-api = { path = "../conjure-verification-api" }
 conjure-verification-api = { path = "../conjure-verification-api" }
 
 [dev-dependencies]
-conjure-object = "2"
-conjure-error = "2"
-conjure-http = "2"
-conjure-serde = "2"
+conjure-object = "3"
+conjure-error = "3"
+conjure-http = "3"
+conjure-serde = "3"
 tokio = { version = "1.0", features = ["full"] }
 witchcraft-metrics = "1"
 
