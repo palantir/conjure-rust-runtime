@@ -8,7 +8,7 @@ links = "conjure-verification"                       # a hack to pass info upstr
 
 [build-dependencies]
 attohttpc = "0.22"
-conjure-codegen = "2"
+conjure-codegen = "3"
 flate2 = "1.0"
 tar = "0.4"
 
