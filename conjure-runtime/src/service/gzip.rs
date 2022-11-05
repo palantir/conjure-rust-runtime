@@ -13,9 +13,10 @@
 // limitations under the License.
 use crate::raw::Service;
 use crate::service::Layer;
-use async_compression::tokio::bufread::GzipDecoder;
-use bytes::{Buf, Bytes, BytesMut};
-use futures::{ready, Stream};
+use bytes::buf::Writer;
+use bytes::{BufMut, Bytes, BytesMut};
+use flate2::write::GzDecoder;
+use futures::ready;
 use http::header::{Entry, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
 use http::{HeaderMap, HeaderValue, Request, Response};
 use http_body::{Body, SizeHint};
@@ -23,11 +24,9 @@ use once_cell::sync::Lazy;
 use pin_project::pin_project;
 use std::error::Error;
 use std::future::Future;
-use std::io;
+use std::io::Write;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
-use tokio_util::codec::{BytesCodec, FramedRead};
 
 static GZIP: Lazy<HeaderValue> = Lazy::new(|| HeaderValue::from_static("gzip"));
 
@@ -88,37 +87,31 @@ where
         let response = ready!(self.project().future.poll(cx))?;
         let (mut parts, body) = response.into_parts();
 
-        let body = match parts.headers.get(CONTENT_ENCODING) {
+        let decoder = match parts.headers.get(CONTENT_ENCODING) {
             Some(v) if v == *GZIP => {
                 parts.headers.remove(CONTENT_ENCODING);
                 parts.headers.remove(CONTENT_LENGTH);
-                DecodedBody::Gzip {
-                    body: FramedRead::new(
-                        GzipDecoder::new(ShimReader {
-                            body,
-                            buf: Bytes::new(),
-                        }),
-                        BytesCodec::new(),
-                    ),
-                }
+                Some(GzDecoder::new(BytesMut::new().writer()))
             }
-            _ => DecodedBody::Identity { body },
+            _ => None,
+        };
+
+        let body = DecodedBody {
+            body,
+            decoder,
+            done: false,
         };
 
         Poll::Ready(Ok(Response::from_parts(parts, body)))
     }
 }
 
-#[pin_project(project = Projection)]
-pub enum DecodedBody<B> {
-    Identity {
-        #[pin]
-        body: B,
-    },
-    Gzip {
-        #[pin]
-        body: FramedRead<GzipDecoder<ShimReader<B>>, BytesCodec>,
-    },
+#[pin_project]
+pub struct DecodedBody<B> {
+    #[pin]
+    body: B,
+    decoder: Option<GzDecoder<Writer<BytesMut>>>,
+    done: bool,
 }
 
 impl<B> Body for DecodedBody<B>
@@ -127,103 +120,67 @@ where
     B::Error: Into<Box<dyn Error + Sync + Send>>,
 {
     type Data = Bytes;
-    type Error = io::Error;
+
+    type Error = Box<dyn Error + Sync + Send>;
 
     fn poll_data(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-        match self.project() {
-            Projection::Identity { body } => body
-                .poll_data(cx)
-                .map(|o| o.map(|r| r.map_err(|e| io::Error::new(io::ErrorKind::Other, e)))),
-            Projection::Gzip { body } => body
-                .poll_next(cx)
-                .map(|o| o.map(|r| r.map(BytesMut::freeze))),
+        let mut this = self.project();
+
+        loop {
+            if *this.done {
+                return Poll::Ready(None);
+            }
+
+            let next = ready!(this.body.as_mut().poll_data(cx))
+                .transpose()
+                .map_err(Into::into)?;
+
+            let Some(decoder) = this.decoder else {
+                return Poll::Ready(next.map(Ok));
+            };
+
+            match next {
+                Some(next) => {
+                    decoder.write_all(&next)?;
+                    if this.body.is_end_stream() {
+                        decoder.try_finish()?;
+                        *this.done = true;
+                    } else {
+                        decoder.flush()?;
+                    }
+                }
+                None => {
+                    decoder.try_finish()?;
+                    *this.done = true;
+                }
+            }
+
+            if !decoder.get_ref().get_ref().is_empty() {
+                return Poll::Ready(Some(Ok(decoder.get_mut().get_mut().split().freeze())));
+            }
         }
     }
 
     fn poll_trailers(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap<HeaderValue>>, Self::Error>> {
-        match self.project() {
-            Projection::Identity { body } => body
-                .poll_trailers(cx)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
-            Projection::Gzip { body, .. } => body
-                .get_pin_mut()
-                .get_pin_mut()
-                .project()
-                .body
-                .poll_trailers(cx)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
-        }
+    ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
+        self.project().body.poll_trailers(cx).map_err(Into::into)
     }
 
     fn is_end_stream(&self) -> bool {
-        match self {
-            DecodedBody::Identity { body } => body.is_end_stream(),
-            // we can't check the inner body since we may get an error out of the decoder at eof
-            DecodedBody::Gzip { .. } => false,
-        }
+        self.body.is_end_stream()
     }
 
     fn size_hint(&self) -> SizeHint {
-        match self {
-            DecodedBody::Identity { body } => body.size_hint(),
-            DecodedBody::Gzip { .. } => SizeHint::new(),
+        if self.decoder.is_some() {
+            SizeHint::new()
+        } else {
+            self.body.size_hint()
         }
-    }
-}
-
-#[pin_project]
-pub struct ShimReader<T> {
-    #[pin]
-    body: T,
-    buf: Bytes,
-}
-
-impl<T> AsyncRead for ShimReader<T>
-where
-    T: Body<Data = Bytes>,
-    T::Error: Into<Box<dyn Error + Sync + Send>>,
-{
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        let in_buf = ready!(self.as_mut().poll_fill_buf(cx))?;
-        let len = usize::min(in_buf.len(), buf.remaining());
-        buf.put_slice(&in_buf[..len]);
-        self.consume(len);
-
-        Poll::Ready(Ok(()))
-    }
-}
-
-impl<T> AsyncBufRead for ShimReader<T>
-where
-    T: Body<Data = Bytes>,
-    T::Error: Into<Box<dyn Error + Sync + Send>>,
-{
-    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
-        let mut this = self.project();
-
-        while !this.buf.has_remaining() {
-            *this.buf = match ready!(this.body.as_mut().poll_data(cx)) {
-                Some(Ok(buf)) => buf,
-                Some(Err(e)) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
-                None => break,
-            }
-        }
-
-        Poll::Ready(Ok(&*this.buf))
-    }
-
-    fn consume(self: Pin<&mut Self>, amt: usize) {
-        self.project().buf.advance(amt);
     }
 }
 

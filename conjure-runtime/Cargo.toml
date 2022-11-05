@@ -10,10 +10,6 @@ readme = "../README.md"
 
 [dependencies]
 arc-swap = "1.0"
-async-compression = { version = "0.3", default-features = false, features = [
-    "gzip",
-    "tokio",
-] }
 async-trait = "0.1"
 base64 = "0.13"
 bytes = "1.0"
@@ -21,6 +17,7 @@ conjure-error = "3"
 conjure-http = "3"
 conjure-object = "3"
 conjure-serde = "3"
+flate2 = "1.0"
 futures = "0.3"
 http = "0.2"
 http-body = "0.4"
@@ -51,7 +48,6 @@ zipkin = "0.4"
 conjure-runtime-config = { version = "4.0.0", path = "../conjure-runtime-config" }
 
 [dev-dependencies]
-flate2 = "1.0"
 futures-test = "0.3"
 hyper = { version = "0.14", features = ["server"] }
 serde_yaml = "0.9"

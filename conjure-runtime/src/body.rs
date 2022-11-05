@@ -175,7 +175,10 @@ where
 {
     fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
         while !self.cur.has_remaining() {
-            match ready!(self.as_mut().project().body.poll_data(cx)).transpose()? {
+            match ready!(self.as_mut().project().body.poll_data(cx))
+                .transpose()
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+            {
                 Some(bytes) => *self.as_mut().project().cur = bytes,
                 None => break,
             }
