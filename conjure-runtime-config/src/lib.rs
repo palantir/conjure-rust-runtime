@@ -13,6 +13,8 @@
 // limitations under the License.
 //! Deserializable configuration types for `conjure_runtime` clients.
 #![warn(missing_docs, clippy::all)]
+// reserve the right to add non-eq config in the future
+#![allow(clippy::derive_partial_eq_without_eq)]
 
 use serde::de::{Deserializer, Error as _, Unexpected};
 use serde::Deserialize;
