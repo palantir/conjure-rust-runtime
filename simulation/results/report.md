@@ -30,9 +30,9 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         short_outage_on_one_node[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=99.5%	client_mean=2s	server_cpu=3184.008s	client_received=1600/1600	server_resps=1600	codes={200=1592, 500=8}
             short_outage_on_one_node[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=99.3%	client_mean=2s	server_cpu=3176.012s	client_received=1600/1600	server_resps=1600	codes={200=1588, 500=12}
                       short_outage_on_one_node[UNLIMITED_ROUND_ROBIN]:	success=99.3%	client_mean=2s	server_cpu=3176.012s	client_received=1600/1600	server_resps=1600	codes={200=1588, 500=12}
-          simplest_possible_case[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=790.227272ms	server_cpu=10431s	client_received=13200/13200	server_resps=13200	codes={200=13200}
-              simplest_possible_case[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=790.121212ms	server_cpu=10429.6s	client_received=13200/13200	server_resps=13200	codes={200=13200}
-                        simplest_possible_case[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=790.121212ms	server_cpu=10429.6s	client_received=13200/13200	server_resps=13200	codes={200=13200}
+          simplest_possible_case[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=790.211379ms	server_cpu=10430s	client_received=13199/13199	server_resps=13199	codes={200=13199}
+              simplest_possible_case[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=790.105311ms	server_cpu=10428.6s	client_received=13199/13199	server_resps=13199	codes={200=13199}
+                        simplest_possible_case[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=790.105311ms	server_cpu=10428.6s	client_received=13199/13199	server_resps=13199	codes={200=13199}
            slow_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=100%	client_mean=221.192666ms	server_cpu=311.283s	client_received=1500/1500	server_resps=1584	codes={200=1500}
                slow_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN]:	success=100%	client_mean=84.623333ms	server_cpu=121.836s	client_received=1500/1500	server_resps=1519	codes={200=1500}
                          slow_503s_then_revert[UNLIMITED_ROUND_ROBIN]:	success=100%	client_mean=84.623333ms	server_cpu=121.836s	client_received=1500/1500	server_resps=1519	codes={200=1500}
