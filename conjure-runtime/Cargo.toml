@@ -15,7 +15,7 @@ async-compression = { version = "0.3", default-features = false, features = [
     "tokio",
 ] }
 async-trait = "0.1"
-base64 = "0.13"
+base64 = "0.20"
 bytes = "1.0"
 conjure-error = "3"
 conjure-http = "3"
