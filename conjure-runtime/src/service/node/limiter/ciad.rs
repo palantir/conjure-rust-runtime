@@ -171,7 +171,7 @@ where
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum Mode {
     Ignore,
     Success,

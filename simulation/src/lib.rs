@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![cfg(test)]
+#![allow(clippy::type_complexity)]
 use crate::harness::Harness;
 use crate::server::Endpoint;
 use crate::simulation::{Simulation, SimulationBuilder1, TokioClock};

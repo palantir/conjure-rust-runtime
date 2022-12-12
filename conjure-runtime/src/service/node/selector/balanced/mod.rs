@@ -212,6 +212,7 @@ where
 }
 
 #[pin_project(project = Project, PinnedDrop)]
+#[allow(clippy::large_enum_variant)]
 pub enum BalancedNodeSelectorFuture<S, B>
 where
     S: Service<Request<B>>,
