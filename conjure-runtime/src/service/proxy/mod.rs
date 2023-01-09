@@ -14,6 +14,8 @@
 use crate::config;
 pub use crate::service::proxy::connector::{ProxyConnectorLayer, ProxyConnectorService};
 pub use crate::service::proxy::request::{ProxyLayer, ProxyService};
+use base64::display::Base64Display;
+use base64::engine::general_purpose::STANDARD;
 use conjure_error::Error;
 use http::{HeaderValue, Uri};
 use std::convert::TryFrom;
@@ -48,8 +50,8 @@ impl ProxyConfig {
 
                 let credentials = config.credentials().map(|c| {
                     let auth = format!("{}:{}", c.username(), c.password());
-                    let auth = base64::encode(&auth);
-                    let header = format!("Basic {}", auth);
+                    let header =
+                        format!("Basic {}", Base64Display::new(auth.as_bytes(), &STANDARD));
                     HeaderValue::try_from(header).unwrap()
                 });
 
