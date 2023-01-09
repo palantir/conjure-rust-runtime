@@ -76,7 +76,7 @@ impl Harness {
             let image_path = self.png_file(result);
             if image_path.exists() {
                 let prev_path = image_path.with_extension("prev.png");
-                fs::rename(&image_path, &prev_path).unwrap();
+                fs::rename(&image_path, prev_path).unwrap();
             }
             result
                 .chart(&image_path)

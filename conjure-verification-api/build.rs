@@ -72,14 +72,14 @@ fn get_server(out_dir: &Path) {
 fn get_tests(out_dir: &Path) {
     let path = out_dir.join("test-cases.json");
     let test_cases = download("verification-server-test-cases", "", "json");
-    fs::write(&path, &test_cases).unwrap();
+    fs::write(&path, test_cases).unwrap();
     println!("cargo:tests={}", path.display());
 }
 
 fn generate_api(out_dir: &Path) {
     let conjure_path = out_dir.join("verification-server-api.conjure.json");
     let service_api = download("verification-server-api", "", "conjure.json");
-    fs::write(&conjure_path, &service_api).unwrap();
+    fs::write(&conjure_path, service_api).unwrap();
     println!("cargo:api={}", conjure_path.display());
 
     conjure_codegen::Config::new()
