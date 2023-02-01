@@ -167,6 +167,9 @@
 //!     are the user-percieved request, including any backoffs/retries/etc. It only records the time until response
 //!     headers are received, not until the entire response body is read. The `status` tag will be `success` if the
 //!     response status was 2xx and will be `failure` otherwise (QoS failure, internal server error, IO error, etc).
+//! * `tls.handshake (context: <service_name>, protocol: <protocol_version>, cipher: <cipher_name>)` - A `Meter`
+//!     tracking the rate of TLS handshakes, tagged by the service, TLS protocol version (e.g. `TLSv1.3`), and cipher
+//!     name (e.g. `TLS_CHACHA20_POLY1305_SHA256`).
 //! * `conjure-runtime.concurrencylimiter.max (service: <service_name>, hostIndex: <host_index>)` - A `Gauge` reporting
 //!     the maximum number of concurrent requests which are currently permitted to be made to a specific host.
 //! * `conjure-runtime.concurrencylimiter.in-flight (service: <service_name>, hostIndex: <host_index>)` - A `Gauge`
