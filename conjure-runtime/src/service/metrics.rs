@@ -12,22 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::raw::Service;
-use crate::service::map_error::RawClientError;
 use crate::service::Layer;
 use crate::Builder;
 use conjure_error::Error;
+use conjure_http::client::Endpoint;
 use futures::ready;
+use http::{Request, Response};
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::time::Instant;
-use witchcraft_metrics::{Meter, MetricId, Timer};
+use witchcraft_metrics::{MetricId, MetricRegistry};
 
 struct Metrics {
-    response_timer: Arc<Timer>,
-    io_error_meter: Arc<Meter>,
+    metrics: Arc<MetricRegistry>,
+    service_name: String,
 }
 
 /// A layer which updates the `client.response` and `client.response.error` metrics.
@@ -42,15 +43,8 @@ impl MetricsLayer {
         MetricsLayer {
             metrics: builder.get_metrics().map(|m| {
                 Arc::new(Metrics {
-                    response_timer: m.timer(
-                        MetricId::new("client.response")
-                            .with_tag("service-name", service.to_string()),
-                    ),
-                    io_error_meter: m.meter(
-                        MetricId::new("client.response.error")
-                            .with_tag("service-name", service.to_string())
-                            .with_tag("reason", "IOException"),
-                    ),
+                    metrics: m.clone(),
+                    service_name: service.to_string(),
                 })
             }),
         }
@@ -73,16 +67,21 @@ pub struct MetricsService<S> {
     metrics: Option<Arc<Metrics>>,
 }
 
-impl<S, R> Service<R> for MetricsService<S>
+impl<S, B1, B2> Service<Request<B1>> for MetricsService<S>
 where
-    S: Service<R, Error = Error>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
     type Response = S::Response;
     type Error = S::Error;
     type Future = MetricsFuture<S::Future>;
 
-    fn call(&self, req: R) -> Self::Future {
+    fn call(&self, req: Request<B1>) -> Self::Future {
         MetricsFuture {
+            endpoint: req
+                .extensions()
+                .get::<Endpoint>()
+                .expect("Request extensions missing Endpoint")
+                .clone(),
             future: self.inner.call(req),
             start: Instant::now(),
             metrics: self.metrics.clone(),
@@ -95,12 +94,13 @@ pub struct MetricsFuture<F> {
     #[pin]
     future: F,
     start: Instant,
+    endpoint: Endpoint,
     metrics: Option<Arc<Metrics>>,
 }
 
-impl<F, R> Future for MetricsFuture<F>
+impl<F, B> Future for MetricsFuture<F>
 where
-    F: Future<Output = Result<R, Error>>,
+    F: Future<Output = Result<Response<B>, Error>>,
 {
     type Output = F::Output;
 
@@ -110,11 +110,21 @@ where
         let result = ready!(this.future.poll(cx));
 
         if let Some(metrics) = this.metrics {
-            match &result {
-                Ok(_) => metrics.response_timer.update(this.start.elapsed()),
-                Err(e) if e.cause().is::<RawClientError>() => metrics.io_error_meter.mark(1),
-                _ => {}
-            }
+            let status = match &result {
+                Ok(r) if r.status().is_success() => "success",
+                _ => "failure",
+            };
+
+            metrics
+                .metrics
+                .timer(
+                    MetricId::new("client.response")
+                        .with_tag("channel-name", metrics.service_name.clone())
+                        .with_tag("service-name", this.endpoint.service())
+                        .with_tag("endpoint", this.endpoint.name())
+                        .with_tag("status", status),
+                )
+                .update(this.start.elapsed());
         }
 
         Poll::Ready(result)
