@@ -34,7 +34,9 @@ use tokio::runtime::{self, Runtime};
 use tokio::time::{self, Duration, Instant};
 use witchcraft_metrics::{Clock, MetricRegistry};
 
-const SERVICE: &str = "simulation";
+const CHANNEL: &str = "simulation";
+pub const SERVICE: &str = "testService";
+pub const ENDPOINT: &str = "testEndpoint";
 
 pub struct SimulationBuilder0;
 
@@ -52,7 +54,7 @@ impl SimulationBuilder0 {
 
         // initialize the responses timer with our custom reservoir
         let _guard = runtime.enter();
-        metrics::responses_timer(&metrics, SERVICE);
+        metrics::responses_timer(&metrics, CHANNEL, SERVICE, ENDPOINT);
 
         let mut recorder = SimulationMetricsRecorder::new(&metrics);
         recorder.filter_metrics(|id| {
@@ -104,7 +106,7 @@ impl SimulationBuilder1 {
         let mut builder = Builder::new();
         self.strategy.apply(&mut builder);
         builder
-            .service(SERVICE)
+            .service(CHANNEL)
             .user_agent(UserAgent::new(Agent::new("simulation", "0.0.0")))
             .metrics(self.metrics.clone());
         for server in &self.servers {
@@ -268,7 +270,7 @@ impl Runner {
         let status_codes = request_runner.status_codes.into_inner();
         SimulationReport {
             client_mean: Duration::from_nanos(
-                metrics::responses_timer(&self.metrics, SERVICE)
+                metrics::responses_timer(&self.metrics, CHANNEL, SERVICE, ENDPOINT)
                     .snapshot()
                     .mean() as u64,
             ),
