@@ -111,8 +111,8 @@ where
 
         if let Some(metrics) = this.metrics {
             let status = match &result {
-                Ok(r) if r.status().is_success() => "success",
-                _ => "failure",
+                Ok(_) => "success",
+                Err(_) => "failure",
             };
 
             metrics
