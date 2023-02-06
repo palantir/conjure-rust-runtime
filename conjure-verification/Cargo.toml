@@ -1,6 +1,6 @@
 [package]
 name = "conjure-verification"
-version = "2.2.0"
+version.workspace = true
 authors = ["Steven Fackler <sfackler@palantir.com>"]
 edition = "2018"
 publish = false

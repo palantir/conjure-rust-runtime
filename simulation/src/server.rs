@@ -11,8 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::metrics;
 use crate::recorder::SimulationMetricsRecorder;
+use crate::{metrics, simulation};
 use bytes::Bytes;
 use conjure_error::Error;
 use conjure_http::client::{self, AsyncBody};
@@ -68,9 +68,9 @@ impl Endpoint {
             .method(self.method.clone())
             .uri(self.path)
             .extension(client::Endpoint::new(
-                "testService",
+                simulation::SERVICE,
                 None,
-                "testEndpoint",
+                simulation::ENDPOINT,
                 self.path,
             ))
             .body(AsyncBody::Empty)

@@ -35,9 +35,18 @@ pub fn request_counter(registry: &MetricRegistry, server: &str, endpoint: &str) 
     )
 }
 
-pub fn responses_timer(registry: &MetricRegistry, service_name: &'static str) -> Arc<Timer> {
+pub fn responses_timer(
+    registry: &MetricRegistry,
+    channel: &'static str,
+    service: &'static str,
+    endpoint: &'static str,
+) -> Arc<Timer> {
     registry.timer_with(
-        MetricId::new("client.response").with_tag("service-name", service_name),
+        MetricId::new("client.response")
+            .with_tag("channel-name", channel)
+            .with_tag("service-name", service)
+            .with_tag("endpoint", endpoint)
+            .with_tag("status", "success"),
         || {
             Timer::new_with(
                 FullyBufferedReservoir {

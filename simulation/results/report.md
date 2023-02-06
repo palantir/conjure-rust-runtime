@@ -52,7 +52,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/all_nodes_500[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/all_nodes_500[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="all_nodes_500[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -64,7 +64,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/all_nodes_500[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/all_nodes_500[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="all_nodes_500[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -76,7 +76,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/all_nodes_500[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/all_nodes_500[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="all_nodes_500[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -88,7 +88,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/black_hole[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/black_hole[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="black_hole[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -100,7 +100,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/black_hole[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/black_hole[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="black_hole[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -112,7 +112,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/black_hole[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/black_hole[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="black_hole[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -124,7 +124,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/drastic_slowdown[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/drastic_slowdown[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="drastic_slowdown[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -136,7 +136,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/drastic_slowdown[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/drastic_slowdown[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="drastic_slowdown[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -148,7 +148,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/drastic_slowdown[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/drastic_slowdown[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="drastic_slowdown[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -160,7 +160,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/fast_400s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/fast_400s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="fast_400s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -172,7 +172,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/fast_400s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/fast_400s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="fast_400s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -184,7 +184,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/fast_400s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/fast_400s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="fast_400s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -196,7 +196,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/fast_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/fast_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="fast_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -208,7 +208,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/fast_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/fast_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="fast_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -220,7 +220,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/fast_503s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/fast_503s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="fast_503s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -232,7 +232,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/one_big_spike[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/one_big_spike[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="one_big_spike[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -244,7 +244,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/one_big_spike[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/one_big_spike[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="one_big_spike[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -256,7 +256,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/one_big_spike[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/one_big_spike[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="one_big_spike[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -268,7 +268,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -280,7 +280,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -292,7 +292,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/one_endpoint_dies_on_each_server[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/one_endpoint_dies_on_each_server[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="one_endpoint_dies_on_each_server[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -304,7 +304,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/server_side_rate_limits[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/server_side_rate_limits[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="server_side_rate_limits[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -316,7 +316,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/server_side_rate_limits[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/server_side_rate_limits[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="server_side_rate_limits[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -328,7 +328,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/server_side_rate_limits[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/server_side_rate_limits[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="server_side_rate_limits[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -340,7 +340,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/short_outage_on_one_node[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/short_outage_on_one_node[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="short_outage_on_one_node[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -352,7 +352,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/short_outage_on_one_node[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/short_outage_on_one_node[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="short_outage_on_one_node[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -364,7 +364,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/short_outage_on_one_node[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/short_outage_on_one_node[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="short_outage_on_one_node[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -376,7 +376,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/simplest_possible_case[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/simplest_possible_case[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="simplest_possible_case[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -388,7 +388,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/simplest_possible_case[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/simplest_possible_case[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="simplest_possible_case[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -400,7 +400,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/simplest_possible_case[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/simplest_possible_case[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="simplest_possible_case[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -412,7 +412,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/slow_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/slow_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="slow_503s_then_revert[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -424,7 +424,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/slow_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/slow_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="slow_503s_then_revert[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -436,7 +436,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/slow_503s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/slow_503s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="slow_503s_then_revert[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -448,7 +448,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/slowdown_and_error_thresholds[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/slowdown_and_error_thresholds[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="slowdown_and_error_thresholds[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -460,7 +460,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/slowdown_and_error_thresholds[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/slowdown_and_error_thresholds[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="slowdown_and_error_thresholds[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -472,7 +472,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/slowdown_and_error_thresholds[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/slowdown_and_error_thresholds[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="slowdown_and_error_thresholds[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -484,7 +484,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/uncommon_flakes[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/uncommon_flakes[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
         <td><image width=400 src="uncommon_flakes[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR].png" /></td>
     </tr>
 </table>
@@ -496,7 +496,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/uncommon_flakes[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/uncommon_flakes[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="uncommon_flakes[CONCURRENCY_LIMITER_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
@@ -508,7 +508,7 @@ one_endpoint_dies_on_each_server[CONCURRENCY_LIMITER_PIN_UNTIL_ERROR]:	success=6
         <th>current</th>
     </tr>
     <tr>
-        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/master/simulation/results/uncommon_flakes[UNLIMITED_ROUND_ROBIN].png" /></td>
+        <td><image width=400 src="https://media.githubusercontent.com/media/palantir/conjure-rust-runtime/develop/simulation/results/uncommon_flakes[UNLIMITED_ROUND_ROBIN].png" /></td>
         <td><image width=400 src="uncommon_flakes[UNLIMITED_ROUND_ROBIN].png" /></td>
     </tr>
 </table>
