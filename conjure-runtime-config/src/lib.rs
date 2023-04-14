@@ -412,6 +412,7 @@ pub enum ProxyConfig {
     Http(HttpProxyConfig),
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for ProxyConfig {
     fn default() -> ProxyConfig {
         ProxyConfig::Direct
