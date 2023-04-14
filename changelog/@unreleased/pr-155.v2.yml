@@ -1,0 +1,7 @@
+type: improvement
+improvement:
+  description: The client now uses rustls as its TLS implementation. Clients will
+    always trust the standard root CAs regardless of the certificate configuration
+    on the host.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/155
