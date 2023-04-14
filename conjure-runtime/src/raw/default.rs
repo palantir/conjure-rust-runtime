@@ -23,17 +23,22 @@ use http::{HeaderMap, Request, Response};
 use http_body::{Body, SizeHint};
 use hyper::client::{HttpConnector, ResponseFuture};
 use hyper::Client;
-use hyper_openssl::{HttpsConnector, HttpsLayer};
-use openssl::ssl::{SslConnector, SslFiletype, SslMethod};
+use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use pin_project::pin_project;
+use rustls::{Certificate, ClientConfig, OwnedTrustAnchor, PrivateKey, RootCertStore};
+use rustls_pemfile::Item;
 use std::error;
 use std::fmt;
+use std::fs::File;
 use std::future::Future;
+use std::io::BufReader;
 use std::marker::PhantomPinned;
+use std::path::Path;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tower_layer::Layer;
+use webpki_roots::TLS_SERVER_ROOTS;
 
 // This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
 const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
@@ -59,40 +64,60 @@ impl BuildRawClient for DefaultRawClientBuilder {
         connector.set_keepalive(Some(TCP_KEEPALIVE));
         connector.set_connect_timeout(Some(builder.get_connect_timeout()));
 
-        let mut ssl = SslConnector::builder(SslMethod::tls()).map_err(Error::internal_safe)?;
-        ssl.set_alpn_protos(b"\x02h2\x08http/1.1")
-            .map_err(Error::internal_safe)?;
-
-        if let Some(ca_file) = builder.get_security().ca_file() {
-            ssl.set_ca_file(ca_file).map_err(Error::internal_safe)?;
-        }
-
-        match (
-            builder.get_security().key_file(),
-            builder.get_security().cert_file(),
-        ) {
-            (Some(key_file), Some(cert_file)) => {
-                ssl.set_private_key_file(key_file, SslFiletype::PEM)
-                    .map_err(Error::internal_safe)?;
-                ssl.set_certificate_chain_file(cert_file)
-                    .map_err(Error::internal_safe)?;
-                ssl.check_private_key().map_err(Error::internal_safe)?;
-            }
-            (None, None) => {}
-            _ => {
-                return Err(Error::internal_safe(
-                    "neither or both of key-file and cert-file must be set in the client security config",
-                ));
-            }
-        }
-
         let proxy = ProxyConfig::from_config(builder.get_proxy())?;
 
         let connector = TimeoutLayer::new(builder).layer(connector);
         let connector = ProxyConnectorLayer::new(&proxy).layer(connector);
-        let connector = HttpsLayer::with_connector(ssl)
-            .map_err(Error::internal_safe)?
-            .layer(connector);
+
+        let mut roots = RootCertStore::empty();
+        roots.add_server_trust_anchors(TLS_SERVER_ROOTS.0.iter().map(|ta| {
+            OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            )
+        }));
+
+        if let Some(ca_file) = builder.get_security().ca_file() {
+            let certs = load_certs_file(ca_file)?;
+            roots.add_parsable_certificates(&certs);
+        }
+
+        let client_config = ClientConfig::builder()
+            .with_safe_defaults()
+            .with_root_certificates(roots);
+
+        let client_config = match (
+            builder.get_security().cert_file(),
+            builder.get_security().key_file(),
+        ) {
+            (Some(cert_file), Some(key_file)) => {
+                let cert_chain = load_certs_file(cert_file)?
+                    .into_iter()
+                    .map(Certificate)
+                    .collect::<Vec<_>>();
+
+                let private_key = load_private_key(key_file)?;
+
+                client_config
+                    .with_single_cert(cert_chain, private_key)
+                    .map_err(Error::internal_safe)?
+            }
+            (None, None) => client_config.with_no_client_auth(),
+            _ => {
+                return Err(Error::internal_safe(
+                    "neither or both of key-file and cert-file must be set in the client \
+                    security config",
+                ));
+            }
+        };
+
+        let connector = HttpsConnectorBuilder::new()
+            .with_tls_config(client_config)
+            .https_or_http()
+            .enable_http1()
+            .enable_http2()
+            .wrap_connector(connector);
         let connector = TlsMetricsLayer::new(service, builder).layer(connector);
 
         let client = hyper::Client::builder()
@@ -100,6 +125,32 @@ impl BuildRawClient for DefaultRawClientBuilder {
             .build(connector);
 
         Ok(DefaultRawClient(client))
+    }
+}
+
+fn load_certs_file(path: &Path) -> Result<Vec<Vec<u8>>, Error> {
+    let file = File::open(path).map_err(Error::internal_safe)?;
+    let mut file = BufReader::new(file);
+    rustls_pemfile::certs(&mut file).map_err(Error::internal_safe)
+}
+
+fn load_private_key(path: &Path) -> Result<PrivateKey, Error> {
+    let file = File::open(path).map_err(Error::internal_safe)?;
+    let mut reader = BufReader::new(file);
+
+    let mut items = rustls_pemfile::read_all(&mut reader).map_err(Error::internal_safe)?;
+
+    if items.len() != 1 {
+        return Err(Error::internal_safe(
+            "expected exactly one private key in key file",
+        ));
+    }
+
+    match items.pop().unwrap() {
+        Item::RSAKey(buf) | Item::PKCS8Key(buf) | Item::ECKey(buf) => Ok(PrivateKey(buf)),
+        _ => Err(Error::internal_safe(
+            "expected a PKCS#1, PKCS#8, or Sec1 private key",
+        )),
     }
 }
 
