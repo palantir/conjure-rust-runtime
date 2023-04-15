@@ -345,7 +345,7 @@ impl SecurityConfig {
 
     /// The path to a file containing PEM-formatted root certificates trusted to identify the service.
     ///
-    /// These certificates are used in addition to the system's root CA list.
+    /// These certificates are used in addition to the bundled root CA list.
     pub fn ca_file(&self) -> Option<&Path> {
         self.ca_file.as_deref()
     }
