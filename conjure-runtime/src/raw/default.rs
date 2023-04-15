@@ -156,7 +156,7 @@ fn load_private_key(path: &Path) -> Result<PrivateKey, Error> {
 
 /// The default raw client implementation used by `conjure_runtime`.
 ///
-/// This is currently implemented with `hyper` and `openssl`, but that is subject to change at any time.
+/// This is currently implemented with `hyper` and `rustls`, but that is subject to change at any time.
 pub struct DefaultRawClient(Client<ConjureConnector, RawBody>);
 
 impl Service<Request<RawBody>> for DefaultRawClient {
