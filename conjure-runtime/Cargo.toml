@@ -16,16 +16,20 @@ bytes = "1.0"
 conjure-error = "3"
 conjure-http = "3"
 conjure-object = "3"
+conjure-runtime-config = { version = "4.4.0", path = "../conjure-runtime-config" }
 conjure-serde = "3"
 flate2 = "1.0"
 futures = "0.3"
-http = "0.2"
 http-body = "0.4"
 http-zipkin = "0.3"
+http = "0.2"
+hyper-rustls = { version = "0.24.0", default-features = false, features = [
+    "http1",
+    "http2",
+    "tls12",
+] }
 hyper = { version = "0.14", features = ["http1", "http2", "client", "tcp"] }
-hyper-openssl = "0.9"
 once_cell = "1.0"
-openssl = "0.10"
 parking_lot = "0.12"
 percent-encoding = "2.1"
 pin-project = "1.0"
@@ -33,29 +37,28 @@ rand = "0.8"
 rand_pcg = "0.3"
 refreshable = "1.0"
 regex = "1.0"
-serde = "1.0"
+rustls-pemfile = "1.0.2"
+rustls = "0.21.0"
 serde-value = "0.7"
-witchcraft-log = "3"
-witchcraft-metrics = "1"
-tokio = { version = "1.0", features = ["io-util", "rt-multi-thread", "time"] }
+serde = "1.0"
 tokio-io-timeout = "1.0"
 tokio-util = { version = "0.7", features = ["codec"] }
+tokio = { version = "1.0", features = ["io-util", "rt-multi-thread", "time"] }
 tower-layer = "0.3"
 tower-service = "0.3"
 url = "2.0"
+webpki-roots = "0.23.0"
+witchcraft-log = "3"
+witchcraft-metrics = "1"
 zipkin = "0.4"
 
-conjure-runtime-config = { version = "4.3.0", path = "../conjure-runtime-config" }
-
 [dev-dependencies]
+conjure-codegen = { version = "3", features = ["example-types"] }
 futures-test = "0.3"
 hyper = { version = "0.14", features = ["server"] }
+openssl = "0.10.50"
 serde_yaml = "0.9"
 tokio-openssl = "0.6"
 tokio-test = "0.4"
 tokio = { version = "1.0", features = ["full"] }
 tower-util = "0.3"
-
-
-# for doc examples
-conjure-codegen = { version = "3", features = ["example-types"] }
