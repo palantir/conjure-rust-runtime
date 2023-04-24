@@ -16,7 +16,7 @@ bytes = "1.0"
 conjure-error = "3"
 conjure-http = "3"
 conjure-object = "3"
-conjure-runtime-config = { version = "4.3.0", path = "../conjure-runtime-config" }
+conjure-runtime-config = { version = "4.4.0", path = "../conjure-runtime-config" }
 conjure-serde = "3"
 flate2 = "1.0"
 futures = "0.3"
