@@ -15,7 +15,7 @@ use crate::recorder::SimulationMetricsRecorder;
 use crate::{metrics, simulation};
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{self, AsyncBody};
+use conjure_http::client::{self, AsyncRequestBody};
 use conjure_runtime::raw::{BuildRawClient, RawBody, Service};
 use conjure_runtime::{BodyWriter, Builder};
 use futures::future::BoxFuture;
@@ -63,7 +63,7 @@ impl Endpoint {
         self.path
     }
 
-    pub fn request(&self) -> Request<AsyncBody<'static, BodyWriter>> {
+    pub fn request(&self) -> Request<AsyncRequestBody<'static, BodyWriter>> {
         Request::builder()
             .method(self.method.clone())
             .uri(self.path)
@@ -73,7 +73,7 @@ impl Endpoint {
                 simulation::ENDPOINT,
                 self.path,
             ))
-            .body(AsyncBody::Empty)
+            .body(AsyncRequestBody::Empty)
             .unwrap()
     }
 }

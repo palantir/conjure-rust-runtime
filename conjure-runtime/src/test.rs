@@ -17,7 +17,9 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use conjure_error::NotFound;
 use conjure_error::{Error, ErrorKind};
-use conjure_http::client::{AsyncBody, AsyncClient, AsyncWriteBody, Body, Client as _, Endpoint};
+use conjure_http::client::{
+    AsyncClient, AsyncRequestBody, AsyncWriteBody, Client as _, Endpoint, RequestBody,
+};
 use conjure_runtime_config::ServiceConfig;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -203,7 +205,7 @@ async fn retry_after_503() {
             let response = builder
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
@@ -228,7 +230,7 @@ async fn no_retry_after_404() {
             let error = builder
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .err()
                 .unwrap();
@@ -271,7 +273,7 @@ async fn retry_after_overrides() {
             let response = builder
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
@@ -326,7 +328,7 @@ async fn connect_error_doesnt_reset_body() {
             .send(
                 req()
                     .method(Method::PUT)
-                    .body(AsyncBody::Streaming(body))
+                    .body(AsyncRequestBody::Streaming(body))
                     .unwrap(),
             )
             .await
@@ -353,7 +355,7 @@ async fn propagate_429() {
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .err()
                 .unwrap();
@@ -383,7 +385,7 @@ async fn propagate_429_with_retry_after() {
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .err()
                 .unwrap();
@@ -412,7 +414,7 @@ async fn propagate_503() {
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .err()
                 .unwrap();
@@ -447,7 +449,7 @@ async fn dont_propagate_protocol_errors() {
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
@@ -482,7 +484,7 @@ failed-url-cooldown: 1h
             let response = builder
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
@@ -509,7 +511,7 @@ async fn body_write_ends_after_error() {
                     .send(
                         req()
                             .method(Method::POST)
-                            .body(AsyncBody::Streaming(body))
+                            .body(AsyncRequestBody::Streaming(body))
                             .unwrap(),
                     )
                     .await;
@@ -550,7 +552,7 @@ async fn streaming_write_error_reporting() {
                 .send(
                     req()
                         .method(Method::POST)
-                        .body(AsyncBody::Streaming(body))
+                        .body(AsyncRequestBody::Streaming(body))
                         .unwrap(),
                 )
                 .await
@@ -581,7 +583,7 @@ async fn service_error_propagation() {
                 .service_error(ServiceError::PropagateToCaller)
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .err()
                 .unwrap();
@@ -613,7 +615,7 @@ async fn gzip_body() {
             let body = builder
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .unwrap()
                 .into_body();
@@ -648,7 +650,7 @@ async fn zipkin_propagation() {
                 builder
                     .build()
                     .unwrap()
-                    .send(req().body(AsyncBody::Empty).unwrap())
+                    .send(req().body(AsyncRequestBody::Empty).unwrap())
                     .await
                     .unwrap();
             })
@@ -676,7 +678,9 @@ fn blocking_zipkin_propagation() {
                 .span_id(SpanId::from(*b"abcdefgh"))
                 .build();
             let _guard = zipkin::set_current(context);
-            client.send(req().body(Body::Empty).unwrap()).unwrap();
+            client
+                .send(req().body(RequestBody::Empty).unwrap())
+                .unwrap();
         },
     );
 }
@@ -698,7 +702,7 @@ async fn read_past_eof() {
             let body = builder
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .unwrap()
                 .into_body();
@@ -742,7 +746,7 @@ security:
             builder
                 .build()
                 .unwrap()
-                .send(req().body(AsyncBody::Empty).unwrap())
+                .send(req().body(AsyncRequestBody::Empty).unwrap())
                 .await
                 .unwrap();
         },
