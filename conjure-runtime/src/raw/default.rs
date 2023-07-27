@@ -70,7 +70,7 @@ impl BuildRawClient for DefaultRawClientBuilder {
         let connector = ProxyConnectorLayer::new(&proxy).layer(connector);
 
         let mut roots = RootCertStore::empty();
-        roots.add_server_trust_anchors(TLS_SERVER_ROOTS.0.iter().map(|ta| {
+        roots.add_server_trust_anchors(TLS_SERVER_ROOTS.iter().map(|ta| {
             OwnedTrustAnchor::from_subject_spki_name_constraints(
                 ta.subject,
                 ta.spki,
@@ -100,7 +100,7 @@ impl BuildRawClient for DefaultRawClientBuilder {
                 let private_key = load_private_key(key_file)?;
 
                 client_config
-                    .with_single_cert(cert_chain, private_key)
+                    .with_client_auth_cert(cert_chain, private_key)
                     .map_err(Error::internal_safe)?
             }
             (None, None) => client_config.with_no_client_auth(),
