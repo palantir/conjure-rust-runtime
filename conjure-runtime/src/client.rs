@@ -30,7 +30,7 @@ use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{AsyncBody, AsyncClient, AsyncService};
+use conjure_http::client::{AsyncClient, AsyncRequestBody, AsyncService};
 use conjure_runtime_config::ServiceConfig;
 use http::{Request, Response};
 use refreshable::Subscription;
@@ -157,7 +157,7 @@ where
 
     async fn send(
         &self,
-        request: Request<AsyncBody<'_, Self::BodyWriter>>,
+        request: Request<AsyncRequestBody<'_, Self::BodyWriter>>,
     ) -> Result<Response<Self::ResponseBody>, Error> {
         // split into 2 statements to avoid holding onto the state while awaiting the future
         let future = self.state.load().service.call(request);
