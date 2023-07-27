@@ -14,7 +14,7 @@
 use crate::BodyWriter;
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{AsyncBody, AsyncWriteBody};
+use conjure_http::client::{AsyncRequestBody, AsyncWriteBody};
 use futures::channel::{mpsc, oneshot};
 use futures::{pin_mut, Stream};
 use hyper::HeaderMap;
@@ -61,23 +61,23 @@ pub struct RawBody {
 }
 
 impl RawBody {
-    pub(crate) fn new(body: AsyncBody<'_, BodyWriter>) -> (RawBody, Writer<'_>) {
+    pub(crate) fn new(body: AsyncRequestBody<'_, BodyWriter>) -> (RawBody, Writer<'_>) {
         match body {
-            AsyncBody::Empty => (
+            AsyncRequestBody::Empty => (
                 RawBody {
                     inner: RawBodyInner::Empty,
                     _p: PhantomPinned,
                 },
                 Writer::Nop,
             ),
-            AsyncBody::Fixed(body) => (
+            AsyncRequestBody::Fixed(body) => (
                 RawBody {
                     inner: RawBodyInner::Single(body),
                     _p: PhantomPinned,
                 },
                 Writer::Nop,
             ),
-            AsyncBody::Streaming(body) => {
+            AsyncRequestBody::Streaming(body) => {
                 let (body_sender, body_receiver) = mpsc::channel(1);
                 let (polled_sender, polled_receiver) = oneshot::channel();
                 (

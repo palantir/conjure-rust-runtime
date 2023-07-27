@@ -21,7 +21,7 @@ use crate::util::spans::{self, HttpSpanFuture};
 use crate::{BodyWriter, Builder, Idempotency};
 use async_trait::async_trait;
 use conjure_error::{Error, ErrorKind};
-use conjure_http::client::{AsyncBody, AsyncWriteBody, Endpoint};
+use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, Endpoint};
 use futures::future::{self, BoxFuture};
 use http::request::Parts;
 use http::{Request, Response, StatusCode};
@@ -87,7 +87,7 @@ pub struct RetryService<S> {
     rng: Arc<ConjureRng>,
 }
 
-impl<'a, S, B> Service<Request<AsyncBody<'a, BodyWriter>>> for RetryService<S>
+impl<'a, S, B> Service<Request<AsyncRequestBody<'a, BodyWriter>>> for RetryService<S>
 where
     S: Service<Request<RawBody>, Response = Response<B>, Error = Error> + 'a + Sync + Send,
     S::Response: Send,
@@ -98,7 +98,7 @@ where
     type Error = S::Error;
     type Future = BoxFuture<'a, Result<Self::Response, Error>>;
 
-    fn call(&self, req: Request<AsyncBody<'a, BodyWriter>>) -> Self::Future {
+    fn call(&self, req: Request<AsyncRequestBody<'a, BodyWriter>>) -> Self::Future {
         let idempotent = match self.idempotency {
             Idempotency::Always => true,
             Idempotency::ByMethod => req.method().is_idempotent(),
@@ -131,18 +131,21 @@ impl<S, B> State<S>
 where
     S: Service<Request<RawBody>, Response = Response<B>, Error = Error>,
 {
-    async fn call(mut self, req: Request<AsyncBody<'_, BodyWriter>>) -> Result<S::Response, Error> {
+    async fn call(
+        mut self,
+        req: Request<AsyncRequestBody<'_, BodyWriter>>,
+    ) -> Result<S::Response, Error> {
         let (parts, mut body) = req.into_parts();
 
         loop {
             let mut tracked = None;
-            let body: AsyncBody<'_, BodyWriter> = match &mut body {
-                AsyncBody::Empty => AsyncBody::Empty,
-                AsyncBody::Fixed(bytes) => AsyncBody::Fixed(bytes.clone()),
-                AsyncBody::Streaming(writer) => {
+            let body: AsyncRequestBody<'_, BodyWriter> = match &mut body {
+                AsyncRequestBody::Empty => AsyncRequestBody::Empty,
+                AsyncRequestBody::Fixed(bytes) => AsyncRequestBody::Fixed(bytes.clone()),
+                AsyncRequestBody::Streaming(writer) => {
                     let body =
                         Pin::new(tracked.insert(ResetTrackingBodyWriter::new(writer.as_mut())));
-                    AsyncBody::Streaming(body)
+                    AsyncRequestBody::Streaming(body)
                 }
             };
 
@@ -161,8 +164,8 @@ where
     fn clone_request<'a>(
         &self,
         parts: &Parts,
-        body: AsyncBody<'a, BodyWriter>,
-    ) -> Request<AsyncBody<'a, BodyWriter>> {
+        body: AsyncRequestBody<'a, BodyWriter>,
+    ) -> Request<AsyncRequestBody<'a, BodyWriter>> {
         let mut new_req = Request::new(());
 
         *new_req.method_mut() = parts.method.clone();
@@ -179,7 +182,7 @@ where
 
     async fn send_attempt(
         &mut self,
-        req: Request<AsyncBody<'_, BodyWriter>>,
+        req: Request<AsyncRequestBody<'_, BodyWriter>>,
     ) -> Result<AttemptOutcome<S::Response>, Error> {
         let mut span = zipkin::next_span()
             .with_name("conjure-runtime: attempt")
@@ -232,7 +235,7 @@ where
     // As noted above, this should be a separate layer!
     async fn send_raw(
         &mut self,
-        req: Request<AsyncBody<'_, BodyWriter>>,
+        req: Request<AsyncRequestBody<'_, BodyWriter>>,
     ) -> Result<S::Response, Error> {
         let (parts, body) = req.into_parts();
         let (body, writer) = RawBody::new(body);
@@ -388,7 +391,7 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Empty)
+            .body(AsyncRequestBody::Empty)
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -410,7 +413,7 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Fixed(Bytes::from(body)))
+            .body(AsyncRequestBody::Fixed(Bytes::from(body)))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -453,7 +456,7 @@ mod test {
         pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(body))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -493,7 +496,7 @@ mod test {
         pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(body))
             .unwrap();
         let err = service.call(request).await.err().unwrap();
 
@@ -534,7 +537,7 @@ mod test {
         pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(body))
             .unwrap();
         let err = service.call(request).await.err().unwrap();
 
@@ -609,7 +612,7 @@ mod test {
         pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(body))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -642,7 +645,7 @@ mod test {
         pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(body))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -675,7 +678,7 @@ mod test {
         pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(body))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -708,7 +711,7 @@ mod test {
         pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(body))
             .unwrap();
         service.call(request).await.err().unwrap();
     }
@@ -741,7 +744,7 @@ mod test {
         pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(body))
             .unwrap();
         service.call(request).await.err().unwrap();
     }
@@ -770,7 +773,7 @@ mod test {
         let request = Request::builder()
             .method(Method::POST)
             .extension(endpoint())
-            .body(AsyncBody::Empty)
+            .body(AsyncRequestBody::Empty)
             .unwrap();
         let err = service.call(request).await.err().unwrap();
         assert_eq!(err.cause().to_string(), "blammo");
@@ -800,7 +803,7 @@ mod test {
         let request = Request::builder()
             .method(Method::POST)
             .extension(endpoint())
-            .body(AsyncBody::Empty)
+            .body(AsyncRequestBody::Empty)
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -835,7 +838,7 @@ mod test {
         pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(body))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -867,7 +870,7 @@ mod test {
         pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(body))
             .unwrap();
         service.call(request).await.err().unwrap();
     }

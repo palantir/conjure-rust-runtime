@@ -16,7 +16,7 @@ use crate::raw::{DefaultRawClient, RawBody, Service};
 use crate::Builder;
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{self, AsyncBody, AsyncClient, Body};
+use conjure_http::client::{self, AsyncClient, AsyncRequestBody, RequestBody};
 use futures::channel::oneshot;
 use futures::executor;
 use http::{Request, Response};
@@ -86,13 +86,13 @@ where
 
     fn send(
         &self,
-        req: Request<Body<'_, Self::BodyWriter>>,
+        req: Request<RequestBody<'_, Self::BodyWriter>>,
     ) -> Result<Response<Self::ResponseBody>, Error> {
         let mut streamer = None;
         let req = req.map(|body| match body {
-            Body::Empty => ShimBody::Empty,
-            Body::Fixed(bytes) => ShimBody::Fixed(bytes),
-            Body::Streaming(body_writer) => {
+            RequestBody::Empty => ShimBody::Empty,
+            RequestBody::Fixed(bytes) => ShimBody::Fixed(bytes),
+            RequestBody::Streaming(body_writer) => {
                 let shim = body::shim(body_writer);
                 streamer = Some(shim.1);
                 ShimBody::Streaming(shim.0)
@@ -112,12 +112,12 @@ where
                 let (parts, body) = req.into_parts();
                 let mut body_writer;
                 let body = match body {
-                    ShimBody::Empty => AsyncBody::Empty,
-                    ShimBody::Fixed(bytes) => AsyncBody::Fixed(bytes),
+                    ShimBody::Empty => AsyncRequestBody::Empty,
+                    ShimBody::Fixed(bytes) => AsyncRequestBody::Fixed(bytes),
                     ShimBody::Streaming(writer) => {
                         body_writer = writer;
                         let writer = Pin::new(&mut body_writer);
-                        AsyncBody::Streaming(writer)
+                        AsyncRequestBody::Streaming(writer)
                     }
                 };
                 let req = Request::from_parts(parts, body);
