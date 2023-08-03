@@ -120,8 +120,8 @@ where
                 .timer(
                     MetricId::new("client.response")
                         .with_tag("channel-name", metrics.service_name.clone())
-                        .with_tag("service-name", this.endpoint.service())
-                        .with_tag("endpoint", this.endpoint.name())
+                        .with_tag("service-name", this.endpoint.service().to_string())
+                        .with_tag("endpoint", this.endpoint.name().to_string())
                         .with_tag("status", status),
                 )
                 .update(this.start.elapsed());

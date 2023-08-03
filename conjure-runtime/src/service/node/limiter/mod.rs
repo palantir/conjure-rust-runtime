@@ -31,7 +31,7 @@ mod deficit_semaphore;
 #[derive(PartialEq, Eq, Hash)]
 struct Endpoint {
     method: Method,
-    pattern: &'static str,
+    pattern: String,
 }
 
 pub struct Limiter {
@@ -51,14 +51,14 @@ impl Limiter {
         &self.host
     }
 
-    pub fn acquire(&self, method: &Method, pattern: &'static str) -> Acquire {
+    pub fn acquire(&self, method: &Method, pattern: &str) -> Acquire {
         Acquire {
             endpoint: future::maybe_done(
                 self.endpoints
                     .lock()
                     .entry(Endpoint {
                         method: method.clone(),
-                        pattern,
+                        pattern: pattern.to_string(),
                     })
                     .or_insert_with(CiadConcurrencyLimiter::new)
                     .clone()
