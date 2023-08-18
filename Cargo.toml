@@ -7,7 +7,6 @@ members = [
     "conjure-runtime-config",
     "conjure-verification",
     "conjure-verification-api",
-    "simulation",
 ]
 
 [profile.release]

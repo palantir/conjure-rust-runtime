@@ -35,9 +35,5 @@ jobs:
       - *RESTORE_DEPS
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all --all-targets
-      - run: cargo test -p conjure-runtime
-      - run: cargo test -p conjure-runtime-config
-      - run: cargo test -p conjure-verification
-      # running unoptimized simulations is slower than building + running optimized simulations
-      - run: cargo test -p simulation --release
+      - run: cargo test --all
       - *SAVE_DEPS
