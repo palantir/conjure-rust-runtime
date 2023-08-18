@@ -1,0 +1,5 @@
+type: fix
+fix:
+  description: Bump crate version to 4.7.0
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/166
