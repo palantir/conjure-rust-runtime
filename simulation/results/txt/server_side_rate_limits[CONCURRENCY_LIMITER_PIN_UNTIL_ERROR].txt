@@ -1,1 +1,0 @@
-success=99.7%	client_mean=0ns	server_cpu=43810600s	client_received=150000/150000	server_resps=219053	codes={200=149520, 429=480}
