@@ -296,7 +296,7 @@ where
         let backoff = match retry_after {
             Some(backoff) => backoff,
             None => {
-                let scale = 1 << self.attempt;
+                let scale = 1 << (self.attempt - 1);
                 let max = self.backoff_slot_size * scale;
                 // gen_range panics when min == max
                 if max == Duration::from_secs(0) {
