@@ -17,11 +17,6 @@ use crate::{BaseBody, ResponseBody};
 use bytes::Bytes;
 use http::Response;
 use http_body::Body;
-use pin_project::pin_project;
-use std::error;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 /// A layer which wraps the response body in the conjure-runtime public `ResponseBody` type.
 pub struct ResponseBodyLayer;
@@ -40,38 +35,14 @@ pub struct ResponseBodyService<S> {
 
 impl<S, R, B> Service<R> for ResponseBodyService<S>
 where
-    S: Service<R, Response = Response<BaseBody<B>>>,
+    S: Service<R, Response = Response<BaseBody<B>>> + Sync + Send,
+    R: Send,
     B: Body<Data = Bytes>,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     type Response = Response<ResponseBody<B>>;
     type Error = S::Error;
 
-    fn call(&self, req: R) -> impl Future<Output = Result<Self::Response, Self::Error>> {
-        ResponseBodyFuture {
-            future: self.inner.call(req),
-        }
-    }
-}
-
-#[pin_project]
-pub struct ResponseBodyFuture<F> {
-    #[pin]
-    future: F,
-}
-
-impl<F, B, E> Future for ResponseBodyFuture<F>
-where
-    F: Future<Output = Result<Response<BaseBody<B>>, E>>,
-    B: Body<Data = Bytes>,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
-    type Output = Result<Response<ResponseBody<B>>, E>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project()
-            .future
-            .poll(cx)
-            .map_ok(|res| res.map(ResponseBody::new))
+    async fn call(&self, req: R) -> Result<Self::Response, Self::Error> {
+        self.inner.call(req).await.map(|r| r.map(ResponseBody::new))
     }
 }
