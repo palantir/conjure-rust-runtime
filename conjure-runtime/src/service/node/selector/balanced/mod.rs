@@ -23,7 +23,6 @@ use rand::seq::SliceRandom;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use witchcraft_log::debug;
@@ -42,21 +41,25 @@ pub struct TrackedNode {
 }
 
 impl TrackedNode {
-    fn new(node: LimitedNode) -> Arc<TrackedNode> {
-        Arc::new(TrackedNode {
+    fn new(node: LimitedNode) -> TrackedNode {
+        TrackedNode {
             node,
             in_flight: AtomicUsize::new(0),
             recent_failures: CoarseExponentialDecayReservoir::new(FAILURE_MEMORY),
-        })
+        }
     }
 
-    fn acquire<B>(
-        self: Arc<TrackedNode>,
-        request: &Request<B>,
-    ) -> AcquiringNode<impl Future<Output = AcquiredNode> + '_> {
+    fn acquire<'a, 'b, 'c, B>(
+        &'a self,
+        request: &'b Request<B>,
+    ) -> AcquiringNode<'a, impl Future<Output = AcquiredNode> + 'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
         AcquiringNode {
-            node: self.clone(),
-            acquire: Box::pin(async move { self.node.acquire(request).await }),
+            node: self,
+            acquire: Box::pin(self.node.acquire(request)),
         }
     }
 
@@ -71,9 +74,8 @@ impl TrackedNode {
     }
 }
 
-// FIXME remove ownership
-pub struct AcquiringNode<F> {
-    node: Arc<TrackedNode>,
+pub struct AcquiringNode<'a, F> {
+    node: &'a TrackedNode,
     // FIXME(#69) ideally we'd just pin the entire Vec<AcquiringNode>
     acquire: Pin<Box<F>>,
 }
@@ -101,12 +103,12 @@ impl Entropy for RandEntropy {
 }
 
 struct State<T> {
-    nodes: Vec<Arc<TrackedNode>>,
+    nodes: Vec<TrackedNode>,
     entropy: T,
 }
 
 pub struct BalancedNodeSelectorLayer<T = RandEntropy> {
-    state: Arc<State<T>>,
+    state: State<T>,
 }
 
 impl BalancedNodeSelectorLayer {
@@ -121,10 +123,10 @@ where
 {
     fn with_entropy(nodes: Vec<LimitedNode>, entropy: T) -> Self {
         BalancedNodeSelectorLayer {
-            state: Arc::new(State {
+            state: State {
                 nodes: nodes.into_iter().map(TrackedNode::new).collect(),
                 entropy,
-            }),
+            },
         }
     }
 }
@@ -135,22 +137,22 @@ impl<T, S> Layer<S> for BalancedNodeSelectorLayer<T> {
     fn layer(self, inner: S) -> Self::Service {
         BalancedNodeSelectorService {
             state: self.state,
-            inner: Arc::new(inner),
+            inner,
         }
     }
 }
 
 pub struct BalancedNodeSelectorService<S, T = RandEntropy> {
-    state: Arc<State<T>>,
-    inner: Arc<S>,
+    state: State<T>,
+    inner: S,
 }
 
 impl<S, T> BalancedNodeSelectorService<S, T>
 where
     T: Entropy,
 {
-    async fn acquire<B1>(&self, req: &Request<B1>) -> (Arc<TrackedNode>, AcquiredNode) {
-        // Dialogue skips nodes that have significantly worse scores thatn previous ones on each
+    async fn acquire<'a, B1>(&'a self, req: &Request<B1>) -> (&'a TrackedNode, AcquiredNode) {
+        // Dialogue skips nodes that have significantly worse scores than previous ones on each
         // attempt, but to do that here we'd need a way to notify tasks on score changes. Rather
         // than adding the complexity of implementing that, we just perform the filtering once. This
         // filtering is intended to bypass nodes that are e.g. entirely offline, so it could be fine
@@ -189,7 +191,7 @@ where
                     .saturating_mul(UNHEALTHY_SCORE_MULTIPLIER);
             }
 
-            nodes.push(snapshot.node.clone().acquire(req));
+            nodes.push(snapshot.node.acquire(req));
         }
 
         // shuffle so that we don't break ties the same way every request
@@ -199,15 +201,15 @@ where
     }
 }
 
-struct Acquire<F> {
-    nodes: Vec<AcquiringNode<F>>,
+struct Acquire<'a, F> {
+    nodes: Vec<AcquiringNode<'a, F>>,
 }
 
-impl<F> Future for Acquire<F>
+impl<'a, F> Future for Acquire<'a, F>
 where
     F: Future<Output = AcquiredNode>,
 {
-    type Output = (Arc<TrackedNode>, AcquiredNode);
+    type Output = (&'a TrackedNode, AcquiredNode);
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // even though we've filtered above in acquire, we still want to poll the nodes in order of
@@ -224,7 +226,7 @@ where
 
         for snapshot in snapshots {
             if let Poll::Ready(acquired) = snapshot.node.acquire.as_mut().poll(cx) {
-                return Poll::Ready((snapshot.node.node.clone(), acquired));
+                return Poll::Ready((snapshot.node.node, acquired));
             }
         }
 
@@ -249,7 +251,7 @@ where
             .await;
 
         node.in_flight.fetch_add(1, Ordering::SeqCst);
-        let _guard = InFlightGuard { node: &node };
+        let _guard = InFlightGuard { node };
 
         let result = tracked.wrap(&self.inner, req).await;
 
@@ -290,6 +292,7 @@ mod test {
     use http::StatusCode;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use tokio::time;
 
     fn request() -> Request<()> {
