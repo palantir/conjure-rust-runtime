@@ -116,7 +116,7 @@ impl LimitedNode {
 
     pub async fn wrap<S, B1, B2>(
         &self,
-        inner: &Arc<S>,
+        inner: &S,
         request: Request<B1>,
     ) -> Result<S::Response, S::Error>
     where

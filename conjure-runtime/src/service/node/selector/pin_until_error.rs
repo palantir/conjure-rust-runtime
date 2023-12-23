@@ -170,15 +170,10 @@ where
     }
 }
 
-struct State<T> {
-    current_pin: AtomicUsize,
-    nodes: T,
-}
-
 /// A node selector layer which pins to a host until a request either fails with a 5xx error or IO error, after which
 /// it rotates to the next.
 pub struct PinUntilErrorNodeSelectorLayer<T> {
-    state: Arc<State<T>>,
+    nodes: T,
 }
 
 impl<T> PinUntilErrorNodeSelectorLayer<T>
@@ -186,12 +181,7 @@ where
     T: Nodes<LimitedNode>,
 {
     pub fn new(nodes: T) -> PinUntilErrorNodeSelectorLayer<T> {
-        PinUntilErrorNodeSelectorLayer {
-            state: Arc::new(State {
-                current_pin: AtomicUsize::new(0),
-                nodes,
-            }),
-        }
+        PinUntilErrorNodeSelectorLayer { nodes }
     }
 }
 
@@ -200,15 +190,17 @@ impl<T, S> Layer<S> for PinUntilErrorNodeSelectorLayer<T> {
 
     fn layer(self, inner: S) -> Self::Service {
         PinUntilErrorNodeSelectorService {
-            state: self.state,
-            inner: Arc::new(inner),
+            nodes: self.nodes,
+            current_pin: AtomicUsize::new(0),
+            inner,
         }
     }
 }
 
 pub struct PinUntilErrorNodeSelectorService<T, S> {
-    state: Arc<State<T>>,
-    inner: Arc<S>,
+    nodes: T,
+    current_pin: AtomicUsize,
+    inner: S,
 }
 
 impl<T, S, B1, B2> Service<Request<B1>> for PinUntilErrorNodeSelectorService<T, S>
@@ -221,8 +213,8 @@ where
     type Error = S::Error;
 
     async fn call(&self, req: Request<B1>) -> Result<Self::Response, Self::Error> {
-        let pin = self.state.current_pin.load(Ordering::SeqCst);
-        let node = self.state.nodes.get(pin);
+        let pin = self.current_pin.load(Ordering::SeqCst);
+        let node = self.nodes.get(pin);
 
         let result = node.wrap(&self.inner, req).await;
 
@@ -232,13 +224,10 @@ where
         };
 
         if increment_host {
-            let new_pin = (pin + 1) % self.state.nodes.len();
-            let _ = self.state.current_pin.compare_exchange(
-                pin,
-                new_pin,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            );
+            let new_pin = (pin + 1) % self.nodes.len();
+            let _ =
+                self.current_pin
+                    .compare_exchange(pin, new_pin, Ordering::SeqCst, Ordering::SeqCst);
         }
 
         result
