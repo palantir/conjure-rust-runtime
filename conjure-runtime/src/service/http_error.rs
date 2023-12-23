@@ -15,18 +15,14 @@ use crate::errors::{RemoteError, ThrottledError, UnavailableError};
 use crate::raw::Service;
 use crate::service::Layer;
 use crate::{Builder, ServerQos, ServiceError};
-use bytes::BufMut;
+use bytes::Bytes;
 use conjure_error::Error;
 use conjure_serde::json;
-use futures::ready;
 use http::header::RETRY_AFTER;
 use http::{Request, Response, StatusCode};
-use http_body::Body;
-use pin_project::pin_project;
+use http_body::{Body, Limited};
+use hyper::body;
 use std::error;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use std::time::Duration;
 use witchcraft_log::info;
 
@@ -74,149 +70,85 @@ pub struct HttpErrorService<S> {
 
 impl<S, B1, B2> Service<Request<B1>> for HttpErrorService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error> + Sync + Send,
+    B1: Sync + Send,
     B2: Body + Send,
+    B2::Data: Send,
     B2::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     type Response = Response<B2>;
     type Error = Error;
 
-    fn call(&self, req: Request<B1>) -> impl Future<Output = Result<Self::Response, Self::Error>> {
-        HttpErrorFuture::Call {
-            future: self.inner.call(req),
-            server_qos: self.server_qos,
-            service_error: self.service_error,
+    async fn call(&self, req: Request<B1>) -> Result<Self::Response, Self::Error> {
+        let response = self.inner.call(req).await?;
+
+        if response.status().is_success() {
+            return Ok(response);
         }
-    }
-}
 
-#[pin_project(project = Projection)]
-pub enum HttpErrorFuture<F, B> {
-    Call {
-        #[pin]
-        future: F,
-        server_qos: ServerQos,
-        service_error: ServiceError,
-    },
-    ReadingBody {
-        status: StatusCode,
-        #[pin]
-        body: B,
-        buf: Vec<u8>,
-        service_error: ServiceError,
-    },
-}
+        match response.status() {
+            StatusCode::TOO_MANY_REQUESTS => {
+                let retry_after = response
+                    .headers()
+                    .get(RETRY_AFTER)
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| s.parse().ok())
+                    .map(Duration::from_secs);
+                let error = ThrottledError { retry_after };
 
-impl<F, B> Future for HttpErrorFuture<F, B>
-where
-    F: Future<Output = Result<Response<B>, Error>>,
-    B: Body,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
-    type Output = Result<Response<B>, Error>;
+                let e = match self.server_qos {
+                    ServerQos::AutomaticRetry => Error::internal_safe(error),
+                    ServerQos::Propagate429And503ToCaller => match retry_after {
+                        Some(retry_after) => Error::throttle_for_safe(error, retry_after),
+                        None => Error::throttle_safe(error),
+                    },
+                };
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        loop {
-            let new_state = match self.as_mut().project() {
-                Projection::Call {
-                    future,
-                    server_qos,
-                    service_error,
-                } => {
-                    let response = ready!(future.poll(cx))?;
+                Err(e)
+            }
+            StatusCode::SERVICE_UNAVAILABLE => {
+                let error = UnavailableError(());
 
-                    if response.status().is_success() {
-                        return Poll::Ready(Ok(response));
+                let e = match self.server_qos {
+                    ServerQos::AutomaticRetry => Error::internal_safe(error),
+                    ServerQos::Propagate429And503ToCaller => Error::unavailable_safe(error),
+                };
+
+                Err(e)
+            }
+            _ => {
+                let (parts, body) = response.into_parts();
+
+                let body = match body::to_bytes(Limited::new(body, 10 * 1024)).await {
+                    Ok(body) => body,
+                    Err(e) => {
+                        info!("error reading response body", error: Error::internal(e));
+                        Bytes::new()
                     }
+                };
 
-                    match response.status() {
-                        StatusCode::TOO_MANY_REQUESTS => {
-                            let retry_after = response
-                                .headers()
-                                .get(RETRY_AFTER)
-                                .and_then(|h| h.to_str().ok())
-                                .and_then(|s| s.parse().ok())
-                                .map(Duration::from_secs);
-                            let error = ThrottledError { retry_after };
+                let error = RemoteError {
+                    status: parts.status,
+                    error: json::client_from_slice(&body).ok(),
+                };
+                let log_body = error.error.is_none();
 
-                            let e = match server_qos {
-                                ServerQos::AutomaticRetry => Error::internal_safe(error),
-                                ServerQos::Propagate429And503ToCaller => match retry_after {
-                                    Some(retry_after) => {
-                                        Error::throttle_for_safe(error, retry_after)
-                                    }
-                                    None => Error::throttle_safe(error),
-                                },
-                            };
-
-                            return Poll::Ready(Err(e));
-                        }
-                        StatusCode::SERVICE_UNAVAILABLE => {
-                            let error = UnavailableError(());
-
-                            let e = match server_qos {
-                                ServerQos::AutomaticRetry => Error::internal_safe(error),
-                                ServerQos::Propagate429And503ToCaller => {
-                                    Error::unavailable_safe(error)
-                                }
-                            };
-
-                            return Poll::Ready(Err(e));
-                        }
-                        _ => HttpErrorFuture::ReadingBody {
-                            status: response.status(),
-                            body: response.into_body(),
-                            buf: vec![],
-                            service_error: *service_error,
-                        },
+                let mut error = match (&error.error, self.service_error) {
+                    (Some(e), ServiceError::PropagateToCaller) => {
+                        let e = e.clone();
+                        Error::propagated_service_safe(error, e)
                     }
+                    (Some(_), ServiceError::WrapInNewError) | (None, _) => {
+                        Error::internal_safe(error)
+                    }
+                };
+
+                if log_body {
+                    error = error.with_unsafe_param("body", String::from_utf8_lossy(&body));
                 }
-                Projection::ReadingBody {
-                    status,
-                    mut body,
-                    buf,
-                    service_error,
-                } => {
-                    loop {
-                        let data = match ready!(body.as_mut().poll_data(cx)) {
-                            Some(Ok(data)) => data,
-                            Some(Err(e)) => {
-                                info!("error reading response body", error: Error::internal(e));
-                                break;
-                            }
-                            None => break,
-                        };
 
-                        buf.put(data);
-                        // limit how much we read in case something weird is going on
-                        if buf.len() > 10 * 1024 {
-                            break;
-                        }
-                    }
-
-                    let error = RemoteError {
-                        status: *status,
-                        error: json::client_from_slice(buf).ok(),
-                    };
-                    let log_body = error.error.is_none();
-                    let mut error = match (&error.error, service_error) {
-                        (Some(e), ServiceError::PropagateToCaller) => {
-                            let e = e.clone();
-                            Error::propagated_service_safe(error, e)
-                        }
-                        (Some(_), ServiceError::WrapInNewError) | (None, _) => {
-                            Error::internal_safe(error)
-                        }
-                    };
-                    if log_body {
-                        error = error.with_unsafe_param("body", String::from_utf8_lossy(buf));
-                    }
-
-                    return Poll::Ready(Err(error));
-                }
-            };
-
-            self.set(new_state);
+                Err(error)
+            }
         }
     }
 }
