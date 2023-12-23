@@ -154,7 +154,7 @@ impl AcquiredNode {
     where
         S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
     {
-        req.extensions_mut().insert(self.node.clone());
+        req.extensions_mut().insert(self.node);
 
         let response = inner.call(req).await;
         if let Some(mut permit) = self.permit {
