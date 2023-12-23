@@ -15,6 +15,7 @@ use crate::service::{Layer, Service};
 use crate::util::spans::{self, HttpSpanFuture};
 use conjure_error::Error;
 use http::{Request, Response};
+use std::future::Future;
 
 /// A layer which manages the root level request span.
 pub struct RootSpanLayer;
@@ -37,9 +38,8 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = HttpSpanFuture<S::Future>;
 
-    fn call(&self, req: Request<B1>) -> Self::Future {
+    fn call(&self, req: Request<B1>) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         let mut span = zipkin::next_span()
             .with_name("conjure-runtime: request")
             .detach();

@@ -44,9 +44,8 @@ where
 {
     type Response = Response<WaitForSpansBody<B>>;
     type Error = S::Error;
-    type Future = WaitForSpansFuture<S::Future>;
 
-    fn call(&self, req: R) -> Self::Future {
+    fn call(&self, req: R) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         WaitForSpansFuture {
             future: zipkin::next_span()
                 .with_name("conjure-runtime: wait-for-headers")

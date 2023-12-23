@@ -75,14 +75,13 @@ pub struct HttpErrorService<S> {
 impl<S, B1, B2> Service<Request<B1>> for HttpErrorService<S>
 where
     S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
-    B2: Body,
+    B2: Body + Send,
     B2::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     type Response = Response<B2>;
     type Error = Error;
-    type Future = HttpErrorFuture<S::Future, B2>;
 
-    fn call(&self, req: Request<B1>) -> Self::Future {
+    fn call(&self, req: Request<B1>) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         HttpErrorFuture::Call {
             future: self.inner.call(req),
             server_qos: self.server_qos,

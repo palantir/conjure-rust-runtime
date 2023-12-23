@@ -56,9 +56,11 @@ where
 {
     type Response = Response<DecodedBody<B2>>;
     type Error = S::Error;
-    type Future = GzipFuture<S::Future>;
 
-    fn call(&self, mut req: Request<B1>) -> Self::Future {
+    fn call(
+        &self,
+        mut req: Request<B1>,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         if let Entry::Vacant(e) = req.headers_mut().entry(ACCEPT_ENCODING) {
             e.insert(GZIP.clone());
         }

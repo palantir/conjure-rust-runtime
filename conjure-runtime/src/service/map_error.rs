@@ -57,11 +57,10 @@ where
     S: Service<R>,
     S::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
-    type Error = Error;
     type Response = S::Response;
-    type Future = MapErrorFuture<S::Future>;
+    type Error = Error;
 
-    fn call(&self, req: R) -> Self::Future {
+    fn call(&self, req: R) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         MapErrorFuture {
             future: self.inner.call(req),
         }

@@ -18,6 +18,7 @@ use conjure_http::client::Endpoint;
 use http::header::USER_AGENT;
 use http::{HeaderValue, Request};
 use std::convert::TryFrom;
+use std::future::Future;
 
 /// A layer which injects a `User-Agent` header into requests.
 ///
@@ -59,9 +60,11 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
 
-    fn call(&self, mut req: Request<B>) -> Self::Future {
+    fn call(
+        &self,
+        mut req: Request<B>,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         let endpoint = req
             .extensions()
             .get::<Endpoint>()

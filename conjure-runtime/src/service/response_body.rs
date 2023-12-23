@@ -45,12 +45,9 @@ where
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     type Response = Response<ResponseBody<B>>;
-
     type Error = S::Error;
 
-    type Future = ResponseBodyFuture<S::Future>;
-
-    fn call(&self, req: R) -> Self::Future {
+    fn call(&self, req: R) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         ResponseBodyFuture {
             future: self.inner.call(req),
         }

@@ -44,9 +44,8 @@ where
 {
     type Error = S::Error;
     type Response = S::Response;
-    type Future = NodeMetricsFuture<S::Future>;
 
-    fn call(&self, req: Request<B1>) -> Self::Future {
+    fn call(&self, req: Request<B1>) -> impl Future<Output = Result<S::Response, S::Error>> {
         let node = req
             .extensions()
             .get::<Arc<Node>>()

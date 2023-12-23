@@ -22,11 +22,12 @@ use crate::{BodyWriter, Builder, Idempotency};
 use async_trait::async_trait;
 use conjure_error::{Error, ErrorKind};
 use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, Endpoint};
-use futures::future::{self, BoxFuture};
+use futures::future;
 use http::request::Parts;
 use http::{Request, Response, StatusCode};
 use rand::Rng;
 use std::error;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::time::{self, Duration};
@@ -91,14 +92,15 @@ impl<'a, S, B> Service<Request<AsyncRequestBody<'a, BodyWriter>>> for RetryServi
 where
     S: Service<Request<RawBody>, Response = Response<B>, Error = Error> + 'a + Sync + Send,
     S::Response: Send,
-    S::Future: Send,
     B: 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = BoxFuture<'a, Result<Self::Response, Error>>;
 
-    fn call(&self, req: Request<AsyncRequestBody<'a, BodyWriter>>) -> Self::Future {
+    fn call(
+        &self,
+        req: Request<AsyncRequestBody<'a, BodyWriter>>,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         let idempotent = match self.idempotency {
             Idempotency::Always => true,
             Idempotency::ByMethod => req.method().is_idempotent(),
@@ -114,7 +116,7 @@ where
             attempt: 0,
         };
 
-        Box::pin(state.call(req))
+        state.call(req)
     }
 }
 

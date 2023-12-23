@@ -13,22 +13,17 @@
 // limitations under the License.
 use crate::raw::Service;
 use crate::rng::ConjureRng;
-use crate::service::node::{LimitedNode, Wrap};
+use crate::service::node::LimitedNode;
 use crate::service::Layer;
 use crate::Builder;
 use arc_swap::ArcSwap;
 use conjure_error::Error;
-use futures::ready;
 use http::{Request, Response};
-use pin_project::pin_project;
 use rand::distributions::uniform::SampleUniform;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use tokio::time::{Duration, Instant};
 
 // we reshuffle nodes every 10 minutes on average, with 30 seconds of jitter to either side
@@ -218,47 +213,18 @@ pub struct PinUntilErrorNodeSelectorService<T, S> {
 
 impl<T, S, B1, B2> Service<Request<B1>> for PinUntilErrorNodeSelectorService<T, S>
 where
-    T: Nodes<LimitedNode>,
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
+    T: Nodes<LimitedNode> + Sync + Send,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error> + Sync + Send,
+    B1: Sync + Send,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = PinUntilErrorNodeSelectorFuture<T, S, B1>;
 
-    fn call(&self, req: Request<B1>) -> Self::Future {
+    async fn call(&self, req: Request<B1>) -> Result<Self::Response, Self::Error> {
         let pin = self.state.current_pin.load(Ordering::SeqCst);
         let node = self.state.nodes.get(pin);
 
-        PinUntilErrorNodeSelectorFuture {
-            future: node.wrap(&self.inner, req),
-            state: self.state.clone(),
-            pin,
-        }
-    }
-}
-
-#[pin_project]
-pub struct PinUntilErrorNodeSelectorFuture<T, S, B>
-where
-    S: Service<Request<B>>,
-{
-    #[pin]
-    future: Wrap<S, B>,
-    state: Arc<State<T>>,
-    pin: usize,
-}
-
-impl<T, S, B1, B2> Future for PinUntilErrorNodeSelectorFuture<T, S, B1>
-where
-    T: Nodes<LimitedNode>,
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
-{
-    type Output = Result<S::Response, S::Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-
-        let result = ready!(this.future.poll(cx));
+        let result = node.wrap(&self.inner, req).await;
 
         let increment_host = match &result {
             Ok(response) => response.status().is_server_error(),
@@ -266,16 +232,16 @@ where
         };
 
         if increment_host {
-            let new_pin = (*this.pin + 1) % this.state.nodes.len();
-            let _ = this.state.current_pin.compare_exchange(
-                *this.pin,
+            let new_pin = (pin + 1) % self.state.nodes.len();
+            let _ = self.state.current_pin.compare_exchange(
+                pin,
                 new_pin,
                 Ordering::SeqCst,
                 Ordering::SeqCst,
             );
         }
 
-        Poll::Ready(result)
+        result
     }
 }
 

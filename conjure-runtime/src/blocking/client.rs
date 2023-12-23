@@ -76,7 +76,6 @@ impl<T, B> conjure_http::client::Client for Client<T>
 where
     T: Service<Request<RawBody>, Response = Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
-    T::Future: Send,
     B: http_body::Body<Data = Bytes> + 'static + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {

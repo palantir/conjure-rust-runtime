@@ -73,9 +73,8 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = MetricsFuture<S::Future>;
 
-    fn call(&self, req: Request<B1>) -> Self::Future {
+    fn call(&self, req: Request<B1>) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         MetricsFuture {
             endpoint: req
                 .extensions()

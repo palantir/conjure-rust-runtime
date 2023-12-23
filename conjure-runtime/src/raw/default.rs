@@ -162,9 +162,11 @@ pub struct DefaultRawClient(Client<ConjureConnector, RawBody>);
 impl Service<Request<RawBody>> for DefaultRawClient {
     type Response = Response<DefaultRawBody>;
     type Error = DefaultRawError;
-    type Future = DefaultRawFuture;
 
-    fn call(&self, req: Request<RawBody>) -> Self::Future {
+    fn call(
+        &self,
+        req: Request<RawBody>,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         DefaultRawFuture {
             future: self.0.request(req),
             _p: PhantomPinned,
