@@ -23,7 +23,6 @@ use http_body::{Body, SizeHint};
 use once_cell::sync::Lazy;
 use pin_project::pin_project;
 use std::error::Error;
-use std::future::Future;
 use std::io::Write;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -50,43 +49,20 @@ pub struct GzipService<S> {
 
 impl<S, B1, B2> Service<Request<B1>> for GzipService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>>,
+    S: Service<Request<B1>, Response = Response<B2>> + Sync + Send,
+    B1: Sync + Send,
     B2: Body<Data = Bytes>,
     B2::Error: Into<Box<dyn Error + Sync + Send>>,
 {
     type Response = Response<DecodedBody<B2>>;
     type Error = S::Error;
 
-    fn call(
-        &self,
-        mut req: Request<B1>,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
+    async fn call(&self, mut req: Request<B1>) -> Result<Self::Response, Self::Error> {
         if let Entry::Vacant(e) = req.headers_mut().entry(ACCEPT_ENCODING) {
             e.insert(GZIP.clone());
         }
 
-        GzipFuture {
-            future: self.inner.call(req),
-        }
-    }
-}
-
-#[pin_project]
-pub struct GzipFuture<F> {
-    #[pin]
-    future: F,
-}
-
-impl<F, E, B> Future for GzipFuture<F>
-where
-    F: Future<Output = Result<Response<B>, E>>,
-    B: Body<Data = Bytes>,
-    B::Error: Into<Box<dyn Error + Sync + Send>>,
-{
-    type Output = Result<Response<DecodedBody<B>>, E>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let response = ready!(self.project().future.poll(cx))?;
+        let response = self.inner.call(req).await?;
         let (mut parts, body) = response.into_parts();
 
         let decoder = match parts.headers.get(CONTENT_ENCODING) {
@@ -104,7 +80,7 @@ where
             done: false,
         };
 
-        Poll::Ready(Ok(Response::from_parts(parts, body)))
+        Ok(Response::from_parts(parts, body))
     }
 }
 
