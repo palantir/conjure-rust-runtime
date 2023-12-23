@@ -13,14 +13,12 @@
 // limitations under the License.
 use crate::raw::Service;
 use crate::service::Layer;
-use futures::ready;
 use http::{HeaderMap, Response};
 use http_body::{Body, SizeHint};
 use pin_project::pin_project;
-use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use zipkin::{Bind, Detached, Kind, OpenSpan};
+use zipkin::{Detached, Kind, OpenSpan};
 
 /// A layer which wraps the request future in a `conjure-runtime: wait-for-headers` span, and the response's body in a
 /// `conjure-runtime: wait-for-body` span.
@@ -40,43 +38,26 @@ pub struct WaitForSpansService<S> {
 
 impl<S, R, B> Service<R> for WaitForSpansService<S>
 where
-    S: Service<R, Response = Response<B>>,
+    S: Service<R, Response = Response<B>> + Sync + Send,
+    R: Send,
 {
     type Response = Response<WaitForSpansBody<B>>;
     type Error = S::Error;
 
-    fn call(&self, req: R) -> impl Future<Output = Result<Self::Response, Self::Error>> {
-        WaitForSpansFuture {
-            future: zipkin::next_span()
-                .with_name("conjure-runtime: wait-for-headers")
-                .with_kind(Kind::Client)
-                .detach()
-                .bind(self.inner.call(req)),
-        }
-    }
-}
+    async fn call(&self, req: R) -> Result<Self::Response, Self::Error> {
+        let response = zipkin::next_span()
+            .with_name("conjure-runtime: wait-for-headers")
+            .with_kind(Kind::Client)
+            .detach()
+            .bind(self.inner.call(req))
+            .await?;
 
-#[pin_project]
-pub struct WaitForSpansFuture<F> {
-    #[pin]
-    future: Bind<F>,
-}
-
-impl<F, B, E> Future for WaitForSpansFuture<F>
-where
-    F: Future<Output = Result<Response<B>, E>>,
-{
-    type Output = Result<Response<WaitForSpansBody<B>>, E>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let response = ready!(self.project().future.poll(cx))?;
-
-        Poll::Ready(Ok(response.map(|body| WaitForSpansBody {
+        Ok(response.map(|body| WaitForSpansBody {
             body,
             _span: zipkin::next_span()
                 .with_name("conjure-runtime: wait-for-body")
                 .detach(),
-        })))
+        }))
     }
 }
 
