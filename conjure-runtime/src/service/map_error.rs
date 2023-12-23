@@ -14,12 +14,8 @@
 use crate::raw::Service;
 use crate::service::Layer;
 use conjure_error::Error;
-use pin_project::pin_project;
 use std::error;
 use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 #[derive(Debug)]
 pub struct RawClientError(pub Box<dyn error::Error + Sync + Send>);
@@ -54,36 +50,17 @@ pub struct MapErrorService<S> {
 
 impl<S, R> Service<R> for MapErrorService<S>
 where
-    S: Service<R>,
+    S: Service<R> + Sync + Send,
     S::Error: Into<Box<dyn error::Error + Sync + Send>>,
+    R: Sync + Send,
 {
     type Response = S::Response;
     type Error = Error;
 
-    fn call(&self, req: R) -> impl Future<Output = Result<Self::Response, Self::Error>> {
-        MapErrorFuture {
-            future: self.inner.call(req),
-        }
-    }
-}
-
-#[pin_project]
-pub struct MapErrorFuture<F> {
-    #[pin]
-    future: F,
-}
-
-impl<F, T, E> Future for MapErrorFuture<F>
-where
-    F: Future<Output = Result<T, E>>,
-    E: Into<Box<dyn error::Error + Sync + Send>>,
-{
-    type Output = Result<T, Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project()
-            .future
-            .poll(cx)
+    async fn call(&self, req: R) -> Result<Self::Response, Self::Error> {
+        self.inner
+            .call(req)
+            .await
             .map_err(|e| Error::internal_safe(RawClientError(e.into())))
     }
 }
