@@ -16,7 +16,6 @@ use crate::service::node::LimitedNode;
 use crate::service::Layer;
 use conjure_error::Error;
 use http::{Request, Response};
-use std::sync::Arc;
 
 /// A node selector layer which always selects a single node.
 ///
@@ -37,14 +36,14 @@ impl<S> Layer<S> for SingleNodeSelectorLayer {
 
     fn layer(self, inner: S) -> SingleNodeSelectorService<S> {
         SingleNodeSelectorService {
-            inner: Arc::new(inner),
+            inner,
             node: self.node,
         }
     }
 }
 
 pub struct SingleNodeSelectorService<S> {
-    inner: Arc<S>,
+    inner: S,
     node: LimitedNode,
 }
 
