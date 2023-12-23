@@ -14,16 +14,10 @@
 use crate::service::node::limiter::ciad::{CiadConcurrencyLimiter, EndpointLevel, HostLevel};
 use crate::util::weak_reducing_gauge::Reduce;
 use conjure_error::Error;
-use futures::future::{self, MaybeDone};
-use futures::ready;
 use http::{Method, Response};
 use parking_lot::Mutex;
-use pin_project::pin_project;
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 mod ciad;
 mod deficit_semaphore;
@@ -51,47 +45,20 @@ impl Limiter {
         &self.host
     }
 
-    pub fn acquire(&self, method: &Method, pattern: &'static str) -> Acquire {
-        Acquire {
-            endpoint: future::maybe_done(
-                self.endpoints
-                    .lock()
-                    .entry(Endpoint {
-                        method: method.clone(),
-                        pattern,
-                    })
-                    .or_insert_with(CiadConcurrencyLimiter::new)
-                    .clone()
-                    .acquire(),
-            ),
-            host: self.host.clone().acquire(),
-        }
-    }
-}
+    pub async fn acquire(&self, method: &Method, pattern: &'static str) -> Permit {
+        let endpoint = self
+            .endpoints
+            .lock()
+            .entry(Endpoint {
+                method: method.clone(),
+                pattern,
+            })
+            .or_insert_with(CiadConcurrencyLimiter::new)
+            .clone();
+        let endpoint = endpoint.acquire().await;
+        let host = self.host.clone().acquire().await;
 
-#[pin_project]
-pub struct Acquire {
-    #[pin]
-    endpoint: MaybeDone<ciad::Acquire<EndpointLevel>>,
-    #[pin]
-    host: ciad::Acquire<HostLevel>,
-}
-
-impl Future for Acquire {
-    type Output = Permit;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-
-        // acquire the endpoint permit first to avoid contention issues in the balanced limiter where requests to a
-        // thottled endpoint could "lock out" requests to other endpoints if we take the host permit first.
-        ready!(this.endpoint.as_mut().poll(cx));
-        let host = ready!(this.host.poll(cx));
-
-        Poll::Ready(Permit {
-            endpoint: this.endpoint.take_output().unwrap(),
-            host,
-        })
+        Permit { endpoint, host }
     }
 }
 

@@ -15,15 +15,10 @@ use crate::service::map_error::RawClientError;
 use crate::service::node::limiter::deficit_semaphore::{self, DeficitSemaphore};
 use crate::util::atomic_f64::AtomicF64;
 use conjure_error::Error;
-use futures::ready;
 use http::{Response, StatusCode};
-use pin_project::pin_project;
-use std::future::Future;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 const INITIAL_LIMIT: usize = 20;
 const BACKOFF_RATIO: f64 = 0.9;
@@ -58,10 +53,14 @@ impl<B> CiadConcurrencyLimiter<B> {
         self.in_flight.load(Ordering::SeqCst)
     }
 
-    pub fn acquire(self: Arc<Self>) -> Acquire<B> {
-        Acquire {
-            future: self.semaphore.clone().acquire(),
+    pub async fn acquire(self: Arc<Self>) -> Permit<B> {
+        let permit = self.semaphore.clone().acquire().await;
+
+        Permit {
+            in_flight_snapshot: self.in_flight.fetch_add(1, Ordering::SeqCst) + 1,
+            mode: Mode::Ignore,
             limiter: self,
+            _permit: permit,
         }
     }
 
@@ -141,33 +140,6 @@ impl Behavior for EndpointLevel {
 
     fn on_failure(_: &Error) -> Mode {
         Mode::Ignore
-    }
-}
-
-#[pin_project]
-pub struct Acquire<B> {
-    #[pin]
-    future: deficit_semaphore::Acquire,
-    limiter: Arc<CiadConcurrencyLimiter<B>>,
-}
-
-impl<B> Future for Acquire<B>
-where
-    B: Behavior,
-{
-    type Output = Permit<B>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-
-        let permit = ready!(this.future.poll(cx));
-
-        Poll::Ready(Permit {
-            limiter: this.limiter.clone(),
-            in_flight_snapshot: this.limiter.in_flight.fetch_add(1, Ordering::SeqCst) + 1,
-            mode: Mode::Ignore,
-            _permit: permit,
-        })
     }
 }
 
