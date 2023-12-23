@@ -163,14 +163,17 @@ impl Service<Request<RawBody>> for DefaultRawClient {
     type Response = Response<DefaultRawBody>;
     type Error = DefaultRawError;
 
-    fn call(
-        &self,
-        req: Request<RawBody>,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
-        DefaultRawFuture {
-            future: self.0.request(req),
-            _p: PhantomPinned,
-        }
+    async fn call(&self, req: Request<RawBody>) -> Result<Self::Response, Self::Error> {
+        self.0
+            .request(req)
+            .await
+            .map(|r| {
+                r.map(|inner| DefaultRawBody {
+                    inner,
+                    _p: PhantomPinned,
+                })
+            })
+            .map_err(DefaultRawError)
     }
 }
 
