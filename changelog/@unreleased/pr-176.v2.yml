@@ -1,0 +1,5 @@
+type: break
+break:
+  description: The `Service` trait now supports `async fn call`.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/176
