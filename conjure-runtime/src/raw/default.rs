@@ -18,10 +18,9 @@ use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::Builder;
 use bytes::Bytes;
 use conjure_error::Error;
-use futures::ready;
 use http::{HeaderMap, Request, Response};
 use http_body::{Body, SizeHint};
-use hyper::client::{HttpConnector, ResponseFuture};
+use hyper::client::HttpConnector;
 use hyper::Client;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use pin_project::pin_project;
@@ -30,7 +29,6 @@ use rustls_pemfile::Item;
 use std::error;
 use std::fmt;
 use std::fs::File;
-use std::future::Future;
 use std::io::BufReader;
 use std::marker::PhantomPinned;
 use std::path::Path;
@@ -216,29 +214,6 @@ impl Body for DefaultRawBody {
 
     fn size_hint(&self) -> SizeHint {
         self.inner.size_hint()
-    }
-}
-
-/// The future type used by `DefaultRawClient`.
-#[pin_project]
-pub struct DefaultRawFuture {
-    #[pin]
-    future: ResponseFuture,
-    #[pin]
-    _p: PhantomPinned,
-}
-
-impl Future for DefaultRawFuture {
-    type Output = Result<Response<DefaultRawBody>, DefaultRawError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let response = ready!(self.project().future.poll(cx)).map_err(DefaultRawError)?;
-        let response = response.map(|inner| DefaultRawBody {
-            inner,
-            _p: PhantomPinned,
-        });
-
-        Poll::Ready(Ok(response))
     }
 }
 

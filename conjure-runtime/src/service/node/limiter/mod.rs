@@ -55,6 +55,9 @@ impl Limiter {
             })
             .or_insert_with(CiadConcurrencyLimiter::new)
             .clone();
+        // acquire the endpoint permit first to avoid contention issues in the balanced limiter
+        // where requests to a throttled endpoint could "lock out" requests to other endpoints if we
+        // take the host permit first.
         let endpoint = endpoint.acquire().await;
         let host = self.host.clone().acquire().await;
 
