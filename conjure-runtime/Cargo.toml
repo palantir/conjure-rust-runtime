@@ -20,15 +20,11 @@ conjure-runtime-config = { version = "4.7.0", path = "../conjure-runtime-config"
 conjure-serde = "3.6"
 flate2 = "1.0"
 futures = "0.3"
-http-body = "0.4"
-http-zipkin = "0.3"
-http = "0.2"
-hyper-rustls = { version = "0.24.0", default-features = false, features = [
-    "http1",
-    "http2",
-    "tls12",
-] }
+http-body = "1"
+http-zipkin = "0.4"
+http = "1"
 hyper = { version = "0.14", features = ["http1", "http2", "client", "tcp"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 once_cell = "1.0"
 parking_lot = "0.12"
 percent-encoding = "2.1"
@@ -37,17 +33,18 @@ rand = "0.8"
 rand_pcg = "0.3"
 refreshable = "1.0"
 regex = "1.0"
-rustls-pemfile = "1.0.2"
-rustls = "0.21.5"
+rustls-pemfile = "2"
+rustls = "0.22"
 serde-value = "0.7"
 serde = "1.0"
 tokio-io-timeout = "1.0"
+tokio-rustls = "0.25"
 tokio-util = { version = "0.7", features = ["codec"] }
 tokio = { version = "1.0", features = ["io-util", "rt-multi-thread", "time"] }
 tower-layer = "0.3"
 tower-service = "0.3"
 url = "2.0"
-webpki-roots = "0.25.1"
+webpki-roots = "0.26"
 witchcraft-log = "3"
 witchcraft-metrics = "1"
 zipkin = "0.4"

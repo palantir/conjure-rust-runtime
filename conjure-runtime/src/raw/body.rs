@@ -17,9 +17,8 @@ use conjure_error::Error;
 use conjure_http::client::{AsyncRequestBody, AsyncWriteBody};
 use futures::channel::{mpsc, oneshot};
 use futures::{pin_mut, Stream};
-use hyper::HeaderMap;
+use http_body::{Frame, SizeHint};
 use pin_project::pin_project;
-use std::io::Cursor;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -39,13 +38,13 @@ impl fmt::Display for BodyError {
 impl error::Error for BodyError {}
 
 pub(crate) enum BodyPart {
-    Chunk(Bytes),
+    Frame(Frame<Bytes>),
     Done,
 }
 
 pub(crate) enum RawBodyInner {
     Empty,
-    Single(Bytes),
+    Single(Frame<Bytes>),
     Stream {
         receiver: mpsc::Receiver<BodyPart>,
         polled: Option<oneshot::Sender<()>>,
@@ -100,18 +99,18 @@ impl RawBody {
 }
 
 impl http_body::Body for RawBody {
-    type Data = Cursor<Bytes>;
+    type Data = Bytes;
     type Error = BodyError;
 
-    fn poll_data(
+    fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let this = self.project();
 
         match mem::replace(this.inner, RawBodyInner::Empty) {
             RawBodyInner::Empty => Poll::Ready(None),
-            RawBodyInner::Single(chunk) => Poll::Ready(Some(Ok(Cursor::new(chunk)))),
+            RawBodyInner::Single(frame) => Poll::Ready(Some(Ok(frame))),
             RawBodyInner::Stream {
                 mut receiver,
                 mut polled,
@@ -121,9 +120,9 @@ impl http_body::Body for RawBody {
                 }
 
                 match Pin::new(&mut receiver).poll_next(cx) {
-                    Poll::Ready(Some(BodyPart::Chunk(bytes))) => {
+                    Poll::Ready(Some(BodyPart::Frame(frame))) => {
                         *this.inner = RawBodyInner::Stream { receiver, polled };
-                        Poll::Ready(Some(Ok(Cursor::new(bytes))))
+                        Poll::Ready(Some(Ok(frame)))
                     }
                     Poll::Ready(Some(BodyPart::Done)) => Poll::Ready(None),
                     Poll::Ready(None) => Poll::Ready(Some(Err(BodyError(())))),
@@ -136,15 +135,22 @@ impl http_body::Body for RawBody {
         }
     }
 
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        _: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
-        Poll::Ready(Ok(None))
-    }
-
     fn is_end_stream(&self) -> bool {
         matches!(self.inner, RawBodyInner::Empty)
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        match self.inner {
+            RawBodyInner::Empty => SizeHint::with_exact(0),
+            RawBodyInner::Single(frame) => {
+                let len = match frame.data_ref() {
+                    Some(buf) => buf.len(),
+                    None => 0,
+                };
+                SizeHint::with_exact(len)
+            }
+            RawBodyInner::Stream { .. } => SizeHint::new(),
+        }
     }
 }
 

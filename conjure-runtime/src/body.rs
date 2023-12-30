@@ -17,8 +17,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use conjure_error::Error;
 use futures::channel::mpsc;
 use futures::{ready, SinkExt, Stream};
-use http::HeaderMap;
-use http_body::Body;
+use http_body::{Body, Frame};
 use pin_project::pin_project;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -212,32 +211,33 @@ where
     type Data = B::Data;
     type Error = B::Error;
 
-    fn poll_data(
+    fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let this = self.project();
 
         if *this.done {
             return Poll::Ready(None);
-        }
 
-        let chunk = ready!(this.body.poll_data(cx));
-        if chunk.is_none() {
-            *this.done = true;
-        }
+            let frame = ready!(this.body.poll_frame(cx));
+            if frame.is_none() {
+                *this.done = true;
+            }
 
-        Poll::Ready(chunk)
+            Poll::Ready(frame)
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        if self.done {
+            true
+        } else {
+            self.body.is_end_stream()
+        }
     }
 
     fn size_hint(&self) -> http_body::SizeHint {
         self.body.size_hint()
-    }
-
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        cx: &mut Context,
-    ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
-        self.project().body.poll_trailers(cx)
     }
 }

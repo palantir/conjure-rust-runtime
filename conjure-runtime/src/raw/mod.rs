@@ -42,6 +42,7 @@ use std::sync::Arc;
 
 mod body;
 mod default;
+pub(crate) mod hyper_rustls;
 
 /// An asynchronous function from request to response.
 ///

@@ -399,7 +399,7 @@ mod test {
         let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 match &req.body().inner {
-                    RawBodyInner::Single(chunk) => assert_eq!(chunk, body),
+                    RawBodyInner::Single(chunk) => assert_eq!(chunk.data_ref().unwrap(), body),
                     _ => panic!("expected single chunk body"),
                 }
 

@@ -18,13 +18,13 @@ use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::Builder;
 use bytes::Bytes;
 use conjure_error::Error;
-use http::{HeaderMap, Request, Response};
-use http_body::{Body, SizeHint};
-use hyper::client::HttpConnector;
+use futures::ready;
+use http::{Request, Response};
+use http_body::{Body, Frame, SizeHint};
+use hyper::body::HttpBody;
+use hyper::client::{HttpConnector, ResponseFuture};
 use hyper::Client;
-use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use pin_project::pin_project;
-use rustls::{Certificate, ClientConfig, OwnedTrustAnchor, PrivateKey, RootCertStore};
 use rustls_pemfile::Item;
 use std::error;
 use std::fmt;
@@ -188,24 +188,14 @@ impl Body for DefaultRawBody {
     type Data = Bytes;
     type Error = DefaultRawError;
 
-    fn poll_data(
+    fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         self.project()
             .inner
-            .poll_data(cx)
+            .poll_frame(cx)
             .map(|o| o.map(|r| r.map_err(DefaultRawError)))
-    }
-
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
-        self.project()
-            .inner
-            .poll_trailers(cx)
-            .map_err(DefaultRawError)
     }
 
     fn is_end_stream(&self) -> bool {

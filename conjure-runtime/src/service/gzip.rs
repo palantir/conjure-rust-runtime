@@ -18,12 +18,13 @@ use bytes::{BufMut, Bytes, BytesMut};
 use flate2::write::GzDecoder;
 use futures::ready;
 use http::header::{Entry, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
-use http::{HeaderMap, HeaderValue, Request, Response};
-use http_body::{Body, SizeHint};
+use http::{HeaderValue, Request, Response};
+use http_body::{Body, Frame, SizeHint};
 use once_cell::sync::Lazy;
 use pin_project::pin_project;
 use std::error::Error;
 use std::io::Write;
+use std::mem;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -65,31 +66,32 @@ where
         let response = self.inner.call(req).await?;
         let (mut parts, body) = response.into_parts();
 
-        let decoder = match parts.headers.get(CONTENT_ENCODING) {
+        let state = match parts.headers.get(CONTENT_ENCODING) {
             Some(v) if v == *GZIP => {
                 parts.headers.remove(CONTENT_ENCODING);
                 parts.headers.remove(CONTENT_LENGTH);
-                Some(GzDecoder::new(BytesMut::new().writer()))
+                State::Decompressing(GzDecoder::new(BytesMut::new().writer()))
             }
-            _ => None,
+            _ => State::Done,
         };
 
-        let body = DecodedBody {
-            body,
-            decoder,
-            done: false,
-        };
+        let body = DecodedBody { body, state };
 
         Ok(Response::from_parts(parts, body))
     }
+}
+
+enum State {
+    Decompressing(GzDecoder<Writer<BytesMut>>),
+    Last(Frame<Bytes>),
+    Done,
 }
 
 #[pin_project]
 pub struct DecodedBody<B> {
     #[pin]
     body: B,
-    decoder: Option<GzDecoder<Writer<BytesMut>>>,
-    done: bool,
+    state: State,
 }
 
 impl<B> Body for DecodedBody<B>
@@ -101,63 +103,84 @@ where
 
     type Error = Box<dyn Error + Sync + Send>;
 
-    fn poll_data(
+    fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let mut this = self.project();
 
         loop {
-            if *this.done {
-                return Poll::Ready(None);
-            }
+            match mem::replace(this.state, State::Done) {
+                State::Decompressing(mut decoder) => match this.body.poll_frame(cx) {
+                    Poll::Ready(Some(Ok(frame))) => match frame.data_ref() {
+                        Some(data) => {
+                            decoder.write_all(data)?;
+                            if this.body.is_end_stream() {
+                                decoder.try_finish()?;
+                                if decoder.get_ref().get_ref().is_empty() {
+                                    return Poll::Ready(None);
+                                } else {
+                                    let buf = decoder.get_mut().get_mut().split().freeze();
+                                    return Poll::Ready(Some(Ok(Frame::data(buf))));
+                                }
+                            } else {
+                                decoder.flush()?;
+                                let buf = decoder.get_mut().get_mut().split().freeze();
+                                *this.state = State::Decompressing(decoder);
 
-            let next = ready!(this.body.as_mut().poll_data(cx))
-                .transpose()
-                .map_err(Into::into)?;
-
-            let Some(decoder) = this.decoder else {
-                return Poll::Ready(next.map(Ok));
-            };
-
-            match next {
-                Some(next) => {
-                    decoder.write_all(&next)?;
-                    if this.body.is_end_stream() {
+                                if !buf.is_empty() {
+                                    let buf = decoder.get_mut().get_mut().split().freeze();
+                                    return Poll::Ready(Some(Ok(Frame::data(buf))));
+                                }
+                            }
+                        }
+                        None => {
+                            decoder.try_finish()?;
+                            if decoder.get_ref().get_ref().is_empty() {
+                                return Poll::Ready(Some(Ok(frame)));
+                            } else {
+                                *this.state = State::Last(frame);
+                                let buf = decoder.get_mut().get_mut().split().freeze();
+                                return Poll::Ready(Some(Ok(Frame::data(buf))));
+                            }
+                        }
+                    },
+                    Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e.into()))),
+                    Poll::Ready(None) => {
                         decoder.try_finish()?;
-                        *this.done = true;
-                    } else {
-                        decoder.flush()?;
+                        if decoder.get_ref().get_ref().is_empty() {
+                            return Poll::Ready(None);
+                        } else {
+                            let buf = decoder.get_mut().get_mut().split().freeze();
+                            return Poll::Ready(Some(Ok(Frame::data(buf))));
+                        }
                     }
-                }
-                None => {
-                    decoder.try_finish()?;
-                    *this.done = true;
-                }
-            }
-
-            if !decoder.get_ref().get_ref().is_empty() {
-                return Poll::Ready(Some(Ok(decoder.get_mut().get_mut().split().freeze())));
+                    Poll::Pending => {
+                        *this.state = State::Decompressing(decoder);
+                        return Poll::Pending;
+                    }
+                },
+                State::Last(frame) => return Poll::Ready(Some(Ok(frame))),
+                State::Done => return this.body.poll_frame(cx).map_err(Into::into),
             }
         }
     }
 
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
-        self.project().body.poll_trailers(cx).map_err(Into::into)
-    }
-
     fn is_end_stream(&self) -> bool {
-        self.body.is_end_stream()
+        match self.state {
+            State::Decompressing(_) | State::Done => self.body.is_end_stream(),
+            State::Last(_) => false,
+        }
     }
 
     fn size_hint(&self) -> SizeHint {
-        if self.decoder.is_some() {
-            SizeHint::new()
-        } else {
-            self.body.size_hint()
+        match &self.state {
+            State::Decompressing(_) => SizeHint::new(),
+            State::Last(frame) => match frame.data_ref() {
+                Some(data) => SizeHint::with_exact(data.len() as u64),
+                None => SizeHint::with_exact(0),
+            },
+            State::Done => self.body.size_hint(),
         }
     }
 }
