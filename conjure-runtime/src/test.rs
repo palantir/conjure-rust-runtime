@@ -28,7 +28,6 @@ use http::{request, Method};
 use hyper::body;
 use hyper::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
 use hyper::http::header::RETRY_AFTER;
-use hyper::server::conn::Http;
 use hyper::service::Service;
 use hyper::{Request, Response, StatusCode};
 use openssl::ssl::{Ssl, SslAcceptor, SslFiletype, SslMethod};

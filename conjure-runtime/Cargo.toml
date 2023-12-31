@@ -21,10 +21,17 @@ conjure-serde = "3.6"
 flate2 = "1.0"
 futures = "0.3"
 http-body = "1"
+http-body-util = "0.1"
 http-zipkin = "0.4"
 http = "1"
-hyper = { version = "0.14", features = ["http1", "http2", "client", "tcp"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
+hyper = { version = "1", features = ["http1", "http2", "client"] }
+hyper-util = { version = "0.1", features = [
+    "http1",
+    "http2",
+    "client",
+    "client-legacy",
+    "tokio",
+] }
 once_cell = "1.0"
 parking_lot = "0.12"
 percent-encoding = "2.1"

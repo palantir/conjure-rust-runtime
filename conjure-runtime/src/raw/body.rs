@@ -18,8 +18,6 @@ use conjure_http::client::{AsyncRequestBody, AsyncWriteBody};
 use futures::channel::{mpsc, oneshot};
 use futures::{pin_mut, Stream};
 use http_body::{Frame, SizeHint};
-use pin_project::pin_project;
-use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{error, fmt, mem};
@@ -52,11 +50,8 @@ pub(crate) enum RawBodyInner {
 }
 
 /// The request body type passed to the raw HTTP client.
-#[pin_project]
 pub struct RawBody {
     pub(crate) inner: RawBodyInner,
-    #[pin]
-    _p: PhantomPinned,
 }
 
 impl RawBody {
@@ -65,14 +60,12 @@ impl RawBody {
             AsyncRequestBody::Empty => (
                 RawBody {
                     inner: RawBodyInner::Empty,
-                    _p: PhantomPinned,
                 },
                 Writer::Nop,
             ),
             AsyncRequestBody::Fixed(body) => (
                 RawBody {
-                    inner: RawBodyInner::Single(body),
-                    _p: PhantomPinned,
+                    inner: RawBodyInner::Single(Frame::data(body)),
                 },
                 Writer::Nop,
             ),
@@ -85,7 +78,6 @@ impl RawBody {
                             receiver: body_receiver,
                             polled: Some(polled_sender),
                         },
-                        _p: PhantomPinned,
                     },
                     Writer::Streaming {
                         polled: polled_receiver,
@@ -103,12 +95,10 @@ impl http_body::Body for RawBody {
     type Error = BodyError;
 
     fn poll_frame(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let this = self.project();
-
-        match mem::replace(this.inner, RawBodyInner::Empty) {
+        match mem::replace(&mut self.inner, RawBodyInner::Empty) {
             RawBodyInner::Empty => Poll::Ready(None),
             RawBodyInner::Single(frame) => Poll::Ready(Some(Ok(frame))),
             RawBodyInner::Stream {
@@ -121,13 +111,13 @@ impl http_body::Body for RawBody {
 
                 match Pin::new(&mut receiver).poll_next(cx) {
                     Poll::Ready(Some(BodyPart::Frame(frame))) => {
-                        *this.inner = RawBodyInner::Stream { receiver, polled };
+                        self.inner = RawBodyInner::Stream { receiver, polled };
                         Poll::Ready(Some(Ok(frame)))
                     }
                     Poll::Ready(Some(BodyPart::Done)) => Poll::Ready(None),
                     Poll::Ready(None) => Poll::Ready(Some(Err(BodyError(())))),
                     Poll::Pending => {
-                        *this.inner = RawBodyInner::Stream { receiver, polled };
+                        self.inner = RawBodyInner::Stream { receiver, polled };
                         Poll::Pending
                     }
                 }
@@ -140,14 +130,14 @@ impl http_body::Body for RawBody {
     }
 
     fn size_hint(&self) -> SizeHint {
-        match self.inner {
+        match &self.inner {
             RawBodyInner::Empty => SizeHint::with_exact(0),
             RawBodyInner::Single(frame) => {
                 let len = match frame.data_ref() {
                     Some(buf) => buf.len(),
                     None => 0,
                 };
-                SizeHint::with_exact(len)
+                SizeHint::with_exact(len as u64)
             }
             RawBodyInner::Stream { .. } => SizeHint::new(),
         }

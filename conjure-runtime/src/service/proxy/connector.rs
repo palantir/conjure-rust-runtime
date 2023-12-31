@@ -12,21 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::service::proxy::{HttpProxyConfig, ProxyConfig};
+use bytes::Bytes;
 use futures::future::{self, BoxFuture};
-use futures::FutureExt;
 use http::header::{HOST, PROXY_AUTHORIZATION};
 use http::uri::Scheme;
 use http::{HeaderValue, Method, Request, StatusCode, Uri, Version};
+use http_body_util::Empty;
 use hyper::client::conn;
-use hyper::client::connect::{Connected, Connection};
-use hyper::Body;
+use hyper::rt::{Read, ReadBufCursor, Write};
+use hyper_util::client::legacy::connect::{Connected, Connection};
 use std::convert::TryFrom;
 use std::error;
 use std::fmt;
+use std::future::Future;
 use std::io;
-use std::pin::Pin;
+use std::pin::{pin, Pin};
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -70,9 +71,9 @@ pub struct ProxyConnectorService<S> {
 impl<S> Service<Uri> for ProxyConnectorService<S>
 where
     S: Service<Uri> + Send,
+    S::Response: Read + Write + Unpin + Send + 'static,
     S::Error: Into<Box<dyn error::Error + Sync + Send>>,
     S::Future: Send + 'static,
-    S::Response: AsyncRead + AsyncWrite + Unpin + 'static + Send,
 {
     type Response = ProxyConnection<S::Response>;
     type Error = Box<dyn error::Error + Sync + Send>;
@@ -123,16 +124,16 @@ async fn connect_https<T>(
     config: HttpProxyConfig,
 ) -> Result<T, Box<dyn error::Error + Sync + Send>>
 where
-    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    T: Read + Write + Send + Unpin + 'static,
 {
-    let (mut sender, mut conn) = conn::handshake(stream).await?;
+    let (mut sender, mut conn) = conn::http1::handshake(stream).await?;
 
     let host = uri.host().ok_or("host missing from URI")?;
     let authority = format!("{}:{}", host, uri.port_u16().unwrap_or(443));
     let authority_uri = Uri::try_from(authority.clone()).unwrap();
     let host = HeaderValue::try_from(authority).unwrap();
 
-    let mut request = Request::new(Body::empty());
+    let mut request = Request::new(Empty::<Bytes>::new());
     *request.method_mut() = Method::CONNECT;
     *request.uri_mut() = authority_uri;
     *request.version_mut() = Version::HTTP_11;
@@ -143,10 +144,10 @@ where
             .insert(PROXY_AUTHORIZATION, credentials);
     }
 
-    let mut response = sender.send_request(request);
+    let mut response = pin!(sender.send_request(request));
     let response = future::poll_fn(|cx| {
         let _ = conn.poll_without_shutdown(cx)?;
-        response.poll_unpin(cx)
+        response.as_mut().poll(cx)
     })
     .await?;
 
@@ -166,22 +167,22 @@ pub struct ProxyConnection<T> {
     proxy: bool,
 }
 
-impl<T> AsyncRead for ProxyConnection<T>
+impl<T> Read for ProxyConnection<T>
 where
-    T: AsyncRead + Unpin,
+    T: Read + Unpin,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
+        buf: ReadBufCursor<'_>,
     ) -> Poll<io::Result<()>> {
         Pin::new(&mut self.stream).poll_read(cx, buf)
     }
 }
 
-impl<T> AsyncWrite for ProxyConnection<T>
+impl<T> Write for ProxyConnection<T>
 where
-    T: AsyncWrite + Unpin,
+    T: Write + Unpin,
 {
     fn poll_write(
         mut self: Pin<&mut Self>,
@@ -197,18 +198,6 @@ where
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.stream).poll_shutdown(cx)
-    }
-
-    fn poll_write_vectored(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        bufs: &[io::IoSlice<'_>],
-    ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.stream).poll_write_vectored(cx, bufs)
-    }
-
-    fn is_write_vectored(&self) -> bool {
-        self.stream.is_write_vectored()
     }
 }
 
@@ -238,6 +227,7 @@ impl error::Error for ProxyTunnelError {}
 mod test {
     use super::*;
     use crate::config::{self, BasicCredentials, HostAndPort};
+    use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
     use tower_util::ServiceExt;
 
     struct MockConnection(tokio_test::io::Mock);

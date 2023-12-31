@@ -16,7 +16,6 @@ use crate::service::Layer;
 use bytes::buf::Writer;
 use bytes::{BufMut, Bytes, BytesMut};
 use flate2::write::GzDecoder;
-use futures::ready;
 use http::header::{Entry, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
 use http::{HeaderValue, Request, Response};
 use http_body::{Body, Frame, SizeHint};
@@ -81,6 +80,7 @@ where
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum State {
     Decompressing(GzDecoder<Writer<BytesMut>>),
     Last(Frame<Bytes>),
@@ -111,7 +111,7 @@ where
 
         loop {
             match mem::replace(this.state, State::Done) {
-                State::Decompressing(mut decoder) => match this.body.poll_frame(cx) {
+                State::Decompressing(mut decoder) => match this.body.as_mut().poll_frame(cx) {
                     Poll::Ready(Some(Ok(frame))) => match frame.data_ref() {
                         Some(data) => {
                             decoder.write_all(data)?;
@@ -129,7 +129,6 @@ where
                                 *this.state = State::Decompressing(decoder);
 
                                 if !buf.is_empty() {
-                                    let buf = decoder.get_mut().get_mut().split().freeze();
                                     return Poll::Ready(Some(Ok(Frame::data(buf))));
                                 }
                             }
@@ -161,7 +160,7 @@ where
                     }
                 },
                 State::Last(frame) => return Poll::Ready(Some(Ok(frame))),
-                State::Done => return this.body.poll_frame(cx).map_err(Into::into),
+                State::Done => return this.body.as_mut().poll_frame(cx).map_err(Into::into),
             }
         }
     }
@@ -191,7 +190,7 @@ mod test {
     use crate::service;
     use flate2::write::GzEncoder;
     use flate2::Compression;
-    use hyper::body;
+    use http_body_util::Full;
     use std::io::Write;
 
     #[tokio::test]
@@ -203,7 +202,7 @@ mod test {
 
             let response = Response::builder()
                 .header(CONTENT_LENGTH, body.len().to_string())
-                .body(hyper::Body::from(body))
+                .body(Full::new(body))
                 .unwrap();
             Ok::<_, hyper::Error>(response)
         }));
@@ -216,8 +215,8 @@ mod test {
         );
         assert_eq!(response.headers().get(CONTENT_ENCODING), None);
 
-        let actual = body::to_bytes(response.into_body()).await.unwrap();
-        assert_eq!(actual, body.as_bytes());
+        let actual = response.into_body().collect().await.unwrap();
+        assert_eq!(actual.to_bytes(), body.as_bytes());
     }
 
     #[tokio::test]
@@ -234,7 +233,7 @@ mod test {
             let response = Response::builder()
                 .header(CONTENT_LENGTH, body.len().to_string())
                 .header(CONTENT_ENCODING, "gzip")
-                .body(hyper::Body::from(body))
+                .body(Full::new(body))
                 .unwrap();
             Ok::<_, hyper::Error>(response)
         }));
@@ -244,8 +243,8 @@ mod test {
         assert_eq!(response.headers().get(CONTENT_LENGTH), None);
         assert_eq!(response.headers().get(CONTENT_ENCODING), None);
 
-        let actual = body::to_bytes(response.into_body()).await.unwrap();
-        assert_eq!(actual, body.as_bytes());
+        let actual = response.into_body().collect().await.unwrap();
+        assert_eq!(actual.to_bytes(), body.as_bytes());
     }
 
     #[tokio::test]
@@ -259,7 +258,7 @@ mod test {
             let response = Response::builder()
                 .header(CONTENT_LENGTH, body.len().to_string())
                 .header(CONTENT_ENCODING, encoding)
-                .body(hyper::Body::from(body))
+                .body(Full::new(body))
                 .unwrap();
             Ok::<_, hyper::Error>(response)
         }));
@@ -276,7 +275,7 @@ mod test {
         );
         assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), encoding);
 
-        let actual = body::to_bytes(response.into_body()).await.unwrap();
-        assert_eq!(actual, body.as_bytes());
+        let actual = response.into_body().collect().await.unwrap();
+        assert_eq!(actual.to_bytes(), body.as_bytes());
     }
 }

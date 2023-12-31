@@ -364,7 +364,7 @@ mod test {
     use bytes::Bytes;
     use futures::pin_mut;
     use http::Method;
-    use http_body::Body as _;
+    use http_body_util::BodyExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::AsyncWriteExt;
 
@@ -441,8 +441,8 @@ mod test {
                     RawBodyInner::Stream { .. } => {}
                     _ => panic!("expected streaming body"),
                 }
-                let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                assert_eq!(body, "hello world");
+                let body = req.into_body().collect().await.unwrap();
+                assert_eq!(body.to_bytes(), "hello world");
 
                 Ok(Response::new(()))
             },
@@ -521,7 +521,8 @@ mod test {
     async fn streamed_body_error() {
         let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
-                hyper::body::to_bytes(req.into_body())
+                req.into_body()
+                    .collect()
                     .await
                     .map_err(Error::internal_safe)?;
 
@@ -592,8 +593,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 => Err(Error::internal_safe(RawClientError("blammo".into()))),
@@ -625,8 +626,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 => Err(Error::internal_safe(UnavailableError(()))),
@@ -658,8 +659,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 => Err(Error::internal_safe(ThrottledError { retry_after: None })),
@@ -691,8 +692,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 => Err(Error::throttle_safe(UnavailableError(()))),
@@ -724,8 +725,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 => Err(Error::throttle_safe(ThrottledError { retry_after: None })),
@@ -819,8 +820,8 @@ mod test {
                     match attempt {
                         0 => Err(Error::internal_safe(UnavailableError(()))),
                         1 => {
-                            let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                            assert_eq!(body, "hello world");
+                            let body = req.into_body().collect().await.unwrap();
+                            assert_eq!(body.to_bytes(), "hello world");
 
                             Ok(Response::new(()))
                         }
@@ -851,8 +852,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 | 1 => Err::<Response<()>, _>(Error::internal_safe(UnavailableError(()))),

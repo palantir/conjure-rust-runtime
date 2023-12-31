@@ -12,19 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::raw::{BuildRawClient, RawBody, Service};
-use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService};
+use crate::service::proxy::connector::ProxyConnectorLayer;
+use crate::service::proxy::{ProxyConfig, ProxyConnectorService};
 use crate::service::timeout::{TimeoutLayer, TimeoutService};
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::Builder;
 use bytes::Bytes;
 use conjure_error::Error;
-use futures::ready;
 use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
-use hyper::body::HttpBody;
-use hyper::client::{HttpConnector, ResponseFuture};
-use hyper::Client;
+use hyper::body::Incoming;
+use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 use pin_project::pin_project;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::{ClientConfig, RootCertStore};
 use rustls_pemfile::Item;
 use std::error;
 use std::fmt;
@@ -37,6 +40,8 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tower_layer::Layer;
 use webpki_roots::TLS_SERVER_ROOTS;
+
+use super::hyper_rustls::HttpsConnector;
 
 // This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
 const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
@@ -68,33 +73,21 @@ impl BuildRawClient for DefaultRawClientBuilder {
         let connector = ProxyConnectorLayer::new(&proxy).layer(connector);
 
         let mut roots = RootCertStore::empty();
-        roots.add_trust_anchors(TLS_SERVER_ROOTS.iter().map(|ta| {
-            OwnedTrustAnchor::from_subject_spki_name_constraints(
-                ta.subject,
-                ta.spki,
-                ta.name_constraints,
-            )
-        }));
+        roots.extend(TLS_SERVER_ROOTS.iter().cloned());
 
         if let Some(ca_file) = builder.get_security().ca_file() {
             let certs = load_certs_file(ca_file)?;
-            roots.add_parsable_certificates(&certs);
+            roots.add_parsable_certificates(certs);
         }
 
-        let client_config = ClientConfig::builder()
-            .with_safe_defaults()
-            .with_root_certificates(roots);
+        let client_config = ClientConfig::builder().with_root_certificates(roots);
 
         let client_config = match (
             builder.get_security().cert_file(),
             builder.get_security().key_file(),
         ) {
             (Some(cert_file), Some(key_file)) => {
-                let cert_chain = load_certs_file(cert_file)?
-                    .into_iter()
-                    .map(Certificate)
-                    .collect::<Vec<_>>();
-
+                let cert_chain = load_certs_file(cert_file)?;
                 let private_key = load_private_key(key_file)?;
 
                 client_config
@@ -110,15 +103,10 @@ impl BuildRawClient for DefaultRawClientBuilder {
             }
         };
 
-        let connector = HttpsConnectorBuilder::new()
-            .with_tls_config(client_config)
-            .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(connector);
+        let connector = HttpsConnector::new(connector, client_config);
         let connector = TlsMetricsLayer::new(service, builder).layer(connector);
 
-        let client = hyper::Client::builder()
+        let client = Client::builder(TokioExecutor::new())
             .pool_idle_timeout(HTTP_KEEPALIVE)
             .build(connector);
 
@@ -126,17 +114,21 @@ impl BuildRawClient for DefaultRawClientBuilder {
     }
 }
 
-fn load_certs_file(path: &Path) -> Result<Vec<Vec<u8>>, Error> {
+fn load_certs_file(path: &Path) -> Result<Vec<CertificateDer<'static>>, Error> {
     let file = File::open(path).map_err(Error::internal_safe)?;
     let mut file = BufReader::new(file);
-    rustls_pemfile::certs(&mut file).map_err(Error::internal_safe)
+    rustls_pemfile::certs(&mut file)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Error::internal_safe)
 }
 
-fn load_private_key(path: &Path) -> Result<PrivateKey, Error> {
+fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, Error> {
     let file = File::open(path).map_err(Error::internal_safe)?;
     let mut reader = BufReader::new(file);
 
-    let mut items = rustls_pemfile::read_all(&mut reader).map_err(Error::internal_safe)?;
+    let mut items = rustls_pemfile::read_all(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Error::internal_safe)?;
 
     if items.len() != 1 {
         return Err(Error::internal_safe(
@@ -145,7 +137,9 @@ fn load_private_key(path: &Path) -> Result<PrivateKey, Error> {
     }
 
     match items.pop().unwrap() {
-        Item::RSAKey(buf) | Item::PKCS8Key(buf) | Item::ECKey(buf) => Ok(PrivateKey(buf)),
+        Item::Pkcs1Key(key) => Ok(key.into()),
+        Item::Pkcs8Key(key) => Ok(key.into()),
+        Item::Sec1Key(key) => Ok(key.into()),
         _ => Err(Error::internal_safe(
             "expected a PKCS#1, PKCS#8, or Sec1 private key",
         )),
@@ -171,7 +165,7 @@ impl Service<Request<RawBody>> for DefaultRawClient {
                     _p: PhantomPinned,
                 })
             })
-            .map_err(DefaultRawError)
+            .map_err(DefaultRawError::new)
     }
 }
 
@@ -179,7 +173,7 @@ impl Service<Request<RawBody>> for DefaultRawClient {
 #[pin_project]
 pub struct DefaultRawBody {
     #[pin]
-    inner: hyper::Body,
+    inner: Incoming,
     #[pin]
     _p: PhantomPinned,
 }
@@ -195,7 +189,7 @@ impl Body for DefaultRawBody {
         self.project()
             .inner
             .poll_frame(cx)
-            .map(|o| o.map(|r| r.map_err(DefaultRawError)))
+            .map(|o| o.map(|r| r.map_err(DefaultRawError::new)))
     }
 
     fn is_end_stream(&self) -> bool {
@@ -209,7 +203,16 @@ impl Body for DefaultRawBody {
 
 /// The error type used by `DefaultRawClient`.
 #[derive(Debug)]
-pub struct DefaultRawError(hyper::Error);
+pub struct DefaultRawError(Box<dyn error::Error + Sync + Send>);
+
+impl DefaultRawError {
+    fn new<T>(e: T) -> Self
+    where
+        T: Into<Box<dyn error::Error + Sync + Send>>,
+    {
+        DefaultRawError(e.into())
+    }
+}
 
 impl fmt::Display for DefaultRawError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -219,6 +222,6 @@ impl fmt::Display for DefaultRawError {
 
 impl error::Error for DefaultRawError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        error::Error::source(&self.0)
+        error::Error::source(&*self.0)
     }
 }

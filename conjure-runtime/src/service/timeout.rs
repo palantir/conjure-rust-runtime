@@ -13,14 +13,15 @@
 // limitations under the License.
 use crate::Builder;
 use futures::ready;
-use hyper::client::connect::{Connected, Connection};
+use hyper::rt::{Read, ReadBufCursor, Write};
+use hyper_util::client::legacy::connect::{Connected, Connection};
+use hyper_util::rt::TokioIo;
 use pin_project::pin_project;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -61,7 +62,7 @@ pub struct TimeoutService<S> {
 impl<S, R> Service<R> for TimeoutService<S>
 where
     S: Service<R>,
-    S::Response: AsyncRead + AsyncWrite + Unpin,
+    S::Response: Read + Write + Unpin,
 {
     type Response = TimeoutStream<S::Response>;
     type Error = S::Error;
@@ -91,7 +92,7 @@ pub struct TimeoutFuture<F> {
 impl<F, S, E> Future for TimeoutFuture<F>
 where
     F: Future<Output = Result<S, E>>,
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: Read + Write + Unpin,
 {
     type Output = Result<TimeoutStream<S>, E>;
 
@@ -99,37 +100,37 @@ where
         let this = self.project();
 
         let stream = ready!(this.future.poll(cx))?;
-        let mut stream = tokio_io_timeout::TimeoutStream::new(stream);
+        let mut stream = tokio_io_timeout::TimeoutStream::new(TokioIo::new(stream));
         stream.set_read_timeout(Some(*this.read_timeout));
         stream.set_write_timeout(Some(*this.write_timeout));
 
         Poll::Ready(Ok(TimeoutStream {
-            stream: Box::pin(stream),
+            stream: Box::pin(TokioIo::new(stream)),
         }))
     }
 }
 
 #[derive(Debug)]
 pub struct TimeoutStream<S> {
-    stream: Pin<Box<tokio_io_timeout::TimeoutStream<S>>>,
+    stream: Pin<Box<TokioIo<tokio_io_timeout::TimeoutStream<TokioIo<S>>>>>,
 }
 
-impl<S> AsyncRead for TimeoutStream<S>
+impl<S> Read for TimeoutStream<S>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: Read + Write,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
+        buf: ReadBufCursor<'_>,
     ) -> Poll<io::Result<()>> {
         self.stream.as_mut().poll_read(cx, buf)
     }
 }
 
-impl<S> AsyncWrite for TimeoutStream<S>
+impl<S> Write for TimeoutStream<S>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: Read + Write,
 {
     fn poll_write(
         mut self: Pin<&mut Self>,
@@ -146,26 +147,14 @@ where
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.stream.as_mut().poll_shutdown(cx)
     }
-
-    fn poll_write_vectored(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        bufs: &[io::IoSlice<'_>],
-    ) -> Poll<io::Result<usize>> {
-        self.stream.as_mut().poll_write_vectored(cx, bufs)
-    }
-
-    fn is_write_vectored(&self) -> bool {
-        self.stream.is_write_vectored()
-    }
 }
 
 impl<S> Connection for TimeoutStream<S>
 where
-    S: AsyncRead + AsyncWrite + Unpin + Connection,
+    S: Read + Write + Connection,
 {
     fn connected(&self) -> Connected {
-        self.stream.get_ref().connected()
+        self.stream.inner().get_ref().inner().connected()
     }
 }
 

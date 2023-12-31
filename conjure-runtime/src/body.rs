@@ -17,7 +17,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use conjure_error::Error;
 use futures::channel::mpsc;
 use futures::{ready, SinkExt, Stream};
-use http_body::{Body, Frame};
+use http_body::{Body, Frame, SizeHint};
 use pin_project::pin_project;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -63,7 +63,7 @@ impl BodyWriter {
         self.flush().await?;
         self.project()
             .sender
-            .send(BodyPart::Chunk(bytes))
+            .send(BodyPart::Frame(Frame::data(bytes)))
             .await
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         Ok(())
@@ -94,7 +94,7 @@ impl AsyncWrite for BodyWriter {
         ready!(this.sender.poll_ready(cx)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         let chunk = this.buf.split().freeze();
         this.sender
-            .start_send(BodyPart::Chunk(chunk))
+            .start_send(BodyPart::Frame(Frame::data(chunk)))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
         Poll::Ready(Ok(()))
@@ -138,13 +138,25 @@ where
     type Item = Result<Bytes, Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
+        let mut this = self.project();
 
         if this.cur.has_remaining() {
             return Poll::Ready(Some(Ok(mem::take(this.cur))));
         }
 
-        this.body.poll_data(cx).map_err(Error::internal_safe)
+        loop {
+            match ready!(this.body.as_mut().poll_frame(cx))
+                .transpose()
+                .map_err(Error::internal_safe)?
+            {
+                Some(frame) => {
+                    if let Ok(data) = frame.into_data() {
+                        return Poll::Ready(Some(Ok(data)));
+                    }
+                }
+                None => return Poll::Ready(None),
+            }
+        }
     }
 }
 
@@ -174,11 +186,15 @@ where
 {
     fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
         while !self.cur.has_remaining() {
-            match ready!(self.as_mut().project().body.poll_data(cx))
+            match ready!(self.as_mut().project().body.poll_frame(cx))
                 .transpose()
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
             {
-                Some(bytes) => *self.as_mut().project().cur = bytes,
+                Some(frame) => {
+                    if let Ok(data) = frame.into_data() {
+                        *self.as_mut().project().cur = data;
+                    }
+                }
                 None => break,
             }
         }
@@ -219,14 +235,14 @@ where
 
         if *this.done {
             return Poll::Ready(None);
-
-            let frame = ready!(this.body.poll_frame(cx));
-            if frame.is_none() {
-                *this.done = true;
-            }
-
-            Poll::Ready(frame)
         }
+
+        let frame = ready!(this.body.poll_frame(cx));
+        if frame.is_none() {
+            *this.done = true;
+        }
+
+        Poll::Ready(frame)
     }
 
     fn is_end_stream(&self) -> bool {
@@ -237,7 +253,11 @@ where
         }
     }
 
-    fn size_hint(&self) -> http_body::SizeHint {
-        self.body.size_hint()
+    fn size_hint(&self) -> SizeHint {
+        if self.done {
+            SizeHint::with_exact(0)
+        } else {
+            self.body.size_hint()
+        }
     }
 }

@@ -101,8 +101,14 @@ where
         let stream = ready!(this.future.poll(cx))?;
 
         if let (Some(metrics), MaybeHttpsStream::Https(s)) = (&this.shared.metrics, &stream) {
-            let protocol = s.get_ref().1.protocol_version().expect("session is active");
+            let protocol = s
+                .inner()
+                .get_ref()
+                .1
+                .protocol_version()
+                .expect("session is active");
             let cipher = s
+                .inner()
                 .get_ref()
                 .1
                 .negotiated_cipher_suite()
