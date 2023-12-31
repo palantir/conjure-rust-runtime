@@ -227,22 +227,22 @@ impl error::Error for ProxyTunnelError {}
 mod test {
     use super::*;
     use crate::config::{self, BasicCredentials, HostAndPort};
-    use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+    use hyper_util::rt::TokioIo;
     use tower_util::ServiceExt;
 
-    struct MockConnection(tokio_test::io::Mock);
+    struct MockConnection(TokioIo<tokio_test::io::Mock>);
 
-    impl AsyncRead for MockConnection {
+    impl Read for MockConnection {
         fn poll_read(
             mut self: Pin<&mut Self>,
             cx: &mut Context<'_>,
-            buf: &mut ReadBuf<'_>,
+            buf: ReadBufCursor<'_>,
         ) -> Poll<io::Result<()>> {
             Pin::new(&mut self.0).poll_read(cx, buf)
         }
     }
 
-    impl AsyncWrite for MockConnection {
+    impl Write for MockConnection {
         fn poll_write(
             mut self: Pin<&mut Self>,
             cx: &mut Context<'_>,
@@ -271,9 +271,9 @@ mod test {
         let service = ProxyConnectorLayer::new(&ProxyConfig::Direct).layer(tower_util::service_fn(
             |uri: Uri| async move {
                 assert_eq!(uri, "http://foobar.com");
-                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(
+                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
                     tokio_test::io::Builder::new().build(),
-                ))
+                )))
             },
         ));
 
@@ -296,9 +296,9 @@ mod test {
         let service = ProxyConnectorLayer::new(&config).layer(tower_util::service_fn(
             |uri: Uri| async move {
                 assert_eq!(uri, "http://127.0.0.1:1234");
-                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(
+                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
                     tokio_test::io::Builder::new().build(),
-                ))
+                )))
             },
         ));
 
@@ -329,7 +329,9 @@ mod test {
                     proxy-authorization: Basic YWRtaW46aHVudGVyMg==\r\n\r\n",
                 );
                 builder.read(b"HTTP/1.1 200 OK\r\n\r\n");
-                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(builder.build()))
+                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
+                    builder.build(),
+                )))
             },
         ));
 
@@ -358,7 +360,9 @@ mod test {
                     host: foobar.com:443\r\n\r\n",
                 );
                 builder.read(b"HTTP/1.1 401 Unauthorized\r\n\r\n");
-                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(builder.build()))
+                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
+                    builder.build(),
+                )))
             },
         ));
 

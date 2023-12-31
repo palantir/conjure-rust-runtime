@@ -190,7 +190,7 @@ mod test {
     use crate::service;
     use flate2::write::GzEncoder;
     use flate2::Compression;
-    use http_body_util::Full;
+    use http_body_util::{BodyExt, Full};
     use std::io::Write;
 
     #[tokio::test]
@@ -202,7 +202,7 @@ mod test {
 
             let response = Response::builder()
                 .header(CONTENT_LENGTH, body.len().to_string())
-                .body(Full::new(body))
+                .body(Full::new(Bytes::from(body)))
                 .unwrap();
             Ok::<_, hyper::Error>(response)
         }));
@@ -233,7 +233,7 @@ mod test {
             let response = Response::builder()
                 .header(CONTENT_LENGTH, body.len().to_string())
                 .header(CONTENT_ENCODING, "gzip")
-                .body(Full::new(body))
+                .body(Full::new(Bytes::from(body)))
                 .unwrap();
             Ok::<_, hyper::Error>(response)
         }));
@@ -258,7 +258,7 @@ mod test {
             let response = Response::builder()
                 .header(CONTENT_LENGTH, body.len().to_string())
                 .header(CONTENT_ENCODING, encoding)
-                .body(Full::new(body))
+                .body(Full::new(Bytes::from(body)))
                 .unwrap();
             Ok::<_, hyper::Error>(response)
         }));

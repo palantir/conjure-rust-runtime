@@ -168,7 +168,7 @@ mod test {
             HttpErrorLayer::new(&Builder::new()).layer(service::service_fn(|_| async move {
                 Ok(Response::builder()
                     .status(StatusCode::OK)
-                    .body(Empty::new())
+                    .body(Empty::<Bytes>::new())
                     .unwrap())
             }));
 
@@ -184,7 +184,7 @@ mod test {
                 Ok(Response::builder()
                     .status(StatusCode::TOO_MANY_REQUESTS)
                     .header(RETRY_AFTER, "100")
-                    .body(Empty::new())
+                    .body(Empty::<Bytes>::new())
                     .unwrap())
             }));
 
@@ -206,7 +206,7 @@ mod test {
                     Ok(Response::builder()
                         .status(StatusCode::TOO_MANY_REQUESTS)
                         .header(RETRY_AFTER, "100")
-                        .body(Empty::new())
+                        .body(Empty::<Bytes>::new())
                         .unwrap())
                 }));
 
@@ -225,7 +225,7 @@ mod test {
             HttpErrorLayer::new(&Builder::new()).layer(service::service_fn(|_| async move {
                 Ok(Response::builder()
                     .status(StatusCode::SERVICE_UNAVAILABLE)
-                    .body(Empty::new())
+                    .body(Empty::<Bytes>::new())
                     .unwrap())
             }));
 
@@ -245,7 +245,7 @@ mod test {
                 .layer(service::service_fn(|_| async move {
                     Ok(Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(Empty::new())
+                        .body(Empty::<Bytes>::new())
                         .unwrap())
                 }));
 
@@ -273,7 +273,7 @@ mod test {
                     Ok(Response::builder()
                         .status(StatusCode::CONFLICT)
                         .header(CONTENT_TYPE, "application/json")
-                        .body(Full::new(json))
+                        .body(Full::new(Bytes::from(json)))
                         .unwrap())
                 }
             })
@@ -313,7 +313,7 @@ mod test {
                             Ok(Response::builder()
                                 .status(StatusCode::CONFLICT)
                                 .header(CONTENT_TYPE, "application/json")
-                                .body(Full::new(json))
+                                .body(Full::new(Bytes::from(json)))
                                 .unwrap())
                         }
                     })

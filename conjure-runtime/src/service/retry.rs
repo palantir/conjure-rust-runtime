@@ -365,6 +365,7 @@ mod test {
     use futures::pin_mut;
     use http::Method;
     use http_body_util::BodyExt;
+    use std::pin::pin;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::AsyncWriteExt;
 
@@ -480,9 +481,8 @@ mod test {
     async fn streamed_body_hangup() {
         let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
-                let body = req.into_body();
-                pin_mut!(body);
-                body.data().await.unwrap().unwrap();
+                let mut body = pin!(req.into_body());
+                body.frame().await.unwrap().unwrap();
 
                 Err::<Response<()>, _>(Error::internal_safe("blammo"))
             },

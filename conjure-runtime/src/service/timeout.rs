@@ -171,12 +171,14 @@ mod test {
 
         let mut service =
             TimeoutLayer::new(&Client::builder()).layer(tower_util::service_fn(|_| async {
-                Ok::<_, ()>(tokio_test::io::Builder::new().read(b"hello").build())
+                Ok::<_, ()>(TokioIo::new(
+                    tokio_test::io::Builder::new().read(b"hello").build(),
+                ))
             }));
 
-        let mut stream = service.call(()).await.unwrap();
+        let stream = service.call(()).await.unwrap();
         let mut buf = vec![];
-        stream.read_to_end(&mut buf).await.unwrap();
+        TokioIo::new(stream).read_to_end(&mut buf).await.unwrap();
 
         assert_eq!(buf, b"hello");
     }
@@ -187,16 +189,19 @@ mod test {
 
         let mut service = TimeoutLayer::new(Client::builder().read_timeout(Duration::from_secs(9)))
             .layer(tower_util::service_fn(|_| async {
-                Ok::<_, ()>(
+                Ok::<_, ()>(TokioIo::new(
                     tokio_test::io::Builder::new()
                         .wait(Duration::from_secs(10))
                         .build(),
-                )
+                ))
             }));
 
-        let mut stream = service.call(()).await.unwrap();
+        let stream = service.call(()).await.unwrap();
         let mut buf = vec![];
-        stream.read_to_end(&mut buf).await.unwrap_err();
+        TokioIo::new(stream)
+            .read_to_end(&mut buf)
+            .await
+            .unwrap_err();
     }
 
     #[tokio::test]
@@ -205,11 +210,13 @@ mod test {
 
         let mut service =
             TimeoutLayer::new(&Client::builder()).layer(tower_util::service_fn(|_| async {
-                Ok::<_, ()>(tokio_test::io::Builder::new().write(b"hello").build())
+                Ok::<_, ()>(TokioIo::new(
+                    tokio_test::io::Builder::new().write(b"hello").build(),
+                ))
             }));
 
-        let mut stream = service.call(()).await.unwrap();
-        stream.write_all(b"hello").await.unwrap();
+        let stream = service.call(()).await.unwrap();
+        TokioIo::new(stream).write_all(b"hello").await.unwrap();
     }
 
     #[tokio::test]
@@ -220,14 +227,14 @@ mod test {
             Client::builder().write_timeout(Duration::from_secs(9)),
         )
         .layer(tower_util::service_fn(|_| async {
-            Ok::<_, ()>(
+            Ok::<_, ()>(TokioIo::new(
                 tokio_test::io::Builder::new()
                     .wait(Duration::from_secs(10))
                     .build(),
-            )
+            ))
         }));
 
-        let mut stream = service.call(()).await.unwrap();
-        stream.write_all(b"hello").await.unwrap_err();
+        let stream = service.call(()).await.unwrap();
+        TokioIo::new(stream).write_all(b"hello").await.unwrap_err();
     }
 }

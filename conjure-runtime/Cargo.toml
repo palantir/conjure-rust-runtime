@@ -59,7 +59,7 @@ zipkin = "0.4"
 [dev-dependencies]
 conjure-codegen = { version = "3", features = ["example-types"] }
 futures-test = "0.3"
-hyper = { version = "0.14", features = ["server"] }
+hyper = { version = "1", features = ["server"] }
 openssl = "0.10.50"
 serde_yaml = "0.9"
 tokio-openssl = "0.6"
