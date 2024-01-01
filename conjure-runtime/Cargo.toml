@@ -21,7 +21,7 @@ conjure-serde = "3.6"
 flate2 = "1.0"
 futures = "0.3"
 http-body = "0.4"
-http-zipkin = "0.3"
+http-zipkin = "0.4"
 http = "0.2"
 hyper-rustls = { version = "0.24.0", default-features = false, features = [
     "http1",
