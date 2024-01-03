@@ -13,27 +13,18 @@
 // limitations under the License.
 use crate::raw::Service;
 use crate::service::node::selector::balanced::{
-    BalancedNodeSelectorFuture, BalancedNodeSelectorLayer, BalancedNodeSelectorService,
+    BalancedNodeSelectorLayer, BalancedNodeSelectorService,
 };
-use crate::service::node::selector::empty::{
-    EmptyNodeSelectorFuture, EmptyNodeSelectorLayer, EmptyNodeSelectorService,
-};
+use crate::service::node::selector::empty::{EmptyNodeSelectorLayer, EmptyNodeSelectorService};
 use crate::service::node::selector::pin_until_error::{
-    FixedNodes, PinUntilErrorNodeSelectorFuture, PinUntilErrorNodeSelectorLayer,
-    PinUntilErrorNodeSelectorService, ReshufflingNodes,
+    FixedNodes, PinUntilErrorNodeSelectorLayer, PinUntilErrorNodeSelectorService, ReshufflingNodes,
 };
-use crate::service::node::selector::single::{
-    SingleNodeSelectorFuture, SingleNodeSelectorLayer, SingleNodeSelectorService,
-};
+use crate::service::node::selector::single::{SingleNodeSelectorLayer, SingleNodeSelectorService};
 use crate::service::node::LimitedNode;
 use crate::service::Layer;
 use crate::{Builder, NodeSelectionStrategy};
 use conjure_error::Error;
 use http::{Request, Response};
-use pin_project::pin_project;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 mod balanced;
 mod empty;
@@ -113,50 +104,19 @@ pub enum NodeSelectorService<S> {
 
 impl<S, B1, B2> Service<Request<B1>> for NodeSelectorService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error> + Sync + Send,
+    B1: Sync + Send,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = NodeSelectorFuture<S, B1>;
 
-    fn call(&self, req: Request<B1>) -> Self::Future {
+    async fn call(&self, req: Request<B1>) -> Result<Self::Response, Self::Error> {
         match self {
-            NodeSelectorService::Empty(s) => NodeSelectorFuture::Empty(s.call(req)),
-            NodeSelectorService::Single(s) => NodeSelectorFuture::Single(s.call(req)),
-            NodeSelectorService::PinUntilError(s) => NodeSelectorFuture::PinUntilError(s.call(req)),
-            NodeSelectorService::PinUntilErrorWithoutReshuffle(s) => {
-                NodeSelectorFuture::PinUntilErrorWithoutReshuffle(s.call(req))
-            }
-            NodeSelectorService::Balanced(s) => NodeSelectorFuture::Balanced(s.call(req)),
-        }
-    }
-}
-
-#[pin_project(project = Projection)]
-pub enum NodeSelectorFuture<S, B>
-where
-    S: Service<Request<B>>,
-{
-    Empty(#[pin] EmptyNodeSelectorFuture<S, B>),
-    Single(#[pin] SingleNodeSelectorFuture<S, B>),
-    PinUntilError(#[pin] PinUntilErrorNodeSelectorFuture<ReshufflingNodes, S, B>),
-    PinUntilErrorWithoutReshuffle(#[pin] PinUntilErrorNodeSelectorFuture<FixedNodes, S, B>),
-    Balanced(#[pin] BalancedNodeSelectorFuture<S, B>),
-}
-
-impl<S, B1, B2> Future for NodeSelectorFuture<S, B1>
-where
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
-{
-    type Output = Result<S::Response, S::Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.project() {
-            Projection::Empty(f) => f.poll(cx),
-            Projection::Single(f) => f.poll(cx),
-            Projection::PinUntilError(f) => f.poll(cx),
-            Projection::PinUntilErrorWithoutReshuffle(f) => f.poll(cx),
-            Projection::Balanced(f) => f.poll(cx),
+            NodeSelectorService::Empty(s) => s.call(req).await,
+            NodeSelectorService::Single(s) => s.call(req).await,
+            NodeSelectorService::PinUntilError(s) => s.call(req).await,
+            NodeSelectorService::PinUntilErrorWithoutReshuffle(s) => s.call(req).await,
+            NodeSelectorService::Balanced(s) => s.call(req).await,
         }
     }
 }

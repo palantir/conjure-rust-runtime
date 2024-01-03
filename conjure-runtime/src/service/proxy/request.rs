@@ -17,6 +17,7 @@ use crate::service::Layer;
 use http::header::PROXY_AUTHORIZATION;
 use http::uri::Scheme;
 use http::Request;
+use std::future::Future;
 
 /// A layer which adjusts an HTTP request as necessary to respect proxy settings.
 ///
@@ -58,9 +59,8 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
 
-    fn call(&self, mut req: Request<B>) -> Self::Future {
+    fn call(&self, mut req: Request<B>) -> impl Future<Output = Result<S::Response, S::Error>> {
         match &self.config {
             ProxyConfig::Http(config) => {
                 if req.uri().scheme() == Some(&Scheme::HTTP) {

@@ -20,13 +20,8 @@ use crate::util::weak_reducing_gauge::WeakReducingGauge;
 use crate::{Builder, ClientQos, HostMetrics};
 use conjure_error::Error;
 use conjure_http::client::Endpoint;
-use futures::ready;
 use http::{Request, Response};
-use pin_project::pin_project;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use url::Url;
 use witchcraft_metrics::MetricId;
 
@@ -99,70 +94,49 @@ impl LimitedNode {
         node
     }
 
-    pub fn acquire<B>(&self, request: &Request<B>) -> Acquire {
+    pub async fn acquire<B>(&self, request: &Request<B>) -> AcquiredNode {
         let endpoint = request
             .extensions()
             .get::<Endpoint>()
             .expect("Endpoint extension missing from request");
 
-        Acquire {
-            acquire: self
-                .limiter
-                .as_ref()
-                .map(|l| l.acquire(request.method(), endpoint.path())),
+        let permit = match &self.limiter {
+            Some(limiter) => {
+                let permit = limiter.acquire(request.method(), endpoint.path()).await;
+                Some(permit)
+            }
+            None => None,
+        };
+
+        AcquiredNode {
             node: self.node.clone(),
+            permit,
         }
     }
 
-    pub fn wrap<S, B1, B2>(&self, inner: &Arc<S>, request: Request<B1>) -> Wrap<S, B1>
+    pub async fn wrap<S, B1, B2>(
+        &self,
+        inner: &S,
+        request: Request<B1>,
+    ) -> Result<S::Response, S::Error>
     where
         S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
     {
-        // don't create the span if client QoS is disabled
+        // Don't create the span if client QoS is disabled.
         if self.limiter.is_some() {
             let span = zipkin::next_span()
                 .with_name("conjure-runtime: acquire-permit")
                 .with_tag("node", &self.node.idx.to_string());
-
-            Wrap::Acquire {
-                future: span.detach().bind(self.acquire(&request)),
-                inner: inner.clone(),
-                request: Some(request),
-            }
+            let permit = span.detach().bind(self.acquire(&request)).await;
+            permit.wrap(inner, request).await
         } else {
-            Wrap::NodeFuture {
-                future: AcquiredNode {
-                    node: self.node.clone(),
-                    permit: None,
-                }
-                .wrap(&**inner, request),
+            AcquiredNode {
+                node: self.node.clone(),
+                permit: None,
             }
+            .wrap(inner, request)
+            .await
         }
-    }
-}
-
-#[pin_project]
-pub struct Acquire {
-    node: Arc<Node>,
-    #[pin]
-    acquire: Option<limiter::Acquire>,
-}
-
-impl Future for Acquire {
-    type Output = AcquiredNode;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let permit = match this.acquire.as_pin_mut().map(|a| a.poll(cx)) {
-            Some(Poll::Ready(permit)) => Some(permit),
-            Some(Poll::Pending) => return Poll::Pending,
-            None => None,
-        };
-
-        Poll::Ready(AcquiredNode {
-            node: this.node.clone(),
-            permit,
-        })
     }
 }
 
@@ -172,40 +146,22 @@ pub struct AcquiredNode {
 }
 
 impl AcquiredNode {
-    pub fn wrap<S, B1, B2>(self, inner: &S, mut req: Request<B1>) -> NodeFuture<S::Future>
+    pub async fn wrap<S, B1, B2>(
+        self,
+        inner: &S,
+        mut req: Request<B1>,
+    ) -> Result<S::Response, S::Error>
     where
         S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
     {
-        req.extensions_mut().insert(self.node.clone());
+        req.extensions_mut().insert(self.node);
 
-        NodeFuture {
-            future: inner.call(req),
-            permit: self.permit,
-        }
-    }
-}
-
-#[pin_project]
-pub struct NodeFuture<F> {
-    #[pin]
-    future: F,
-    permit: Option<Permit>,
-}
-
-impl<F, B> Future for NodeFuture<F>
-where
-    F: Future<Output = Result<Response<B>, Error>>,
-{
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let response = ready!(this.future.poll(cx));
-        if let Some(permit) = this.permit {
+        let response = inner.call(req).await;
+        if let Some(mut permit) = self.permit {
             permit.on_response(&response);
         }
 
-        Poll::Ready(response)
+        response
     }
 }
 
@@ -223,50 +179,5 @@ impl Node {
             url: url.parse().unwrap(),
             host_metrics: None,
         })
-    }
-}
-
-#[pin_project(project = WrapProject)]
-pub enum Wrap<S, B>
-where
-    S: Service<Request<B>>,
-{
-    Acquire {
-        #[pin]
-        future: zipkin::Bind<Acquire>,
-        inner: Arc<S>,
-        request: Option<Request<B>>,
-    },
-    NodeFuture {
-        #[pin]
-        future: NodeFuture<S::Future>,
-    },
-}
-
-impl<S, B1, B2> Future for Wrap<S, B1>
-where
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
-{
-    type Output = Result<S::Response, S::Error>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        loop {
-            let new_self = match self.as_mut().project() {
-                WrapProject::Acquire {
-                    future,
-                    inner,
-                    request,
-                } => {
-                    let acquired = ready!(future.poll(cx));
-                    let request = request.take().unwrap();
-
-                    Wrap::NodeFuture {
-                        future: acquired.wrap(&**inner, request),
-                    }
-                }
-                WrapProject::NodeFuture { future } => return future.poll(cx),
-            };
-            self.set(new_self);
-        }
     }
 }

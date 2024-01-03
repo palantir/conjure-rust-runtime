@@ -14,22 +14,18 @@
 use crate::raw::Service;
 use crate::rng::ConjureRng;
 use crate::service::node::selector::balanced::reservoir::CoarseExponentialDecayReservoir;
-use crate::service::node::{Acquire, LimitedNode, NodeFuture};
+use crate::service::node::{AcquiredNode, LimitedNode};
 use crate::service::Layer;
 use crate::Builder;
 use conjure_error::Error;
-use futures::ready;
 use http::{Request, Response};
-use pin_project::{pin_project, pinned_drop};
 use rand::seq::SliceRandom;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use witchcraft_log::debug;
-use zipkin::{Detached, OpenSpan};
 
 mod reservoir;
 
@@ -45,18 +41,25 @@ pub struct TrackedNode {
 }
 
 impl TrackedNode {
-    fn new(node: LimitedNode) -> Arc<TrackedNode> {
-        Arc::new(TrackedNode {
+    fn new(node: LimitedNode) -> TrackedNode {
+        TrackedNode {
             node,
             in_flight: AtomicUsize::new(0),
             recent_failures: CoarseExponentialDecayReservoir::new(FAILURE_MEMORY),
-        })
+        }
     }
 
-    fn acquire<B>(self: Arc<TrackedNode>, request: &Request<B>) -> AcquiringNode {
+    fn acquire<'a, 'b, 'c, B>(
+        &'a self,
+        request: &'b Request<B>,
+    ) -> AcquiringNode<'a, impl Future<Output = AcquiredNode> + 'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
         AcquiringNode {
-            acquire: Box::pin(self.node.acquire(request)),
             node: self,
+            acquire: Box::pin(self.node.acquire(request)),
         }
     }
 
@@ -71,10 +74,10 @@ impl TrackedNode {
     }
 }
 
-pub struct AcquiringNode {
-    node: Arc<TrackedNode>,
+pub struct AcquiringNode<'a, F> {
+    node: &'a TrackedNode,
     // FIXME(#69) ideally we'd just pin the entire Vec<AcquiringNode>
-    acquire: Pin<Box<Acquire>>,
+    acquire: Pin<Box<F>>,
 }
 
 struct Score {
@@ -100,12 +103,12 @@ impl Entropy for RandEntropy {
 }
 
 struct State<T> {
-    nodes: Vec<Arc<TrackedNode>>,
+    nodes: Vec<TrackedNode>,
     entropy: T,
 }
 
 pub struct BalancedNodeSelectorLayer<T = RandEntropy> {
-    state: Arc<State<T>>,
+    state: State<T>,
 }
 
 impl BalancedNodeSelectorLayer {
@@ -120,10 +123,10 @@ where
 {
     fn with_entropy(nodes: Vec<LimitedNode>, entropy: T) -> Self {
         BalancedNodeSelectorLayer {
-            state: Arc::new(State {
+            state: State {
                 nodes: nodes.into_iter().map(TrackedNode::new).collect(),
                 entropy,
-            }),
+            },
         }
     }
 }
@@ -134,34 +137,26 @@ impl<T, S> Layer<S> for BalancedNodeSelectorLayer<T> {
     fn layer(self, inner: S) -> Self::Service {
         BalancedNodeSelectorService {
             state: self.state,
-            inner: Arc::new(inner),
+            inner,
         }
     }
 }
 
 pub struct BalancedNodeSelectorService<S, T = RandEntropy> {
-    state: Arc<State<T>>,
-    inner: Arc<S>,
+    state: State<T>,
+    inner: S,
 }
 
-impl<S, T, B1, B2> Service<Request<B1>> for BalancedNodeSelectorService<S, T>
+impl<S, T> BalancedNodeSelectorService<S, T>
 where
     T: Entropy,
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = BalancedNodeSelectorFuture<S, B1>;
-
-    fn call(&self, req: Request<B1>) -> Self::Future {
-        let span = zipkin::next_span().with_name("conjure-runtime: balanced-node-selection");
-
-        // Dialogue skips nodes that have significantly worse scores than previous ones on each attempt, but to do that
-        // here we'd need a way to notify tasks on score changes. Rather than adding the complexity of implementing
-        // that, we just perform the filtering once when first constructing the future. This filtering is intended to
-        // bypass nodes that are e.g. entirely offline, so it should be fine to just do it once up front for a given
-        // request.
-
+    async fn acquire<'a, B1>(&'a self, req: &Request<B1>) -> (&'a TrackedNode, AcquiredNode) {
+        // Dialogue skips nodes that have significantly worse scores than previous ones on each
+        // attempt, but to do that here we'd need a way to notify tasks on score changes. Rather
+        // than adding the complexity of implementing that, we just perform the filtering once. This
+        // filtering is intended to bypass nodes that are e.g. entirely offline, so it could be fine
+        // to just do it once up front for a given request.
         let mut snapshots = self
             .state
             .nodes
@@ -174,7 +169,7 @@ where
         snapshots.sort_by_key(|s| s.score.score);
 
         let mut nodes = vec![];
-        let mut give_up_threshold = usize::max_value();
+        let mut give_up_threshold = usize::MAX;
         for snapshot in snapshots {
             if snapshot.score.score > give_up_threshold {
                 debug!(
@@ -183,7 +178,7 @@ where
                         score: snapshot.score.score,
                         giveUpScore: give_up_threshold,
                         hostIndex: snapshot.node.node.node.idx,
-                    },
+                    }
                 );
 
                 continue;
@@ -196,122 +191,92 @@ where
                     .saturating_mul(UNHEALTHY_SCORE_MULTIPLIER);
             }
 
-            nodes.push(snapshot.node.clone().acquire(&req));
+            nodes.push(snapshot.node.acquire(req));
         }
 
         // shuffle so that we don't break ties the same way every request
         self.state.entropy.shuffle(&mut nodes);
 
-        BalancedNodeSelectorFuture::Acquire {
-            nodes,
-            service: self.inner.clone(),
-            request: Some(req),
-            span: span.detach(),
-        }
+        Acquire { nodes }.await
     }
 }
 
-#[pin_project(project = Project, PinnedDrop)]
-#[allow(clippy::large_enum_variant)]
-pub enum BalancedNodeSelectorFuture<S, B>
-where
-    S: Service<Request<B>>,
-{
-    Acquire {
-        nodes: Vec<AcquiringNode>,
-        service: Arc<S>,
-        request: Option<Request<B>>,
-        span: OpenSpan<Detached>,
-    },
-    Wrap {
-        #[pin]
-        future: NodeFuture<S::Future>,
-        node: Arc<TrackedNode>,
-    },
+struct Acquire<'a, F> {
+    nodes: Vec<AcquiringNode<'a, F>>,
 }
 
-#[pinned_drop]
-impl<S, B> PinnedDrop for BalancedNodeSelectorFuture<S, B>
+impl<'a, F> Future for Acquire<'a, F>
 where
-    S: Service<Request<B>>,
+    F: Future<Output = AcquiredNode>,
 {
-    fn drop(self: Pin<&mut Self>) {
-        if let Project::Wrap { node, .. } = self.project() {
-            node.in_flight.fetch_sub(1, Ordering::SeqCst);
-        }
-    }
-}
-
-impl<S, B1, B2> Future for BalancedNodeSelectorFuture<S, B1>
-where
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
-{
-    type Output = Result<S::Response, S::Error>;
+    type Output = (&'a TrackedNode, AcquiredNode);
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        loop {
-            let new_self = match self.as_mut().project() {
-                Project::Acquire {
-                    nodes,
-                    service,
-                    request,
-                    span,
-                } => {
-                    let mut _guard = Some(zipkin::set_current(span.context()));
+        // even though we've filtered above in acquire, we still want to poll the nodes in order of
+        // score to ensure we pick the best scoring node if multiple are available at the same time.
+        let mut snapshots = self
+            .nodes
+            .iter_mut()
+            .map(|node| Snapshot {
+                score: node.node.score(),
+                node,
+            })
+            .collect::<Vec<_>>();
+        snapshots.sort_by_key(|n| n.score.score);
 
-                    // even though we've filtered above in Service::call, we still want to poll the nodes in order of
-                    // score to ensure we pick the best scoring node if multiple are available at the same time.
-                    let mut snapshots = nodes
-                        .iter_mut()
-                        .map(|node| Snapshot {
-                            score: node.node.score(),
-                            node,
-                        })
-                        .collect::<Vec<_>>();
-                    snapshots.sort_by_key(|n| n.score.score);
-
-                    match snapshots
-                        .into_iter()
-                        .filter_map(|s| match s.node.acquire.as_mut().poll(cx) {
-                            Poll::Ready(node) => {
-                                // drop the context guard before we create the next future to avoid span nesting
-                                _guard = None;
-
-                                s.node.node.in_flight.fetch_add(1, Ordering::SeqCst);
-
-                                Some(BalancedNodeSelectorFuture::Wrap {
-                                    future: node.wrap(&**service, request.take().unwrap()),
-                                    node: s.node.node.clone(),
-                                })
-                            }
-                            Poll::Pending => None,
-                        })
-                        .next()
-                    {
-                        Some(f) => f,
-                        None => return Poll::Pending,
-                    }
-                }
-                Project::Wrap { future, node } => {
-                    let result = ready!(future.poll(cx));
-
-                    match &result {
-                        // dialogue has a more complex set of conditionals, but this is what it ends up working out to
-                        Ok(response) if response.status().is_server_error() => {
-                            node.recent_failures.update(FAILURE_WEIGHT)
-                        }
-                        Ok(response) if response.status().is_client_error() => {
-                            node.recent_failures.update(FAILURE_WEIGHT / 100.)
-                        }
-                        Ok(_) => {}
-                        Err(_) => node.recent_failures.update(FAILURE_WEIGHT),
-                    }
-
-                    return Poll::Ready(result);
-                }
-            };
-            self.set(new_self);
+        for snapshot in snapshots {
+            if let Poll::Ready(acquired) = snapshot.node.acquire.as_mut().poll(cx) {
+                return Poll::Ready((snapshot.node.node, acquired));
+            }
         }
+
+        Poll::Pending
+    }
+}
+
+impl<S, T, B1, B2> Service<Request<B1>> for BalancedNodeSelectorService<S, T>
+where
+    T: Entropy + Sync + Send,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error> + Sync + Send,
+    B1: Sync + Send,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+
+    async fn call(&self, req: Request<B1>) -> Result<Self::Response, Self::Error> {
+        let (node, tracked) = zipkin::next_span()
+            .with_name("conjure-runtime: balanced-node-selection")
+            .detach()
+            .bind(self.acquire(&req))
+            .await;
+
+        node.in_flight.fetch_add(1, Ordering::SeqCst);
+        let _guard = InFlightGuard { node };
+
+        let result = tracked.wrap(&self.inner, req).await;
+
+        match &result {
+            Ok(response) if response.status().is_server_error() => {
+                node.recent_failures.update(FAILURE_WEIGHT);
+            }
+            Ok(response) if response.status().is_client_error() => {
+                node.recent_failures.update(FAILURE_WEIGHT / 100.)
+            }
+            Ok(_) => {}
+            Err(_) => node.recent_failures.update(FAILURE_WEIGHT),
+        }
+
+        result
+    }
+}
+
+struct InFlightGuard<'a> {
+    node: &'a TrackedNode,
+}
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        self.node.in_flight.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -327,6 +292,7 @@ mod test {
     use http::StatusCode;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use tokio::time;
 
     fn request() -> Request<()> {
@@ -375,9 +341,13 @@ mod test {
                 }
             }
         }));
+        let service = Arc::new(service);
 
         // the first request will be to a, so wait until we know the request has hit the service.
-        tokio::spawn(service.call(request()));
+        tokio::spawn({
+            let service = service.clone();
+            async move { service.call(request()).await }
+        });
         rx.next().await.unwrap();
 
         for _ in 0..100 {

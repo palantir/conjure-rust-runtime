@@ -147,7 +147,6 @@ impl<T, B> AsyncClient for Client<T>
 where
     T: Service<http::Request<RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
     T::Error: Into<Box<dyn error::Error + Sync + Send>>,
-    T::Future: Send,
     B: http_body::Body<Data = Bytes> + 'static + Send,
     B::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
@@ -159,8 +158,6 @@ where
         &self,
         request: Request<AsyncRequestBody<'_, Self::BodyWriter>>,
     ) -> Result<Response<Self::ResponseBody>, Error> {
-        // split into 2 statements to avoid holding onto the state while awaiting the future
-        let future = self.state.load().service.call(request);
-        future.await
+        self.state.load().service.call(request).await
     }
 }

@@ -15,6 +15,7 @@ use crate::raw::Service;
 use crate::service::node::Node;
 use crate::service::Layer;
 use http::Request;
+use std::future::Future;
 use std::sync::Arc;
 
 /// A layer which converts an origin-form URI to an absolute-form by joining with a node's base URI stored in the
@@ -39,9 +40,11 @@ where
 {
     type Error = S::Error;
     type Response = S::Response;
-    type Future = S::Future;
 
-    fn call(&self, mut req: Request<B>) -> Self::Future {
+    fn call(
+        &self,
+        mut req: Request<B>,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         // we expect the request's URI to be in origin-form
         debug_assert!(req.uri().scheme().is_none());
         debug_assert!(req.uri().authority().is_none());

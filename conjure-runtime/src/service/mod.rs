@@ -118,13 +118,12 @@ pub struct ServiceFn<T>(T);
 impl<T, R, F, S, E> Service<R> for ServiceFn<T>
 where
     T: Fn(R) -> F,
-    F: Future<Output = Result<S, E>>,
+    F: Future<Output = Result<S, E>> + Send,
 {
     type Response = S;
     type Error = E;
-    type Future = F;
 
-    fn call(&self, req: R) -> Self::Future {
+    fn call(&self, req: R) -> impl Future<Output = Result<S, E>> {
         (self.0)(req)
     }
 }

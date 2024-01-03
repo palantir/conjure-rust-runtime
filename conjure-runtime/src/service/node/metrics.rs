@@ -14,13 +14,8 @@
 use crate::raw::Service;
 use crate::service::node::Node;
 use crate::service::Layer;
-use futures::ready;
 use http::{Request, Response};
-use pin_project::pin_project;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use tokio::time::Instant;
 
 /// A layer which updates the host metrics for the node stored in the request's extensions map.
@@ -40,53 +35,29 @@ pub struct NodeMetricsService<S> {
 
 impl<S, B1, B2> Service<Request<B1>> for NodeMetricsService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>>,
+    S: Service<Request<B1>, Response = Response<B2>> + Sync + Send,
+    B1: Sync + Send,
 {
     type Error = S::Error;
     type Response = S::Response;
-    type Future = NodeMetricsFuture<S::Future>;
 
-    fn call(&self, req: Request<B1>) -> Self::Future {
+    async fn call(&self, req: Request<B1>) -> Result<S::Response, S::Error> {
         let node = req
             .extensions()
             .get::<Arc<Node>>()
             .expect("should have a Node extension")
             .clone();
 
-        NodeMetricsFuture {
-            inner: self.inner.call(req),
-            start: Instant::now(),
-            node,
-        }
-    }
-}
+        let start = Instant::now();
+        let result = self.inner.call(req).await;
 
-#[pin_project]
-pub struct NodeMetricsFuture<F> {
-    #[pin]
-    inner: F,
-    start: Instant,
-    node: Arc<Node>,
-}
-
-impl<F, B, E> Future for NodeMetricsFuture<F>
-where
-    F: Future<Output = Result<Response<B>, E>>,
-{
-    type Output = Result<Response<B>, E>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-
-        let result = ready!(this.inner.poll(cx));
-
-        if let Some(host_metrics) = &this.node.host_metrics {
+        if let Some(host_metrics) = &node.host_metrics {
             match &result {
-                Ok(response) => host_metrics.update(response.status(), this.start.elapsed()),
+                Ok(response) => host_metrics.update(response.status(), start.elapsed()),
                 Err(_) => host_metrics.update_io_error(),
             }
         }
 
-        Poll::Ready(result)
+        result
     }
 }

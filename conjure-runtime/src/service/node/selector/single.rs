@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::raw::Service;
-use crate::service::node::{LimitedNode, Wrap};
+use crate::service::node::LimitedNode;
 use crate::service::Layer;
 use conjure_error::Error;
 use http::{Request, Response};
-use std::sync::Arc;
 
 /// A node selector layer which always selects a single node.
 ///
@@ -37,28 +36,26 @@ impl<S> Layer<S> for SingleNodeSelectorLayer {
 
     fn layer(self, inner: S) -> SingleNodeSelectorService<S> {
         SingleNodeSelectorService {
-            inner: Arc::new(inner),
+            inner,
             node: self.node,
         }
     }
 }
 
 pub struct SingleNodeSelectorService<S> {
-    inner: Arc<S>,
+    inner: S,
     node: LimitedNode,
 }
 
 impl<S, B1, B2> Service<Request<B1>> for SingleNodeSelectorService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error> + Sync + Send,
+    B1: Sync + Send,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = SingleNodeSelectorFuture<S, B1>;
 
-    fn call(&self, req: Request<B1>) -> Self::Future {
-        self.node.wrap(&self.inner, req)
+    async fn call(&self, req: Request<B1>) -> Result<Self::Response, Self::Error> {
+        self.node.wrap(&self.inner, req).await
     }
 }
-
-pub type SingleNodeSelectorFuture<S, B> = Wrap<S, B>;

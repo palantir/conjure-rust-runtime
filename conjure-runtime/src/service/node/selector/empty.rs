@@ -15,11 +15,8 @@ use crate::raw::Service;
 use crate::service::Layer;
 use conjure_error::Error;
 use http::Request;
-use std::future::Future;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 /// A node selector that always returns an error.
 pub struct EmptyNodeSelectorLayer {
@@ -52,33 +49,14 @@ pub struct EmptyNodeSelectorService<S> {
 
 impl<S, B> Service<Request<B>> for EmptyNodeSelectorService<S>
 where
-    S: Service<Request<B>, Error = Error>,
+    S: Service<Request<B>, Error = Error> + Sync,
+    B: Send,
 {
     type Response = S::Response;
     type Error = Error;
-    type Future = EmptyNodeSelectorFuture<S, B>;
 
-    fn call(&self, _: Request<B>) -> Self::Future {
-        EmptyNodeSelectorFuture {
-            service: self.service.clone(),
-            _p: PhantomData,
-        }
-    }
-}
-
-pub struct EmptyNodeSelectorFuture<S, B> {
-    service: Arc<str>,
-    _p: PhantomData<(S, B)>,
-}
-
-impl<S, B> Future for EmptyNodeSelectorFuture<S, B>
-where
-    S: Service<Request<B>, Error = Error>,
-{
-    type Output = Result<S::Response, S::Error>;
-
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(Err(Error::internal_safe("service configured with no URIs")
-            .with_safe_param("service", &*self.service)))
+    async fn call(&self, _: Request<B>) -> Result<Self::Response, Self::Error> {
+        Err(Error::internal_safe("service configured with no URIs")
+            .with_safe_param("service", &*self.service))
     }
 }

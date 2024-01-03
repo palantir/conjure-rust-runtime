@@ -53,11 +53,9 @@ pub trait Service<R> {
     type Response;
     /// The error type returned by the service.
     type Error;
-    /// The future type returned by the service.
-    type Future: Future<Output = Result<Self::Response, Self::Error>>;
 
     /// Asynchronously perform the request.
-    fn call(&self, req: R) -> Self::Future;
+    fn call(&self, req: R) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send;
 }
 
 impl<R, T> Service<R> for Arc<T>
@@ -66,9 +64,8 @@ where
 {
     type Response = T::Response;
     type Error = T::Error;
-    type Future = T::Future;
 
-    fn call(&self, req: R) -> Self::Future {
+    fn call(&self, req: R) -> impl Future<Output = Result<T::Response, T::Error>> {
         (**self).call(req)
     }
 }

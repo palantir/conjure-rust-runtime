@@ -22,13 +22,13 @@ use crate::{BodyWriter, Builder, Idempotency};
 use async_trait::async_trait;
 use conjure_error::{Error, ErrorKind};
 use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, Endpoint};
-use futures::future::{self, BoxFuture};
+use futures::future;
 use http::request::Parts;
 use http::{Request, Response, StatusCode};
 use rand::Rng;
 use std::error;
+use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use tokio::time::{self, Duration};
 use witchcraft_log::info;
 
@@ -47,7 +47,7 @@ pub struct RetryLayer {
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
-    rng: Arc<ConjureRng>,
+    rng: ConjureRng,
 }
 
 impl RetryLayer {
@@ -60,7 +60,7 @@ impl RetryLayer {
                 builder.get_max_num_retries()
             },
             backoff_slot_size: builder.get_backoff_slot_size(),
-            rng: Arc::new(ConjureRng::new(builder)),
+            rng: ConjureRng::new(builder),
         }
     }
 }
@@ -70,7 +70,7 @@ impl<S> Layer<S> for RetryLayer {
 
     fn layer(self, inner: S) -> Self::Service {
         RetryService {
-            inner: Arc::new(inner),
+            inner,
             idempotency: self.idempotency,
             max_num_retries: self.max_num_retries,
             backoff_slot_size: self.backoff_slot_size,
@@ -80,25 +80,26 @@ impl<S> Layer<S> for RetryLayer {
 }
 
 pub struct RetryService<S> {
-    inner: Arc<S>,
+    inner: S,
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
-    rng: Arc<ConjureRng>,
+    rng: ConjureRng,
 }
 
 impl<'a, S, B> Service<Request<AsyncRequestBody<'a, BodyWriter>>> for RetryService<S>
 where
     S: Service<Request<RawBody>, Response = Response<B>, Error = Error> + 'a + Sync + Send,
     S::Response: Send,
-    S::Future: Send,
     B: 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = BoxFuture<'a, Result<Self::Response, Error>>;
 
-    fn call(&self, req: Request<AsyncRequestBody<'a, BodyWriter>>) -> Self::Future {
+    fn call(
+        &self,
+        req: Request<AsyncRequestBody<'a, BodyWriter>>,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         let idempotent = match self.idempotency {
             Idempotency::Always => true,
             Idempotency::ByMethod => req.method().is_idempotent(),
@@ -106,28 +107,22 @@ where
         };
 
         let state = State {
-            inner: self.inner.clone(),
+            service: self,
             idempotent,
-            max_num_retries: self.max_num_retries,
-            backoff_slot_size: self.backoff_slot_size,
-            rng: self.rng.clone(),
             attempt: 0,
         };
 
-        Box::pin(state.call(req))
+        state.call(req)
     }
 }
 
-struct State<S> {
-    inner: Arc<S>,
+struct State<'a, S> {
+    service: &'a RetryService<S>,
     idempotent: bool,
-    max_num_retries: u32,
-    backoff_slot_size: Duration,
-    rng: Arc<ConjureRng>,
     attempt: u32,
 }
 
-impl<S, B> State<S>
+impl<S, B> State<'_, S>
 where
     S: Service<Request<RawBody>, Response = Response<B>, Error = Error>,
 {
@@ -242,7 +237,7 @@ where
         let req = Request::from_parts(parts, body);
 
         let (body_result, response_result) =
-            future::join(writer.write(), self.inner.call(req)).await;
+            future::join(writer.write(), self.service.inner.call(req)).await;
 
         match (body_result, response_result) {
             (Ok(()), Ok(response)) => Ok(response),
@@ -280,7 +275,7 @@ where
         retry_after: Option<Duration>,
     ) -> Result<(), Error> {
         self.attempt += 1;
-        if self.attempt > self.max_num_retries {
+        if self.attempt > self.service.max_num_retries {
             info!("exceeded retry limits");
             return Err(error);
         }
@@ -297,12 +292,13 @@ where
             Some(backoff) => backoff,
             None => {
                 let scale = 1 << (self.attempt - 1);
-                let max = self.backoff_slot_size * scale;
+                let max = self.service.backoff_slot_size * scale;
                 // gen_range panics when min == max
                 if max == Duration::from_secs(0) {
                     Duration::from_secs(0)
                 } else {
-                    self.rng
+                    self.service
+                        .rng
                         .with(|rng| rng.gen_range(Duration::from_secs(0)..max))
                 }
             }

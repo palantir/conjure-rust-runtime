@@ -14,6 +14,7 @@
 use crate::raw::Service;
 use crate::service::Layer;
 use http::Request;
+use std::future::Future;
 
 /// A request layer which injects Zipkin tracing information into an outgoing request's headers.
 ///
@@ -38,9 +39,11 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
 
-    fn call(&self, mut req: Request<B>) -> Self::Future {
+    fn call(
+        &self,
+        mut req: Request<B>,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         if let Some(context) = zipkin::current() {
             http_zipkin::set_trace_context(context, req.headers_mut());
         }
