@@ -320,15 +320,13 @@ async fn connect_error_doesnt_reset_body() {
     };
 
     let client = client(STOCK_CONFIG, port, |builder| async move {
-        let body = TestBody(false);
-        pin_mut!(body);
         let response = builder
             .build()
             .unwrap()
             .send(
                 req()
                     .method(Method::PUT)
-                    .body(AsyncRequestBody::Streaming(body))
+                    .body(AsyncRequestBody::Streaming(Box::pin(TestBody(false))))
                     .unwrap(),
             )
             .await
@@ -499,8 +497,6 @@ async fn body_write_ends_after_error() {
         |_| async { Ok(Response::new(Empty::new().boxed())) },
         |builder| {
             async move {
-                let body = InfiniteBody;
-                pin_mut!(body);
                 // This could succeed or fail depending on if we get an EPIPE or the response. The important thing is
                 // that we don't deadlock.
                 let _ = builder
@@ -509,7 +505,7 @@ async fn body_write_ends_after_error() {
                     .send(
                         req()
                             .method(Method::POST)
-                            .body(AsyncRequestBody::Streaming(body))
+                            .body(AsyncRequestBody::Streaming(Box::pin(InfiniteBody)))
                             .unwrap(),
                     )
                     .await;
@@ -542,15 +538,13 @@ async fn streaming_write_error_reporting() {
             Ok(Response::new(Empty::new().boxed()))
         },
         |builder| async move {
-            let body = TestBody;
-            pin_mut!(body);
             let error = builder
                 .build()
                 .unwrap()
                 .send(
                     req()
                         .method(Method::POST)
-                        .body(AsyncRequestBody::Streaming(body))
+                        .body(AsyncRequestBody::Streaming(Box::pin(TestBody)))
                         .unwrap(),
                 )
                 .await

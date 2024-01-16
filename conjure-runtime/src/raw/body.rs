@@ -148,7 +148,7 @@ pub(crate) enum Writer<'a> {
     Nop,
     Streaming {
         polled: oneshot::Receiver<()>,
-        body: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>,
+        body: Pin<Box<dyn AsyncWriteBody<BodyWriter> + 'a + Send>>,
         sender: mpsc::Sender<BodyPart>,
     },
 }
@@ -159,7 +159,7 @@ impl<'a> Writer<'a> {
             Writer::Nop => Ok(()),
             Writer::Streaming {
                 polled,
-                body,
+                mut body,
                 sender,
             } => {
                 // wait for hyper to actually ask for the body so we don't start reading it if the request fails early
@@ -170,7 +170,7 @@ impl<'a> Writer<'a> {
 
                 let writer = BodyWriter::new(sender);
                 pin_mut!(writer);
-                body.write_body(writer.as_mut()).await?;
+                body.as_mut().write_body(writer.as_mut()).await?;
                 writer.finish().await.map_err(Error::internal_safe)?;
 
                 Ok(())

@@ -139,7 +139,7 @@ where
                 AsyncRequestBody::Fixed(bytes) => AsyncRequestBody::Fixed(bytes.clone()),
                 AsyncRequestBody::Streaming(writer) => {
                     let body =
-                        Pin::new(tracked.insert(ResetTrackingBodyWriter::new(writer.as_mut())));
+                        Box::pin(tracked.insert(ResetTracker::new(writer.as_mut())).writer());
                     AsyncRequestBody::Streaming(body)
                 }
             };
@@ -270,7 +270,7 @@ where
 
     async fn prepare_for_retry(
         &mut self,
-        body: Option<&mut ResetTrackingBodyWriter<'_>>,
+        body: Option<&mut ResetTracker<'_>>,
         error: Error,
         retry_after: Option<Duration>,
     ) -> Result<(), Error> {
@@ -314,33 +314,39 @@ where
     }
 }
 
-struct ResetTrackingBodyWriter<'a> {
+struct ResetTracker<'a> {
     needs_reset: bool,
     body_writer: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>,
 }
 
-impl<'a> ResetTrackingBodyWriter<'a> {
-    fn new(
-        body_writer: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>,
-    ) -> ResetTrackingBodyWriter<'a> {
-        ResetTrackingBodyWriter {
+impl<'a> ResetTracker<'a> {
+    fn new(body_writer: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>) -> Self {
+        ResetTracker {
             needs_reset: false,
             body_writer,
         }
     }
+
+    fn writer<'b>(&'b mut self) -> ResetTrackingBodyWriter<'b, 'a> {
+        ResetTrackingBodyWriter { tracker: self }
+    }
+}
+
+struct ResetTrackingBodyWriter<'a, 'b> {
+    tracker: &'a mut ResetTracker<'b>,
 }
 
 #[async_trait]
-impl AsyncWriteBody<BodyWriter> for ResetTrackingBodyWriter<'_> {
+impl AsyncWriteBody<BodyWriter> for ResetTrackingBodyWriter<'_, '_> {
     async fn write_body(mut self: Pin<&mut Self>, w: Pin<&mut BodyWriter>) -> Result<(), Error> {
-        self.needs_reset = true;
-        self.body_writer.as_mut().write_body(w).await
+        self.tracker.needs_reset = true;
+        self.tracker.body_writer.as_mut().write_body(w).await
     }
 
     async fn reset(mut self: Pin<&mut Self>) -> bool {
-        let ok = self.body_writer.as_mut().reset().await;
+        let ok = self.tracker.body_writer.as_mut().reset().await;
         if ok {
-            self.needs_reset = false;
+            self.tracker.needs_reset = false;
         }
         ok
     }
@@ -362,7 +368,6 @@ mod test {
     use crate::BodyWriter;
     use async_trait::async_trait;
     use bytes::Bytes;
-    use futures::pin_mut;
     use http::Method;
     use http_body_util::BodyExt;
     use std::pin::pin;
@@ -449,11 +454,9 @@ mod test {
             },
         ));
 
-        let body = StreamedBody;
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(Box::pin(StreamedBody)))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -488,11 +491,9 @@ mod test {
             },
         ));
 
-        let body = StreamedInfiniteBody;
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(Box::pin(StreamedInfiniteBody)))
             .unwrap();
         let err = service.call(request).await.err().unwrap();
 
@@ -530,11 +531,9 @@ mod test {
             },
         ));
 
-        let body = StreamedErrorBody;
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(Box::pin(StreamedErrorBody)))
             .unwrap();
         let err = service.call(request).await.err().unwrap();
 
@@ -605,11 +604,9 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(1);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(1))))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -638,11 +635,9 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(1);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(1))))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -671,11 +666,9 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(1);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(1))))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -704,11 +697,9 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(0);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(0))))
             .unwrap();
         service.call(request).await.err().unwrap();
     }
@@ -737,11 +728,9 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(0);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(0))))
             .unwrap();
         service.call(request).await.err().unwrap();
     }
@@ -831,11 +820,9 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(0);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(0))))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -863,11 +850,9 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(1);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(1))))
             .unwrap();
         service.call(request).await.err().unwrap();
     }

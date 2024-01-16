@@ -22,6 +22,7 @@ use conjure_error::Error;
 use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
 use hyper::body::Incoming;
+use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
@@ -40,8 +41,6 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tower_layer::Layer;
 use webpki_roots::TLS_SERVER_ROOTS;
-
-use super::hyper_rustls::HttpsConnector;
 
 // This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
 const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
@@ -103,7 +102,11 @@ impl BuildRawClient for DefaultRawClientBuilder {
             }
         };
 
-        let connector = HttpsConnector::new(connector, client_config);
+        let connector = HttpsConnectorBuilder::new()
+            .with_tls_config(client_config)
+            .https_or_http()
+            .enable_all_versions()
+            .wrap_connector(connector);
         let connector = TlsMetricsLayer::new(service, builder).layer(connector);
 
         let client = Client::builder(TokioExecutor::new())
