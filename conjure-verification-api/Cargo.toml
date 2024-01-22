@@ -7,7 +7,7 @@ publish = false
 links = "conjure-verification"                       # a hack to pass info upstream to conjure-verification's build script
 
 [build-dependencies]
-attohttpc = "0.26"
+attohttpc = "0.27"
 conjure-codegen = "3"
 flate2 = "1.0"
 tar = "0.4"
