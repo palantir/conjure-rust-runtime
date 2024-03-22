@@ -23,20 +23,26 @@ use conjure_http::client::{
 use conjure_runtime_config::ServiceConfig;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use futures::{join, pin_mut};
+use futures::channel::mpsc;
+use futures::{join, pin_mut, SinkExt};
 use http::{request, Method};
-use hyper::body;
+use http_body::Frame;
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Empty, Full, StreamBody};
+use hyper::body::Incoming;
 use hyper::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
 use hyper::http::header::RETRY_AFTER;
-use hyper::server::conn::Http;
+use hyper::server::conn::http1;
 use hyper::service::Service;
 use hyper::{Request, Response, StatusCode};
+use hyper_util::rt::TokioIo;
 use openssl::ssl::{Ssl, SslAcceptor, SslFiletype, SslMethod};
+use std::convert::Infallible;
 use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -75,10 +81,10 @@ fn ssl_acceptor() -> SslAcceptor {
 async fn test<F, G>(
     config: &str,
     requests: u32,
-    handler: impl FnMut(Request<hyper::Body>) -> F + 'static,
+    handler: impl Fn(Request<Incoming>) -> F + 'static,
     check: impl FnOnce(Builder) -> G,
 ) where
-    F: Future<Output = Result<Response<hyper::Body>, &'static str>> + 'static + Send,
+    F: Future<Output = Result<Response<BoxBody<Bytes, Infallible>>, &'static str>> + 'static + Send,
     G: Future<Output = ()>,
 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -93,10 +99,10 @@ async fn test<F, G>(
 fn blocking_test<F>(
     config: &str,
     requests: u32,
-    handler: impl FnMut(Request<hyper::Body>) -> F + 'static + Send,
+    handler: impl Fn(Request<Incoming>) -> F + 'static + Send,
     check: impl FnOnce(blocking::Client),
 ) where
-    F: Future<Output = Result<Response<hyper::Body>, &'static str>> + 'static + Send,
+    F: Future<Output = Result<Response<BoxBody<Bytes, Infallible>>, &'static str>> + 'static + Send,
 {
     let runtime = Runtime::new().unwrap();
     let listener = runtime.block_on(TcpListener::bind("127.0.0.1:0")).unwrap();
@@ -118,9 +124,9 @@ fn blocking_test<F>(
 async fn server<F>(
     listener: TcpListener,
     requests: u32,
-    mut handler: impl FnMut(Request<hyper::Body>) -> F + 'static,
+    handler: impl Fn(Request<Incoming>) -> F + 'static,
 ) where
-    F: Future<Output = Result<Response<hyper::Body>, &'static str>> + 'static + Send,
+    F: Future<Output = Result<Response<BoxBody<Bytes, Infallible>>, &'static str>> + 'static + Send,
 {
     let acceptor = ssl_acceptor();
 
@@ -131,9 +137,9 @@ async fn server<F>(
         let mut socket = SslStream::new(ssl, socket).unwrap();
         Pin::new(&mut socket).accept().await.unwrap();
 
-        let _ = Http::new()
-            .http1_keep_alive(false)
-            .serve_connection(socket, TestService(&mut handler))
+        let _ = http1::Builder::new()
+            .keep_alive(false)
+            .serve_connection(TokioIo::new(socket), TestService(&handler))
             .await;
     }
 }
@@ -157,22 +163,18 @@ fn parse_config(config: &str, port: u16) -> ServiceConfig {
     serde_yaml::from_str(&config).unwrap()
 }
 
-struct TestService<'a, F>(&'a mut F);
+struct TestService<'a, F>(&'a F);
 
-impl<'a, F, G> Service<Request<hyper::Body>> for TestService<'a, F>
+impl<'a, F, G> Service<Request<Incoming>> for TestService<'a, F>
 where
-    F: FnMut(Request<hyper::Body>) -> G,
-    G: Future<Output = Result<Response<hyper::Body>, &'static str>> + 'static + Send,
+    F: Fn(Request<Incoming>) -> G,
+    G: Future<Output = Result<Response<BoxBody<Bytes, Infallible>>, &'static str>> + 'static + Send,
 {
-    type Response = Response<hyper::Body>;
+    type Response = Response<BoxBody<Bytes, Infallible>>;
     type Error = &'static str;
     type Future = G;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: Request<hyper::Body>) -> Self::Future {
+    fn call(&self, req: Request<Incoming>) -> Self::Future {
         (self.0)(req)
     }
 }
@@ -183,21 +185,20 @@ fn req() -> request::Builder {
 
 #[tokio::test]
 async fn retry_after_503() {
-    let mut first = true;
+    let first = AtomicBool::new(true);
     test(
         STOCK_CONFIG,
         2,
         move |_| {
-            let inner_first = first;
-            first = false;
+            let inner_first = first.swap(false, Ordering::Relaxed);
             async move {
                 if inner_first {
                     Ok(Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(hyper::Body::empty())
+                        .body(Empty::new().boxed())
                         .unwrap())
                 } else {
-                    Ok(Response::new(hyper::Body::empty()))
+                    Ok(Response::new(Empty::new().boxed()))
                 }
             }
         },
@@ -223,7 +224,7 @@ async fn no_retry_after_404() {
         |_| async move {
             Ok(Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(hyper::Body::empty())
+                .body(Empty::new().boxed())
                 .unwrap())
         },
         |builder| async move {
@@ -249,22 +250,21 @@ async fn no_retry_after_404() {
 
 #[tokio::test]
 async fn retry_after_overrides() {
-    let mut first = true;
+    let first = AtomicBool::new(true);
     test(
         STOCK_CONFIG,
         2,
         move |_| {
-            let inner_first = first;
-            first = false;
+            let inner_first = first.swap(false, Ordering::Relaxed);
             async move {
                 if inner_first {
                     Ok(Response::builder()
                         .status(StatusCode::TOO_MANY_REQUESTS)
                         .header(RETRY_AFTER, "1")
-                        .body(hyper::Body::empty())
+                        .body(Empty::new().boxed())
                         .unwrap())
                 } else {
-                    Ok(Response::new(hyper::Body::empty()))
+                    Ok(Response::new(Empty::new().boxed()))
                 }
             }
         },
@@ -312,23 +312,21 @@ async fn connect_error_doesnt_reset_body() {
         listener.accept().await.unwrap();
 
         server(listener, 1, |req| async move {
-            let body = body::to_bytes(req.into_body()).await.unwrap();
-            assert_eq!(&*body, b"hello world");
-            Ok(Response::new(hyper::Body::empty()))
+            let body = req.into_body().collect().await.unwrap();
+            assert_eq!(&*body.to_bytes(), b"hello world");
+            Ok(Response::new(Empty::new().boxed()))
         })
         .await;
     };
 
     let client = client(STOCK_CONFIG, port, |builder| async move {
-        let body = TestBody(false);
-        pin_mut!(body);
         let response = builder
             .build()
             .unwrap()
             .send(
                 req()
                     .method(Method::PUT)
-                    .body(AsyncRequestBody::Streaming(body))
+                    .body(AsyncRequestBody::Streaming(Box::pin(TestBody(false))))
                     .unwrap(),
             )
             .await
@@ -347,7 +345,7 @@ async fn propagate_429() {
         |_| async {
             Ok(Response::builder()
                 .status(StatusCode::TOO_MANY_REQUESTS)
-                .body(hyper::Body::empty())
+                .body(Empty::new().boxed())
                 .unwrap())
         },
         |mut builder| async move {
@@ -377,7 +375,7 @@ async fn propagate_429_with_retry_after() {
             Ok(Response::builder()
                 .status(StatusCode::TOO_MANY_REQUESTS)
                 .header(RETRY_AFTER, "100")
-                .body(hyper::Body::empty())
+                .body(Empty::new().boxed())
                 .unwrap())
         },
         |mut builder| async move {
@@ -406,7 +404,7 @@ async fn propagate_503() {
         |_| async {
             Ok(Response::builder()
                 .status(StatusCode::SERVICE_UNAVAILABLE)
-                .body(hyper::Body::empty())
+                .body(Empty::new().boxed())
                 .unwrap())
         },
         |mut builder| async move {
@@ -429,18 +427,17 @@ async fn propagate_503() {
 
 #[tokio::test]
 async fn dont_propagate_protocol_errors() {
-    let mut first = true;
+    let first = AtomicBool::new(true);
     test(
         STOCK_CONFIG,
         2,
         move |_| {
-            let inner_first = first;
-            first = false;
+            let inner_first = first.swap(false, Ordering::Relaxed);
             async move {
                 if inner_first {
                     Err("")
                 } else {
-                    Ok(Response::new(hyper::Body::empty()))
+                    Ok(Response::new(Empty::new().boxed()))
                 }
             }
         },
@@ -460,7 +457,7 @@ async fn dont_propagate_protocol_errors() {
 
 #[tokio::test]
 async fn dont_bail_when_all_timed_out() {
-    let mut first = true;
+    let first = AtomicBool::new(true);
     test(
         r#"
 uris: ["https://localhost:{{port}}"]
@@ -470,13 +467,12 @@ failed-url-cooldown: 1h
     "#,
         2,
         move |_| {
-            let inner_first = first;
-            first = false;
+            let inner_first = first.swap(false, Ordering::Relaxed);
             async move {
                 if inner_first {
                     Err("")
                 } else {
-                    Ok(Response::new(hyper::Body::empty()))
+                    Ok(Response::new(Empty::new().boxed()))
                 }
             }
         },
@@ -498,11 +494,9 @@ async fn body_write_ends_after_error() {
     test(
         STOCK_CONFIG,
         1,
-        |_| async { Ok(Response::new(hyper::Body::empty())) },
+        |_| async { Ok(Response::new(Empty::new().boxed())) },
         |builder| {
             async move {
-                let body = InfiniteBody;
-                pin_mut!(body);
                 // This could succeed or fail depending on if we get an EPIPE or the response. The important thing is
                 // that we don't deadlock.
                 let _ = builder
@@ -511,7 +505,7 @@ async fn body_write_ends_after_error() {
                     .send(
                         req()
                             .method(Method::POST)
-                            .body(AsyncRequestBody::Streaming(body))
+                            .body(AsyncRequestBody::Streaming(Box::pin(InfiniteBody)))
                             .unwrap(),
                     )
                     .await;
@@ -540,19 +534,17 @@ async fn streaming_write_error_reporting() {
         STOCK_CONFIG,
         1,
         |req| async move {
-            let _ = body::to_bytes(req.into_body()).await;
-            Ok(Response::new(hyper::Body::empty()))
+            let _ = req.into_body().collect().await;
+            Ok(Response::new(Empty::new().boxed()))
         },
         |builder| async move {
-            let body = TestBody;
-            pin_mut!(body);
             let error = builder
                 .build()
                 .unwrap()
                 .send(
                     req()
                         .method(Method::POST)
-                        .body(AsyncRequestBody::Streaming(body))
+                        .body(AsyncRequestBody::Streaming(Box::pin(TestBody)))
                         .unwrap(),
                 )
                 .await
@@ -575,7 +567,7 @@ async fn service_error_propagation() {
             Ok(Response::builder()
                 .status(404)
                 .header("Content-Type", "application/json")
-                .body(hyper::Body::from(body))
+                .body(Full::new(Bytes::from(body)).boxed())
                 .unwrap())
         },
         |mut builder| async move {
@@ -608,7 +600,7 @@ async fn gzip_body() {
             let body = body.finish().unwrap();
             Ok(Response::builder()
                 .header(CONTENT_ENCODING, "gzip")
-                .body(hyper::Body::from(body))
+                .body(Full::new(Bytes::from(body)).boxed())
                 .unwrap())
         },
         |builder| async move {
@@ -639,7 +631,7 @@ async fn zipkin_propagation() {
                 req.headers().get("X-B3-TraceId").unwrap(),
                 "0001020304050607"
             );
-            Ok(Response::new(hyper::Body::empty()))
+            Ok(Response::new(Empty::new().boxed()))
         },
         |builder| {
             let context = TraceContext::builder()
@@ -670,7 +662,7 @@ fn blocking_zipkin_propagation() {
                 req.headers().get("X-B3-TraceId").unwrap(),
                 "0001020304050607"
             );
-            Ok(Response::new(hyper::Body::empty()))
+            Ok(Response::new(Empty::new().boxed()))
         },
         |client| {
             let context = TraceContext::builder()
@@ -691,12 +683,16 @@ async fn read_past_eof() {
         STOCK_CONFIG,
         1,
         |_| async move {
-            let (mut tx, rx) = hyper::Body::channel();
+            let (mut tx, rx) = mpsc::channel(1);
             tokio::spawn(async move {
-                tx.send_data(Bytes::from("hello")).await.unwrap();
-                tx.send_data(Bytes::from(" world")).await.unwrap();
+                tx.send(Ok(Frame::data(Bytes::from("hello"))))
+                    .await
+                    .unwrap();
+                tx.send(Ok(Frame::data(Bytes::from(" world"))))
+                    .await
+                    .unwrap();
             });
-            Ok(Response::new(rx))
+            Ok(Response::new(StreamBody::new(rx).boxed()))
         },
         |builder| async move {
             let body = builder
@@ -741,7 +737,7 @@ security:
   ca-file: "{{ca_file}}"
         "#,
         1,
-        |_| async move { Ok(Response::new(hyper::Body::empty())) },
+        |_| async move { Ok(Response::new(Empty::new().boxed())) },
         |builder| async move {
             builder
                 .build()

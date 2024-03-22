@@ -14,7 +14,7 @@
 //! Error types.
 
 use conjure_error::SerializableError;
-use hyper::StatusCode;
+use http::StatusCode;
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;

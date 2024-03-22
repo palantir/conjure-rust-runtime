@@ -1,0 +1,5 @@
+type: break
+break:
+  description: Upgrade to Hyper 1
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/177

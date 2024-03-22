@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::config;
-pub use crate::service::proxy::connector::{ProxyConnectorLayer, ProxyConnectorService};
+pub use crate::service::proxy::connector::ProxyConnectorService;
 pub use crate::service::proxy::request::ProxyLayer;
 use base64::display::Base64Display;
 use base64::engine::general_purpose::STANDARD;

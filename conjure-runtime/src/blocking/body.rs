@@ -26,7 +26,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::runtime::Handle;
 
 pub(crate) fn shim(
-    body_writer: &mut dyn WriteBody<BodyWriter>,
+    body_writer: Box<dyn WriteBody<BodyWriter> + '_>,
 ) -> (BodyWriterShim, BodyStreamer<'_>) {
     let (sender, receiver) = mpsc::channel(1);
     (
@@ -87,7 +87,7 @@ impl AsyncWriteBody<crate::BodyWriter> for BodyWriterShim {
 }
 
 pub(crate) struct BodyStreamer<'a> {
-    body_writer: &'a mut dyn WriteBody<BodyWriter>,
+    body_writer: Box<dyn WriteBody<BodyWriter> + 'a>,
     receiver: mpsc::Receiver<ShimRequest>,
 }
 

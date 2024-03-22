@@ -109,15 +109,10 @@ where
             let client = self.client.clone();
             async move {
                 let (parts, body) = req.into_parts();
-                let mut body_writer;
                 let body = match body {
                     ShimBody::Empty => AsyncRequestBody::Empty,
                     ShimBody::Fixed(bytes) => AsyncRequestBody::Fixed(bytes),
-                    ShimBody::Streaming(writer) => {
-                        body_writer = writer;
-                        let writer = Pin::new(&mut body_writer);
-                        AsyncRequestBody::Streaming(writer)
-                    }
+                    ShimBody::Streaming(writer) => AsyncRequestBody::Streaming(Box::pin(writer)),
                 };
                 let req = Request::from_parts(parts, body);
 
