@@ -1,0 +1,5 @@
+type: break
+break:
+  description: Builder types are now staged and infallible.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/197
