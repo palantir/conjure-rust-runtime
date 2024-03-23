@@ -17,7 +17,7 @@ pub use crate::service::node::metrics::NodeMetricsLayer;
 pub use crate::service::node::selector::NodeSelectorLayer;
 pub use crate::service::node::uri::NodeUriLayer;
 use crate::util::weak_reducing_gauge::WeakReducingGauge;
-use crate::{Builder, ClientQos, HostMetrics};
+use crate::{builder, Builder, ClientQos, HostMetrics};
 use conjure_error::Error;
 use conjure_http::client::Endpoint;
 use http::{Request, Response};
@@ -44,7 +44,12 @@ impl LimitedNode {
         }
     }
 
-    pub fn new<T>(idx: usize, url: &Url, service: &str, builder: &Builder<T>) -> Self {
+    pub fn new<T>(
+        idx: usize,
+        url: &Url,
+        service: &str,
+        builder: &Builder<builder::Complete<T>>,
+    ) -> Self {
         let node = LimitedNode {
             node: Arc::new(Node {
                 idx,

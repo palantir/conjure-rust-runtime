@@ -15,7 +15,7 @@ use crate::raw::{BuildRawClient, RawBody, Service};
 use crate::service::proxy::{ProxyConfig, ProxyConnectorLayer, ProxyConnectorService};
 use crate::service::timeout::{TimeoutLayer, TimeoutService};
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
-use crate::Builder;
+use crate::{builder, Builder};
 use bytes::Bytes;
 use conjure_error::Error;
 use http::{HeaderMap, Request, Response};
@@ -53,9 +53,10 @@ pub struct DefaultRawClientBuilder;
 impl BuildRawClient for DefaultRawClientBuilder {
     type RawClient = DefaultRawClient;
 
-    fn build_raw_client(&self, builder: &Builder<Self>) -> Result<Self::RawClient, Error> {
-        let service = builder.get_service().expect("service not set");
-
+    fn build_raw_client(
+        &self,
+        builder: &Builder<builder::Complete<Self>>,
+    ) -> Result<Self::RawClient, Error> {
         let mut connector = HttpConnector::new();
         connector.enforce_http(false);
         connector.set_nodelay(true);
@@ -116,7 +117,7 @@ impl BuildRawClient for DefaultRawClientBuilder {
             .enable_http1()
             .enable_http2()
             .wrap_connector(connector);
-        let connector = TlsMetricsLayer::new(service, builder).layer(connector);
+        let connector = TlsMetricsLayer::new(builder).layer(connector);
 
         let client = hyper::Client::builder()
             .pool_idle_timeout(HTTP_KEEPALIVE)

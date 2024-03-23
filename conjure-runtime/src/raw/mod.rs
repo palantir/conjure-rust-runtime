@@ -33,6 +33,7 @@
 //!
 //! [`conjure_runtime::Client`]: crate::Client
 //! [`AsyncBody`]: conjure_http::client::AsyncBody
+use crate::builder;
 pub use crate::raw::body::*;
 pub use crate::raw::default::*;
 use crate::Builder;
@@ -76,7 +77,10 @@ pub trait BuildRawClient {
     type RawClient;
 
     /// Creates a new raw client.
-    fn build_raw_client(&self, builder: &Builder<Self>) -> Result<Self::RawClient, Error>
+    fn build_raw_client(
+        &self,
+        builder: &Builder<builder::Complete<Self>>,
+    ) -> Result<Self::RawClient, Error>
     where
         Self: Sized;
 }

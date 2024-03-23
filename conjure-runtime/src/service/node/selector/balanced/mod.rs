@@ -16,7 +16,7 @@ use crate::rng::ConjureRng;
 use crate::service::node::selector::balanced::reservoir::CoarseExponentialDecayReservoir;
 use crate::service::node::{AcquiredNode, LimitedNode};
 use crate::service::Layer;
-use crate::Builder;
+use crate::{builder, Builder};
 use conjure_error::Error;
 use http::{Request, Response};
 use rand::seq::SliceRandom;
@@ -112,7 +112,7 @@ pub struct BalancedNodeSelectorLayer<T = RandEntropy> {
 }
 
 impl BalancedNodeSelectorLayer {
-    pub fn new<T>(nodes: Vec<LimitedNode>, builder: &Builder<T>) -> Self {
+    pub fn new<T>(nodes: Vec<LimitedNode>, builder: &Builder<builder::Complete<T>>) -> Self {
         Self::with_entropy(nodes, RandEntropy(ConjureRng::new(builder)))
     }
 }

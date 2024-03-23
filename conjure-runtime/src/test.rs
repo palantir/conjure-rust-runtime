@@ -105,9 +105,9 @@ fn blocking_test<F>(
     let server = thread::spawn(move || runtime.block_on(server(listener, requests, handler)));
 
     let client = Client::builder()
-        .from_config(&parse_config(config, port))
         .service("service")
         .user_agent(UserAgent::new(Agent::new("test", "1.0")))
+        .from_config(&parse_config(config, port))
         .build_blocking()
         .unwrap();
 
@@ -142,11 +142,10 @@ async fn client<F>(config: &str, port: u16, check: impl FnOnce(Builder) -> F)
 where
     F: Future<Output = ()>,
 {
-    let mut builder = Client::builder();
-    builder
-        .from_config(&parse_config(config, port))
+    let builder = Client::builder()
         .service("service")
-        .user_agent(UserAgent::new(Agent::new("test", "1.0")));
+        .user_agent(UserAgent::new(Agent::new("test", "1.0")))
+        .from_config(&parse_config(config, port));
     check(builder).await
 }
 
@@ -350,7 +349,7 @@ async fn propagate_429() {
                 .body(hyper::Body::empty())
                 .unwrap())
         },
-        |mut builder| async move {
+        |builder| async move {
             let error = builder
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
@@ -380,7 +379,7 @@ async fn propagate_429_with_retry_after() {
                 .body(hyper::Body::empty())
                 .unwrap())
         },
-        |mut builder| async move {
+        |builder| async move {
             let error = builder
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
@@ -409,7 +408,7 @@ async fn propagate_503() {
                 .body(hyper::Body::empty())
                 .unwrap())
         },
-        |mut builder| async move {
+        |builder| async move {
             let error = builder
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
@@ -444,7 +443,7 @@ async fn dont_propagate_protocol_errors() {
                 }
             }
         },
-        |mut builder| async move {
+        |builder| async move {
             let response = builder
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
@@ -578,7 +577,7 @@ async fn service_error_propagation() {
                 .body(hyper::Body::from(body))
                 .unwrap())
         },
-        |mut builder| async move {
+        |builder| async move {
             let error = builder
                 .service_error(ServiceError::PropagateToCaller)
                 .build()
