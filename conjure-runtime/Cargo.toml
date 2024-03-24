@@ -29,6 +29,7 @@ hyper-rustls = { version = "0.24.0", default-features = false, features = [
     "tls12",
 ] }
 hyper = { version = "0.14", features = ["http1", "http2", "client", "tcp"] }
+linked-hash-map = "0.5"
 once_cell = "1.0"
 parking_lot = "0.12"
 percent-encoding = "2.1"

@@ -550,7 +550,7 @@ where
 }
 
 /// Specifies the beahavior of client-side sympathetic rate limiting.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ClientQos {
     /// Enable client side rate limiting.
@@ -568,7 +568,7 @@ pub enum ClientQos {
 /// Specifies the behavior of a client in response to a `QoS` error from a server.
 ///
 /// QoS errors have status codes 429 or 503.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ServerQos {
     /// The client will automatically retry the request when possible in response to a QoS error.
@@ -586,7 +586,7 @@ pub enum ServerQos {
 /// Specifies the behavior of the client in response to a service error from a server.
 ///
 /// Service errors are encoded as responses with a 4xx or 5xx response code and a body containing a `SerializableError`.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ServiceError {
     /// The service error will be propagated as a new internal service error.
@@ -605,7 +605,7 @@ pub enum ServiceError {
 }
 
 /// Specifies the manner in which the client decides if a request is idempotent or not.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Idempotency {
     /// All requests are assumed to be idempotent.
@@ -622,7 +622,7 @@ pub enum Idempotency {
 }
 
 /// Specifies the strategy used to select a node of a service to use for a request attempt.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NodeSelectionStrategy {
     /// Pin to a single host as long as it continues to successfully respond to requests.

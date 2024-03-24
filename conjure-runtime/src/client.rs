@@ -1,3 +1,4 @@
+use crate::client_cache::CacheEvictor;
 // Copyright 2020 Palantir Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -65,6 +66,7 @@ pub(crate) type BaseBody<B> = WaitForSpansBody<DecodedBody<B>>;
 
 pub(crate) struct ClientState<T> {
     service: BaseService<T>,
+    pub(crate) evictor: Option<CacheEvictor>,
 }
 
 impl<T> ClientState<T> {
@@ -93,7 +95,10 @@ impl<T> ClientState<T> {
             .layer(MapErrorLayer)
             .service(client);
 
-        Ok(ClientState { service })
+        Ok(ClientState {
+            service,
+            evictor: None,
+        })
     }
 }
 
