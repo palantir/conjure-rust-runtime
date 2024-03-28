@@ -22,7 +22,7 @@ flate2 = "1.0"
 futures = "0.3"
 http-body = "0.4"
 http-zipkin = "0.3"
-http = "0.2"
+http = "1.1"
 hyper-rustls = { version = "0.24.0", default-features = false, features = [
     "http1",
     "http2",
