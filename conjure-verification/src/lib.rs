@@ -28,11 +28,10 @@ mod test {
 }
 
 fn main() {
-    let mut builder = Builder::new();
-    builder
-        .uri("http://localhost:8000".parse().unwrap())
+    let builder = Builder::new()
         .service("verification")
-        .user_agent(UserAgent::new(Agent::new("blocking-client", "0.0.0")));
+        .user_agent(UserAgent::new(Agent::new("blocking-client", "0.0.0")))
+        .uri("http://localhost:8000".parse().unwrap());
 
     let mut passed = 0;
     let mut failed = 0;

@@ -13,7 +13,7 @@
 // limitations under the License.
 use crate::blocking::{body, BodyWriter, BodyWriterShim, ResponseBody};
 use crate::raw::{DefaultRawClient, RawBody, Service};
-use crate::Builder;
+use crate::{builder, Builder};
 use bytes::Bytes;
 use conjure_error::Error;
 use conjure_http::client::{self, AsyncClient, AsyncRequestBody, RequestBody};
@@ -61,7 +61,8 @@ impl<T> Clone for Client<T> {
 
 impl Client {
     /// Returns a new `Builder` for clients.
-    pub fn builder() -> Builder {
+    #[inline]
+    pub fn builder() -> Builder<builder::ServiceStage> {
         Builder::new()
     }
 }

@@ -18,7 +18,7 @@ use crate::rng::ConjureRng;
 use crate::service::map_error::RawClientError;
 use crate::service::Layer;
 use crate::util::spans::{self, HttpSpanFuture};
-use crate::{BodyWriter, Builder, Idempotency};
+use crate::{builder, BodyWriter, Builder, Idempotency};
 use async_trait::async_trait;
 use conjure_error::{Error, ErrorKind};
 use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, Endpoint};
@@ -51,7 +51,7 @@ pub struct RetryLayer {
 }
 
 impl RetryLayer {
-    pub fn new<T>(builder: &Builder<T>) -> RetryLayer {
+    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> RetryLayer {
         RetryLayer {
             idempotency: builder.get_idempotency(),
             max_num_retries: if builder.mesh_mode() {
@@ -374,7 +374,7 @@ mod test {
 
     #[tokio::test]
     async fn no_body() {
-        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+        let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 match req.body().inner {
                     RawBodyInner::Empty => {}
@@ -396,7 +396,7 @@ mod test {
     async fn fixed_size_body() {
         let body = "hello world";
 
-        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+        let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 match &req.body().inner {
                     RawBodyInner::Single(chunk) => assert_eq!(chunk, body),
@@ -435,7 +435,7 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body() {
-        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+        let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 match req.body().inner {
                     RawBodyInner::Stream { .. } => {}
@@ -478,7 +478,7 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body_hangup() {
-        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+        let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 let body = req.into_body();
                 pin_mut!(body);
@@ -519,7 +519,7 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body_error() {
-        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+        let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 hyper::body::to_bytes(req.into_body())
                     .await
@@ -583,7 +583,7 @@ mod test {
     #[tokio::test]
     async fn retry_after_raw_client_error() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -616,7 +616,7 @@ mod test {
     #[tokio::test]
     async fn retry_after_unavailable() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -649,7 +649,7 @@ mod test {
     #[tokio::test]
     async fn retry_after_throttled() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -682,7 +682,7 @@ mod test {
     #[tokio::test]
     async fn no_retry_after_propagated_unavailable() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -715,7 +715,7 @@ mod test {
     #[tokio::test]
     async fn no_retry_after_propagated_throttled() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -748,7 +748,7 @@ mod test {
     #[tokio::test]
     async fn no_retry_non_idempotent() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -778,7 +778,7 @@ mod test {
     #[tokio::test]
     async fn retry_non_idempotent_for_qos_errors() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -807,7 +807,7 @@ mod test {
     #[tokio::test]
     async fn no_reset_unread_body() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -842,7 +842,7 @@ mod test {
     #[tokio::test]
     async fn give_up_after_limit() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(1)
                 .backoff_slot_size(Duration::from_secs(0)),
         )

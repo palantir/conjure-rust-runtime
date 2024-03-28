@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//! The client factory.
 use crate::blocking;
 use crate::client::ClientState;
 use crate::config::{ServiceConfig, ServicesConfig};
@@ -28,9 +29,21 @@ use witchcraft_metrics::MetricRegistry;
 
 /// A factory type which can create clients that will live-reload in response to configuration updates.
 #[derive(Clone)]
-pub struct ClientFactory {
+pub struct ClientFactory<T = Complete>(T);
+
+/// The config builder stage.
+pub struct ConfigStage(());
+
+/// The user agent builder stage.
+pub struct UserAgentStage {
     config: Arc<Refreshable<ServicesConfig, Error>>,
-    user_agent: Option<UserAgent>,
+}
+
+/// The complete builder stage.
+#[derive(Clone)]
+pub struct Complete {
+    config: Arc<Refreshable<ServicesConfig, Error>>,
+    user_agent: UserAgent,
     metrics: Option<Arc<MetricRegistry>>,
     host_metrics: Option<Arc<HostMetricsRegistry>>,
     client_qos: ClientQos,
@@ -41,12 +54,39 @@ pub struct ClientFactory {
     blocking_handle: Option<Handle>,
 }
 
-impl ClientFactory {
-    /// Creates a new client factory based off of a refreshable [`ServicesConfig`].
-    pub fn new(config: Refreshable<ServicesConfig, Error>) -> ClientFactory {
-        ClientFactory {
+impl Default for ClientFactory<ConfigStage> {
+    #[inline]
+    fn default() -> Self {
+        ClientFactory::builder()
+    }
+}
+
+impl ClientFactory<ConfigStage> {
+    /// Creates a new builder to construct a client factory.
+    #[inline]
+    pub fn builder() -> Self {
+        ClientFactory(ConfigStage(()))
+    }
+
+    /// Sets the refreshable configuration used for service clients.
+    #[inline]
+    pub fn config(
+        self,
+        config: Refreshable<ServicesConfig, Error>,
+    ) -> ClientFactory<UserAgentStage> {
+        ClientFactory(UserAgentStage {
             config: Arc::new(config),
-            user_agent: None,
+        })
+    }
+}
+
+impl ClientFactory<UserAgentStage> {
+    /// Sets the user agent sent by clients.
+    #[inline]
+    pub fn user_agent(self, user_agent: UserAgent) -> ClientFactory {
+        ClientFactory(Complete {
+            config: self.0.config,
+            user_agent,
             metrics: None,
             host_metrics: None,
             client_qos: ClientQos::Enabled,
@@ -55,59 +95,67 @@ impl ClientFactory {
             idempotency: Idempotency::ByMethod,
             node_selection_strategy: NodeSelectionStrategy::PinUntilError,
             blocking_handle: None,
-        }
+        })
     }
+}
 
+impl ClientFactory {
     /// Sets the user agent sent by clients.
-    ///
-    /// Required.
-    pub fn user_agent(&mut self, user_agent: UserAgent) -> &mut Self {
-        self.user_agent = Some(user_agent);
+    #[inline]
+    pub fn user_agent(mut self, user_agent: UserAgent) -> Self {
+        self.0.user_agent = user_agent;
         self
     }
 
     /// Returns the configured user agent.
-    pub fn get_user_agent(&self) -> Option<&UserAgent> {
-        self.user_agent.as_ref()
+    #[inline]
+    pub fn get_user_agent(&self) -> &UserAgent {
+        &self.0.user_agent
     }
 
     /// Sets clients' rate limiting behavior.
     ///
     /// Defaults to `ClientQos::Enabled`.
-    pub fn client_qos(&mut self, client_qos: ClientQos) -> &mut Self {
-        self.client_qos = client_qos;
+    #[inline]
+    pub fn client_qos(mut self, client_qos: ClientQos) -> Self {
+        self.0.client_qos = client_qos;
         self
     }
 
     /// Returns the configured rate limiting behavior
+    #[inline]
     pub fn get_client_qos(&self) -> ClientQos {
-        self.client_qos
+        self.0.client_qos
     }
 
     /// Sets clients' behavior in response to a QoS error from the server.
     ///
     /// Defaults to `ServerQos::AutomaticRetry`.
-    pub fn server_qos(&mut self, server_qos: ServerQos) -> &mut Self {
-        self.server_qos = server_qos;
+    #[inline]
+    pub fn server_qos(mut self, server_qos: ServerQos) -> Self {
+        self.0.server_qos = server_qos;
         self
     }
 
     /// Returns the configured QoS behavior.
+    #[inline]
     pub fn get_server_qos(&self) -> ServerQos {
-        self.server_qos
+        self.0.server_qos
     }
 
     /// Sets clients' behavior in response to a service error from the server.
     ///
     /// Defaults to `ServiceError::WrapInNewError`.
-    pub fn service_error(&mut self, service_error: ServiceError) -> &mut Self {
-        self.service_error = service_error;
+    #[inline]
+    pub fn service_error(mut self, service_error: ServiceError) -> Self {
+        self.0.service_error = service_error;
         self
     }
 
     /// Returns the configured service error behavior.
+    #[inline]
     pub fn get_service_error(&self) -> ServiceError {
-        self.service_error
+        self.0.service_error
     }
 
     /// Sets clients' behavior to determine if a request is idempotent or not.
@@ -115,56 +163,64 @@ impl ClientFactory {
     /// Only idempotent requests will be retried.
     ///
     /// Defaults to `Idempotency::ByMethod`.
-    pub fn idempotency(&mut self, idempotency: Idempotency) -> &mut Self {
-        self.idempotency = idempotency;
+    #[inline]
+    pub fn idempotency(mut self, idempotency: Idempotency) -> Self {
+        self.0.idempotency = idempotency;
         self
     }
 
     /// Returns the configured idempotency behavior.
+    #[inline]
     pub fn get_idempotency(&self) -> Idempotency {
-        self.idempotency
+        self.0.idempotency
     }
 
     /// Sets the clients' strategy for selecting a node for a request.
     ///
     /// Defaults to `NodeSelectionStrategy::PinUntilError`.
+    #[inline]
     pub fn node_selection_strategy(
-        &mut self,
+        mut self,
         node_selection_strategy: NodeSelectionStrategy,
-    ) -> &mut Self {
-        self.node_selection_strategy = node_selection_strategy;
+    ) -> Self {
+        self.0.node_selection_strategy = node_selection_strategy;
         self
     }
 
     /// Returns the configured node selection strategy.
+    #[inline]
     pub fn get_node_selection_strategy(&self) -> NodeSelectionStrategy {
-        self.node_selection_strategy
+        self.0.node_selection_strategy
     }
 
     /// Sets the metric registry used to register client metrics.
     ///
     /// Defaults to no registry.
-    pub fn metrics(&mut self, metrics: Arc<MetricRegistry>) -> &mut Self {
-        self.metrics = Some(metrics);
+    #[inline]
+    pub fn metrics(mut self, metrics: Arc<MetricRegistry>) -> Self {
+        self.0.metrics = Some(metrics);
         self
     }
 
     /// Returns the configured metrics registry.
+    #[inline]
     pub fn get_metrics(&self) -> Option<&Arc<MetricRegistry>> {
-        self.metrics.as_ref()
+        self.0.metrics.as_ref()
     }
 
     /// Sets the host metrics registry used to track host performance.
     ///
     /// Defaults to no registry.
-    pub fn host_metrics(&mut self, host_metrics: Arc<HostMetricsRegistry>) -> &mut Self {
-        self.host_metrics = Some(host_metrics);
+    #[inline]
+    pub fn host_metrics(mut self, host_metrics: Arc<HostMetricsRegistry>) -> Self {
+        self.0.host_metrics = Some(host_metrics);
         self
     }
 
     /// Returns the configured host metrics registry.
+    #[inline]
     pub fn get_host_metrics(&self) -> Option<&Arc<HostMetricsRegistry>> {
-        self.host_metrics.as_ref()
+        self.0.host_metrics.as_ref()
     }
 
     /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
@@ -172,21 +228,23 @@ impl ClientFactory {
     /// This has no effect on async clients.
     ///
     /// Defaults to a `conjure-runtime` internal `Runtime`.
-    pub fn blocking_handle(&mut self, blocking_handle: Handle) -> &mut Self {
-        self.blocking_handle = Some(blocking_handle);
+    #[inline]
+    pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
+        self.0.blocking_handle = Some(blocking_handle);
         self
     }
 
     /// Returns the configured blocking handle.
+    #[inline]
     pub fn get_blocking_handle(&self) -> Option<&Handle> {
-        self.blocking_handle.as_ref()
+        self.0.blocking_handle.as_ref()
     }
 
     /// Creates a new client for the specified service.
     ///
-    /// The client's configuration will automatically refresh to track changes in the factory's `ServicesConfig`.
+    /// The client's configuration will automatically refresh to track changes in the factory's [`ServicesConfig`].
     ///
-    /// If no configuration is present for the specified service in the `ServicesConfig`, the client will
+    /// If no configuration is present for the specified service in the [`ServicesConfig`], the client will
     /// immediately return an error for all requests.
     ///
     /// The method can return any type implementing the `conjure-http` [`AsyncService`] trait. This notably includes all
@@ -203,42 +261,38 @@ impl ClientFactory {
     }
 
     fn client_inner(&self, service: &str) -> Result<Client, Error> {
-        let service_config = self.config.map({
+        let service_config = self.0.config.map({
             let service = service.to_string();
             move |c| c.merged_service(&service).unwrap_or_default()
         });
 
         let service = service.to_string();
-        let user_agent = self.user_agent.clone();
-        let metrics = self.metrics.clone();
-        let host_metrics = self.host_metrics.clone();
-        let client_qos = self.client_qos;
-        let server_qos = self.server_qos;
-        let service_error = self.service_error;
-        let idempotency = self.idempotency;
-        let node_selection_strategy = self.node_selection_strategy;
+        let user_agent = self.0.user_agent.clone();
+        let metrics = self.0.metrics.clone();
+        let host_metrics = self.0.host_metrics.clone();
+        let client_qos = self.0.client_qos;
+        let server_qos = self.0.server_qos;
+        let service_error = self.0.service_error;
+        let idempotency = self.0.idempotency;
+        let node_selection_strategy = self.0.node_selection_strategy;
 
         let make_state = move |config: &ServiceConfig| {
-            let mut builder = Client::builder();
-            builder
-                .from_config(config)
+            let mut builder = Client::builder()
                 .service(&service)
+                .user_agent(user_agent.clone())
+                .from_config(config)
                 .client_qos(client_qos)
                 .server_qos(server_qos)
                 .service_error(service_error)
                 .idempotency(idempotency)
                 .node_selection_strategy(node_selection_strategy);
 
-            if let Some(user_agent) = user_agent.clone() {
-                builder.user_agent(user_agent);
-            }
-
             if let Some(metrics) = metrics.clone() {
-                builder.metrics(metrics);
+                builder = builder.metrics(metrics);
             }
 
             if let Some(host_metrics) = host_metrics.clone() {
-                builder.host_metrics(host_metrics);
+                builder = builder.host_metrics(host_metrics);
             }
 
             ClientState::new(&builder)
@@ -261,9 +315,9 @@ impl ClientFactory {
 
     /// Creates a new blocking client for the specified service.
     ///
-    /// The client's configuration will automatically refresh to track changes in the factory's `ServicesConfig`.
+    /// The client's configuration will automatically refresh to track changes in the factory's [`ServicesConfig`].
     ///
-    /// If no configuration is present for the specified service in the `ServicesConfig`, the client will
+    /// If no configuration is present for the specified service in the [`ServicesConfig`], the client will
     /// immediately return an error for all requests.
     ///
     /// The method can return any type implementing the `conjure-http` [`Service`] trait. This notably includes all
@@ -282,7 +336,7 @@ impl ClientFactory {
     fn blocking_client_inner(&self, service: &str) -> Result<blocking::Client, Error> {
         self.client_inner(service).map(|client| blocking::Client {
             client,
-            handle: self.blocking_handle.clone(),
+            handle: self.0.blocking_handle.clone(),
         })
     }
 }

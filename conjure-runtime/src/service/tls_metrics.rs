@@ -35,11 +35,11 @@ pub struct TlsMetricsLayer {
 }
 
 impl TlsMetricsLayer {
-    pub fn new(service: &str, builder: &Builder) -> TlsMetricsLayer {
+    pub fn new(builder: &Builder) -> TlsMetricsLayer {
         TlsMetricsLayer {
             shared: Arc::new(Shared {
                 metrics: builder.get_metrics().cloned(),
-                service: service.to_string(),
+                service: builder.get_service().to_string(),
             }),
         }
     }

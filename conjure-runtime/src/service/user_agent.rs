@@ -13,7 +13,7 @@
 // limitations under the License.
 use crate::raw::Service;
 use crate::service::Layer;
-use crate::{Agent, Builder, UserAgent};
+use crate::{builder, Agent, Builder, UserAgent};
 use conjure_http::client::Endpoint;
 use http::header::USER_AGENT;
 use http::{HeaderValue, Request};
@@ -28,12 +28,9 @@ pub struct UserAgentLayer {
 }
 
 impl UserAgentLayer {
-    pub fn new<B>(builder: &Builder<B>) -> UserAgentLayer {
+    pub fn new<B>(builder: &Builder<builder::Complete<B>>) -> UserAgentLayer {
         UserAgentLayer {
-            user_agent: builder
-                .get_user_agent()
-                .cloned()
-                .expect("user agent not set"),
+            user_agent: builder.get_user_agent().clone(),
         }
     }
 }
@@ -100,7 +97,9 @@ mod test {
     #[tokio::test]
     async fn basic() {
         let layer = UserAgentLayer::new(
-            Builder::new().user_agent(UserAgent::new(Agent::new("foobar", "1.0.0"))),
+            &Builder::new()
+                .service("foo")
+                .user_agent(UserAgent::new(Agent::new("foobar", "1.0.0"))),
         );
         let service = layer.layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 

@@ -190,17 +190,21 @@
 #![warn(missing_docs, clippy::all)]
 
 pub use crate::body::*;
-pub use crate::builder::*;
+#[doc(inline)]
+pub use crate::builder::{
+    Builder, ClientQos, Idempotency, NodeSelectionStrategy, ServerQos, ServiceError,
+};
 pub use crate::client::*;
-pub use crate::client_factory::*;
+#[doc(inline)]
+pub use crate::client_factory::ClientFactory;
 pub use crate::host_metrics::*;
 pub use crate::user_agent::*;
 
 pub mod blocking;
 mod body;
-mod builder;
+pub mod builder;
 mod client;
-mod client_factory;
+pub mod client_factory;
 pub mod errors;
 mod host_metrics;
 pub mod raw;

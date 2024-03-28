@@ -15,7 +15,7 @@ use crate::raw::Service;
 use crate::rng::ConjureRng;
 use crate::service::node::LimitedNode;
 use crate::service::Layer;
-use crate::Builder;
+use crate::{builder, Builder};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
 use http::{Request, Response};
@@ -65,7 +65,7 @@ pub struct FixedNodes<T = LimitedNode> {
 }
 
 impl<T> FixedNodes<T> {
-    pub fn new<U>(nodes: Vec<T>, builder: &Builder<U>) -> Self {
+    pub fn new<U>(nodes: Vec<T>, builder: &Builder<builder::Complete<U>>) -> Self {
         Self::with_entropy(nodes, RandEntropy(ConjureRng::new(builder)))
     }
 
@@ -100,7 +100,7 @@ pub struct ReshufflingNodes<T = LimitedNode, E = RandEntropy> {
 }
 
 impl<T> ReshufflingNodes<T> {
-    pub fn new<U>(nodes: Vec<T>, builder: &Builder<U>) -> Self {
+    pub fn new<U>(nodes: Vec<T>, builder: &Builder<builder::Complete<U>>) -> Self {
         Self::with_entropy(nodes, RandEntropy(ConjureRng::new(builder)))
     }
 }

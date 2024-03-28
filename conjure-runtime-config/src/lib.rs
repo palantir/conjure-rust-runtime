@@ -18,6 +18,7 @@
 
 use serde::de::{Deserializer, Error as _, Unexpected};
 use serde::Deserialize;
+use staged_builder::staged_builder;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -51,26 +52,30 @@ mod test;
 /// ```
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
+#[staged_builder]
+#[builder(update)]
 pub struct ServicesConfig {
+    #[builder(map(key(type = String, into), value(type = ServiceConfig)))]
     services: HashMap<String, ServiceConfig>,
+    #[builder(default, into)]
     security: Option<SecurityConfig>,
+    #[builder(default, into)]
     proxy: Option<ProxyConfig>,
+    #[builder(default, into)]
     #[serde(deserialize_with = "de_opt_duration")]
     connect_timeout: Option<Duration>,
+    #[builder(default, into)]
     #[serde(deserialize_with = "de_opt_duration")]
     read_timeout: Option<Duration>,
+    #[builder(default, into)]
     #[serde(deserialize_with = "de_opt_duration")]
     write_timeout: Option<Duration>,
+    #[builder(default, into)]
     #[serde(deserialize_with = "de_opt_duration")]
     backoff_slot_size: Option<Duration>,
 }
 
 impl ServicesConfig {
-    /// Returns a new builder.
-    pub fn builder() -> ServicesConfigBuilder {
-        ServicesConfigBuilder::default()
-    }
-
     /// Returns the configuration for the specified service with top-level defaults applied.
     pub fn merged_service(&self, name: &str) -> Option<ServiceConfig> {
         let mut service = self.services.get(name).cloned()?;
@@ -133,89 +138,35 @@ impl ServicesConfig {
     }
 }
 
-/// A builder type for `ServiceConfig`.
-#[derive(Default)]
-pub struct ServicesConfigBuilder(ServicesConfig);
-
-impl From<ServicesConfig> for ServicesConfigBuilder {
-    fn from(config: ServicesConfig) -> ServicesConfigBuilder {
-        ServicesConfigBuilder(config)
-    }
-}
-
-impl ServicesConfigBuilder {
-    /// Adds a service to the builder.
-    pub fn service(&mut self, name: &str, config: ServiceConfig) -> &mut Self {
-        self.0.services.insert(name.to_string(), config);
-        self
-    }
-
-    /// Sets the security configuration.
-    pub fn security(&mut self, security: SecurityConfig) -> &mut Self {
-        self.0.security = Some(security);
-        self
-    }
-
-    /// Sets the proxy configuration.
-    pub fn proxy(&mut self, proxy: ProxyConfig) -> &mut Self {
-        self.0.proxy = Some(proxy);
-        self
-    }
-
-    /// Sets the connect timeout.
-    pub fn connect_timeout(&mut self, connect_timeout: Duration) -> &mut Self {
-        self.0.connect_timeout = Some(connect_timeout);
-        self
-    }
-
-    /// Sets the read timeout.
-    pub fn read_timeout(&mut self, read_timeout: Duration) -> &mut Self {
-        self.0.read_timeout = Some(read_timeout);
-        self
-    }
-
-    /// Sets the write timeout.
-    pub fn write_timeout(&mut self, write_timeout: Duration) -> &mut Self {
-        self.0.write_timeout = Some(write_timeout);
-        self
-    }
-
-    /// Sets the backoff slot size.
-    pub fn backoff_slot_size(&mut self, backoff_slot_size: Duration) -> &mut Self {
-        self.0.backoff_slot_size = Some(backoff_slot_size);
-        self
-    }
-
-    /// Creates a new `ServicesConfig`.
-    pub fn build(&self) -> ServicesConfig {
-        self.0.clone()
-    }
-}
-
 /// The configuration for an individual service.
 #[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
+#[staged_builder]
+#[builder(update)]
 pub struct ServiceConfig {
+    #[builder(list(item(type = Url)))]
     uris: Vec<Url>,
+    #[builder(default, into)]
     security: Option<SecurityConfig>,
+    #[builder(default, into)]
     proxy: Option<ProxyConfig>,
+    #[builder(default, into)]
     #[serde(deserialize_with = "de_opt_duration")]
     connect_timeout: Option<Duration>,
+    #[builder(default, into)]
     #[serde(deserialize_with = "de_opt_duration")]
     read_timeout: Option<Duration>,
+    #[builder(default, into)]
     #[serde(deserialize_with = "de_opt_duration")]
     write_timeout: Option<Duration>,
+    #[builder(default, into)]
     #[serde(deserialize_with = "de_opt_duration")]
     backoff_slot_size: Option<Duration>,
+    #[builder(default, into)]
     max_num_retries: Option<u32>,
 }
 
 impl ServiceConfig {
-    /// Returns a new builder.
-    pub fn builder() -> ServiceConfigBuilder {
-        ServiceConfigBuilder::default()
-    }
-
     /// Returns the URIs of the service's nodes.
     pub fn uris(&self) -> &[Url] {
         &self.uris
@@ -257,92 +208,21 @@ impl ServiceConfig {
     }
 }
 
-/// A builder type for `ServiceConfig`s.
-#[derive(Default)]
-pub struct ServiceConfigBuilder(ServiceConfig);
-
-impl From<ServiceConfig> for ServiceConfigBuilder {
-    fn from(config: ServiceConfig) -> ServiceConfigBuilder {
-        ServiceConfigBuilder(config)
-    }
-}
-
-impl ServiceConfigBuilder {
-    /// Appends a URI to the URIs list.
-    pub fn uri(&mut self, uri: Url) -> &mut Self {
-        self.0.uris.push(uri);
-        self
-    }
-
-    /// Sets the URIs list.
-    pub fn uris(&mut self, uris: Vec<Url>) -> &mut Self {
-        self.0.uris = uris;
-        self
-    }
-
-    /// Sets the security configuration.
-    pub fn security(&mut self, security: SecurityConfig) -> &mut Self {
-        self.0.security = Some(security);
-        self
-    }
-
-    /// Sets the proxy configuration.
-    pub fn proxy(&mut self, proxy: ProxyConfig) -> &mut Self {
-        self.0.proxy = Some(proxy);
-        self
-    }
-
-    /// Sets the connect timeout.
-    pub fn connect_timeout(&mut self, connect_timeout: Duration) -> &mut Self {
-        self.0.connect_timeout = Some(connect_timeout);
-        self
-    }
-
-    /// Sets the read timeout.
-    pub fn read_timeout(&mut self, read_timeout: Duration) -> &mut Self {
-        self.0.read_timeout = Some(read_timeout);
-        self
-    }
-
-    /// Sets the write timeout.
-    pub fn write_timeout(&mut self, write_timeout: Duration) -> &mut Self {
-        self.0.write_timeout = Some(write_timeout);
-        self
-    }
-
-    /// Sets the backoff slot size.
-    pub fn backoff_slot_size(&mut self, backoff_slot_size: Duration) -> &mut Self {
-        self.0.backoff_slot_size = Some(backoff_slot_size);
-        self
-    }
-
-    /// Sets the maximum number of retries for failed RPCs.
-    pub fn max_num_retries(&mut self, max_num_retries: u32) -> &mut Self {
-        self.0.max_num_retries = Some(max_num_retries);
-        self
-    }
-
-    /// Creates a new `ServiceConfig`.
-    pub fn build(&self) -> ServiceConfig {
-        self.0.clone()
-    }
-}
-
 /// Security configuration used to communicate with a service.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[staged_builder]
+#[builder(update)]
 pub struct SecurityConfig {
+    #[builder(default, into)]
     ca_file: Option<PathBuf>,
+    #[builder(default, into)]
     key_file: Option<PathBuf>,
+    #[builder(default, into)]
     cert_file: Option<PathBuf>,
 }
 
 impl SecurityConfig {
-    /// Returns a new builder.
-    pub fn builder() -> SecurityConfigBuilder {
-        SecurityConfigBuilder::default()
-    }
-
     /// The path to a file containing PEM-formatted root certificates trusted to identify the service.
     ///
     /// These certificates are used in addition to the bundled root CA list.
@@ -363,41 +243,6 @@ impl SecurityConfig {
     /// the remainder of the certificate chain to a trusted root.
     pub fn cert_file(&self) -> Option<&Path> {
         self.cert_file.as_deref()
-    }
-}
-
-/// A builder type for `SecurityConfig`s.
-#[derive(Default)]
-pub struct SecurityConfigBuilder(SecurityConfig);
-
-impl From<SecurityConfig> for SecurityConfigBuilder {
-    fn from(config: SecurityConfig) -> SecurityConfigBuilder {
-        SecurityConfigBuilder(config)
-    }
-}
-
-impl SecurityConfigBuilder {
-    /// Sets the trusted root CA file.
-    pub fn ca_file(&mut self, ca_file: Option<PathBuf>) -> &mut Self {
-        self.0.ca_file = ca_file;
-        self
-    }
-
-    /// Sets the private key used for client certificate authentication.
-    pub fn key_file(&mut self, key_file: Option<PathBuf>) -> &mut Self {
-        self.0.key_file = key_file;
-        self
-    }
-
-    /// Sets the certificate chain used for client certificate authentication.
-    pub fn cert_file(&mut self, cert_file: Option<PathBuf>) -> &mut Self {
-        self.0.cert_file = cert_file;
-        self
-    }
-
-    /// Creates a new `SecurityConfig`.
-    pub fn build(&self) -> SecurityConfig {
-        self.0.clone()
     }
 }
 
@@ -422,17 +267,15 @@ impl Default for ProxyConfig {
 /// Configuration for an HTTP proxy.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[staged_builder]
+#[builder(update)]
 pub struct HttpProxyConfig {
     host_and_port: HostAndPort,
+    #[builder(default, into)]
     credentials: Option<BasicCredentials>,
 }
 
 impl HttpProxyConfig {
-    /// Returns a new builder.
-    pub fn builder() -> HttpProxyConfigBuilder {
-        HttpProxyConfigBuilder::default()
-    }
-
     /// The host and port of the proxy server.
     pub fn host_and_port(&self) -> &HostAndPort {
         &self.host_and_port
@@ -441,48 +284,6 @@ impl HttpProxyConfig {
     /// The credentials used to authenticate with the proxy.
     pub fn credentials(&self) -> Option<&BasicCredentials> {
         self.credentials.as_ref()
-    }
-}
-
-/// A builder for `HttpProxyConfig`s.
-#[derive(Default)]
-pub struct HttpProxyConfigBuilder {
-    host_and_port: Option<HostAndPort>,
-    credentials: Option<BasicCredentials>,
-}
-
-impl From<HttpProxyConfig> for HttpProxyConfigBuilder {
-    fn from(config: HttpProxyConfig) -> HttpProxyConfigBuilder {
-        HttpProxyConfigBuilder {
-            host_and_port: Some(config.host_and_port),
-            credentials: config.credentials,
-        }
-    }
-}
-
-impl HttpProxyConfigBuilder {
-    /// Sets the host and port.
-    pub fn host_and_port(&mut self, host_and_port: HostAndPort) -> &mut Self {
-        self.host_and_port = Some(host_and_port);
-        self
-    }
-
-    /// Sets the credentials.
-    pub fn credentials(&mut self, credentials: Option<BasicCredentials>) -> &mut Self {
-        self.credentials = credentials;
-        self
-    }
-
-    /// Creates a new `HttpProxyConfig`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `host_and_port` is not set.
-    pub fn build(&self) -> HttpProxyConfig {
-        HttpProxyConfig {
-            host_and_port: self.host_and_port.clone().expect("host_and_port not set"),
-            credentials: self.credentials.clone(),
-        }
     }
 }
 
