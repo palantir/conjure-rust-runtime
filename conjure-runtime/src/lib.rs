@@ -204,6 +204,7 @@ pub mod blocking;
 mod body;
 pub mod builder;
 mod client;
+mod client_cache;
 pub mod client_factory;
 pub mod errors;
 mod host_metrics;

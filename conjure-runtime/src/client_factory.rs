@@ -13,7 +13,7 @@
 // limitations under the License.
 //! The client factory.
 use crate::blocking;
-use crate::client::ClientState;
+use crate::client_cache::ClientCache;
 use crate::config::{ServiceConfig, ServicesConfig};
 use crate::{
     Client, ClientQos, HostMetricsRegistry, Idempotency, NodeSelectionStrategy, ServerQos,
@@ -52,6 +52,7 @@ pub struct Complete {
     idempotency: Idempotency,
     node_selection_strategy: NodeSelectionStrategy,
     blocking_handle: Option<Handle>,
+    cache: ClientCache,
 }
 
 impl Default for ClientFactory<ConfigStage> {
@@ -95,11 +96,17 @@ impl ClientFactory<UserAgentStage> {
             idempotency: Idempotency::ByMethod,
             node_selection_strategy: NodeSelectionStrategy::PinUntilError,
             blocking_handle: None,
+            cache: ClientCache::new(),
         })
     }
 }
 
 impl ClientFactory {
+    // Some state can't be tracked in the cache key, so we instead swap to a new cache.
+    fn swap_cache(&mut self) {
+        self.0.cache = ClientCache::new();
+    }
+
     /// Sets the user agent sent by clients.
     #[inline]
     pub fn user_agent(mut self, user_agent: UserAgent) -> Self {
@@ -199,6 +206,7 @@ impl ClientFactory {
     #[inline]
     pub fn metrics(mut self, metrics: Arc<MetricRegistry>) -> Self {
         self.0.metrics = Some(metrics);
+        self.swap_cache();
         self
     }
 
@@ -214,6 +222,7 @@ impl ClientFactory {
     #[inline]
     pub fn host_metrics(mut self, host_metrics: Arc<HostMetricsRegistry>) -> Self {
         self.0.host_metrics = Some(host_metrics);
+        self.swap_cache();
         self
     }
 
@@ -231,6 +240,7 @@ impl ClientFactory {
     #[inline]
     pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
         self.0.blocking_handle = Some(blocking_handle);
+        self.swap_cache();
         self
     }
 
@@ -275,6 +285,7 @@ impl ClientFactory {
         let service_error = self.0.service_error;
         let idempotency = self.0.idempotency;
         let node_selection_strategy = self.0.node_selection_strategy;
+        let cache = self.0.cache.clone();
 
         let make_state = move |config: &ServiceConfig| {
             let mut builder = Client::builder()
@@ -295,17 +306,17 @@ impl ClientFactory {
                 builder = builder.host_metrics(host_metrics);
             }
 
-            ClientState::new(&builder)
+            cache.get(&builder)
         };
 
         let state = make_state(&service_config.get())?;
-        let state = Arc::new(ArcSwap::new(Arc::new(state)));
+        let state = Arc::new(ArcSwap::new(state));
 
         let subscription = service_config.subscribe({
             let state = state.clone();
             move |config| {
                 let new_state = make_state(config)?;
-                state.store(Arc::new(new_state));
+                state.store(new_state);
                 Ok(())
             }
         })?;
