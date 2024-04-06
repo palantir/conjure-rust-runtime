@@ -25,7 +25,7 @@ use hyper::body::Incoming;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
-use hyper_util::rt::TokioExecutor;
+use hyper_util::rt::{TokioExecutor, TokioTimer};
 use pin_project::pin_project;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore};
@@ -112,6 +112,8 @@ impl BuildRawClient for DefaultRawClientBuilder {
 
         let client = Client::builder(TokioExecutor::new())
             .pool_idle_timeout(HTTP_KEEPALIVE)
+            .pool_timer(TokioTimer::new())
+            .timer(TokioTimer::new())
             .build(connector);
 
         Ok(DefaultRawClient(client))
