@@ -10,7 +10,6 @@ readme = "../README.md"
 
 [dependencies]
 arc-swap = "1.0"
-async-trait = "0.1"
 base64 = "0.22"
 bytes = "1.0"
 conjure-error = "3.6"
