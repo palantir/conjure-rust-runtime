@@ -14,7 +14,7 @@
 use crate::errors::{RemoteError, ThrottledError, UnavailableError};
 use crate::raw::Service;
 use crate::service::Layer;
-use crate::{Builder, ServerQos, ServiceError};
+use crate::{builder, Builder, ServerQos, ServiceError};
 use bytes::Bytes;
 use conjure_error::Error;
 use conjure_serde::json;
@@ -42,7 +42,7 @@ pub struct HttpErrorLayer {
 }
 
 impl HttpErrorLayer {
-    pub fn new<T>(builder: &Builder<T>) -> HttpErrorLayer {
+    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> HttpErrorLayer {
         HttpErrorLayer {
             server_qos: builder.get_server_qos(),
             service_error: builder.get_service_error(),
@@ -165,7 +165,7 @@ mod test {
     #[tokio::test]
     async fn success_is_ok() {
         let service =
-            HttpErrorLayer::new(&Builder::new()).layer(service::service_fn(|_| async move {
+            HttpErrorLayer::new(&Builder::for_test()).layer(service::service_fn(|_| async move {
                 Ok(Response::builder()
                     .status(StatusCode::OK)
                     .body(Empty::<Bytes>::new())
@@ -180,7 +180,7 @@ mod test {
     #[tokio::test]
     async fn default_throttle_handling() {
         let service =
-            HttpErrorLayer::new(&Builder::new()).layer(service::service_fn(|_| async move {
+            HttpErrorLayer::new(&Builder::for_test()).layer(service::service_fn(|_| async move {
                 Ok(Response::builder()
                     .status(StatusCode::TOO_MANY_REQUESTS)
                     .header(RETRY_AFTER, "100")
@@ -200,15 +200,16 @@ mod test {
 
     #[tokio::test]
     async fn propagated_throttle_handling() {
-        let service =
-            HttpErrorLayer::new(Builder::new().server_qos(ServerQos::Propagate429And503ToCaller))
-                .layer(service::service_fn(|_| async move {
-                    Ok(Response::builder()
-                        .status(StatusCode::TOO_MANY_REQUESTS)
-                        .header(RETRY_AFTER, "100")
-                        .body(Empty::<Bytes>::new())
-                        .unwrap())
-                }));
+        let service = HttpErrorLayer::new(
+            &Builder::for_test().server_qos(ServerQos::Propagate429And503ToCaller),
+        )
+        .layer(service::service_fn(|_| async move {
+            Ok(Response::builder()
+                .status(StatusCode::TOO_MANY_REQUESTS)
+                .header(RETRY_AFTER, "100")
+                .body(Empty::<Bytes>::new())
+                .unwrap())
+        }));
 
         let request = Request::new(());
         let error = service.call(request).await.err().unwrap();
@@ -222,7 +223,7 @@ mod test {
     #[tokio::test]
     async fn default_unavailable_handling() {
         let service =
-            HttpErrorLayer::new(&Builder::new()).layer(service::service_fn(|_| async move {
+            HttpErrorLayer::new(&Builder::for_test()).layer(service::service_fn(|_| async move {
                 Ok(Response::builder()
                     .status(StatusCode::SERVICE_UNAVAILABLE)
                     .body(Empty::<Bytes>::new())
@@ -240,14 +241,15 @@ mod test {
 
     #[tokio::test]
     async fn propagated_unavailable_handling() {
-        let service =
-            HttpErrorLayer::new(Builder::new().server_qos(ServerQos::Propagate429And503ToCaller))
-                .layer(service::service_fn(|_| async move {
-                    Ok(Response::builder()
-                        .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(Empty::<Bytes>::new())
-                        .unwrap())
-                }));
+        let service = HttpErrorLayer::new(
+            &Builder::for_test().server_qos(ServerQos::Propagate429And503ToCaller),
+        )
+        .layer(service::service_fn(|_| async move {
+            Ok(Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .body(Empty::<Bytes>::new())
+                .unwrap())
+        }));
 
         let request = Request::new(());
         let error = service.call(request).await.err().unwrap();
@@ -265,7 +267,7 @@ mod test {
             .error_instance_id(Uuid::nil())
             .build();
 
-        let service = HttpErrorLayer::new(&Builder::new()).layer({
+        let service = HttpErrorLayer::new(&Builder::for_test()).layer({
             let service_error = service_error.clone();
             service::service_fn(move |_| {
                 let json = json::to_vec(&service_error).unwrap();
@@ -303,21 +305,22 @@ mod test {
             .error_instance_id(Uuid::nil())
             .build();
 
-        let service =
-            HttpErrorLayer::new(Builder::new().service_error(ServiceError::PropagateToCaller))
-                .layer({
-                    let service_error = service_error.clone();
-                    service::service_fn(move |_| {
-                        let json = json::to_vec(&service_error).unwrap();
-                        async move {
-                            Ok(Response::builder()
-                                .status(StatusCode::CONFLICT)
-                                .header(CONTENT_TYPE, "application/json")
-                                .body(Full::new(Bytes::from(json)))
-                                .unwrap())
-                        }
-                    })
-                });
+        let service = HttpErrorLayer::new(
+            &Builder::for_test().service_error(ServiceError::PropagateToCaller),
+        )
+        .layer({
+            let service_error = service_error.clone();
+            service::service_fn(move |_| {
+                let json = json::to_vec(&service_error).unwrap();
+                async move {
+                    Ok(Response::builder()
+                        .status(StatusCode::CONFLICT)
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(Full::new(Bytes::from(json)))
+                        .unwrap())
+                }
+            })
+        });
 
         let request = Request::new(());
         let error = service.call(request).await.err().unwrap();

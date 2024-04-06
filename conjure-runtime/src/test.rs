@@ -13,12 +13,12 @@
 // limitations under the License.
 use crate::errors::RemoteError;
 use crate::{blocking, Agent, BodyWriter, Builder, Client, ServerQos, ServiceError, UserAgent};
-use async_trait::async_trait;
 use bytes::Bytes;
 use conjure_error::NotFound;
 use conjure_error::{Error, ErrorKind};
 use conjure_http::client::{
-    AsyncClient, AsyncRequestBody, AsyncWriteBody, Client as _, Endpoint, RequestBody,
+    AsyncClient, AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody, Client as _, Endpoint,
+    RequestBody,
 };
 use conjure_runtime_config::ServiceConfig;
 use flate2::write::GzEncoder;
@@ -111,9 +111,9 @@ fn blocking_test<F>(
     let server = thread::spawn(move || runtime.block_on(server(listener, requests, handler)));
 
     let client = Client::builder()
-        .from_config(&parse_config(config, port))
         .service("service")
         .user_agent(UserAgent::new(Agent::new("test", "1.0")))
+        .from_config(&parse_config(config, port))
         .build_blocking()
         .unwrap();
 
@@ -148,11 +148,10 @@ async fn client<F>(config: &str, port: u16, check: impl FnOnce(Builder) -> F)
 where
     F: Future<Output = ()>,
 {
-    let mut builder = Client::builder();
-    builder
-        .from_config(&parse_config(config, port))
+    let builder = Client::builder()
         .service("service")
-        .user_agent(UserAgent::new(Agent::new("test", "1.0")));
+        .user_agent(UserAgent::new(Agent::new("test", "1.0")))
+        .from_config(&parse_config(config, port));
     check(builder).await
 }
 
@@ -287,7 +286,6 @@ async fn retry_after_overrides() {
 async fn connect_error_doesnt_reset_body() {
     struct TestBody(bool);
 
-    #[async_trait]
     impl AsyncWriteBody<BodyWriter> for TestBody {
         async fn write_body(
             mut self: Pin<&mut Self>,
@@ -326,7 +324,9 @@ async fn connect_error_doesnt_reset_body() {
             .send(
                 req()
                     .method(Method::PUT)
-                    .body(AsyncRequestBody::Streaming(Box::pin(TestBody(false))))
+                    .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                        TestBody(false),
+                    )))
                     .unwrap(),
             )
             .await
@@ -348,7 +348,7 @@ async fn propagate_429() {
                 .body(Empty::new().boxed())
                 .unwrap())
         },
-        |mut builder| async move {
+        |builder| async move {
             let error = builder
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
@@ -378,7 +378,7 @@ async fn propagate_429_with_retry_after() {
                 .body(Empty::new().boxed())
                 .unwrap())
         },
-        |mut builder| async move {
+        |builder| async move {
             let error = builder
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
@@ -407,7 +407,7 @@ async fn propagate_503() {
                 .body(Empty::new().boxed())
                 .unwrap())
         },
-        |mut builder| async move {
+        |builder| async move {
             let error = builder
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
@@ -441,7 +441,7 @@ async fn dont_propagate_protocol_errors() {
                 }
             }
         },
-        |mut builder| async move {
+        |builder| async move {
             let response = builder
                 .server_qos(ServerQos::Propagate429And503ToCaller)
                 .build()
@@ -505,7 +505,9 @@ async fn body_write_ends_after_error() {
                     .send(
                         req()
                             .method(Method::POST)
-                            .body(AsyncRequestBody::Streaming(Box::pin(InfiniteBody)))
+                            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                                InfiniteBody,
+                            )))
                             .unwrap(),
                     )
                     .await;
@@ -519,7 +521,6 @@ async fn body_write_ends_after_error() {
 async fn streaming_write_error_reporting() {
     struct TestBody;
 
-    #[async_trait]
     impl AsyncWriteBody<BodyWriter> for TestBody {
         async fn write_body(self: Pin<&mut Self>, _: Pin<&mut BodyWriter>) -> Result<(), Error> {
             Err(Error::internal_safe("foobar"))
@@ -544,7 +545,9 @@ async fn streaming_write_error_reporting() {
                 .send(
                     req()
                         .method(Method::POST)
-                        .body(AsyncRequestBody::Streaming(Box::pin(TestBody)))
+                        .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                            TestBody,
+                        )))
                         .unwrap(),
                 )
                 .await
@@ -570,7 +573,7 @@ async fn service_error_propagation() {
                 .body(Full::new(Bytes::from(body)).boxed())
                 .unwrap())
         },
-        |mut builder| async move {
+        |builder| async move {
             let error = builder
                 .service_error(ServiceError::PropagateToCaller)
                 .build()
@@ -714,7 +717,6 @@ async fn read_past_eof() {
 
 struct InfiniteBody;
 
-#[async_trait]
 impl AsyncWriteBody<BodyWriter> for InfiniteBody {
     async fn write_body(self: Pin<&mut Self>, mut w: Pin<&mut BodyWriter>) -> Result<(), Error> {
         let buf = [b'a'; 1024];

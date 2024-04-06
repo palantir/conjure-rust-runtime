@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//! The client builder.
 use crate::blocking;
 use crate::client::ClientState;
 use crate::config::{ProxyConfig, SecurityConfig, ServiceConfig};
@@ -28,9 +29,20 @@ use witchcraft_metrics::MetricRegistry;
 const MESH_PREFIX: &str = "mesh-";
 
 /// A builder to construct [`Client`]s and [`blocking::Client`]s.
-pub struct Builder<T = DefaultRawClientBuilder> {
-    service: Option<String>,
-    user_agent: Option<UserAgent>,
+pub struct Builder<T = Complete>(T);
+
+/// The service builder stage.
+pub struct ServiceStage(());
+
+/// The user agent builder stage.
+pub struct UserAgentStage {
+    service: String,
+}
+
+/// The complete builder stage.
+pub struct Complete<T = DefaultRawClientBuilder> {
+    service: String,
+    user_agent: UserAgent,
     uris: Vec<Url>,
     security: SecurityConfig,
     proxy: ProxyConfig,
@@ -51,18 +63,38 @@ pub struct Builder<T = DefaultRawClientBuilder> {
     raw_client_builder: T,
 }
 
-impl Default for Builder {
-    fn default() -> Builder {
+impl Default for Builder<ServiceStage> {
+    #[inline]
+    fn default() -> Self {
         Builder::new()
     }
 }
 
-impl Builder {
+impl Builder<ServiceStage> {
     /// Creates a new builder with default settings.
-    pub fn new() -> Builder {
-        Builder {
-            service: None,
-            user_agent: None,
+    #[inline]
+    pub fn new() -> Self {
+        Builder(ServiceStage(()))
+    }
+
+    /// Sets the name of the service this client will communicate with.
+    ///
+    /// This is used in logging and metrics to allow differentiation between different clients.
+    #[inline]
+    pub fn service(self, service: &str) -> Builder<UserAgentStage> {
+        Builder(UserAgentStage {
+            service: service.to_string(),
+        })
+    }
+}
+
+impl Builder<UserAgentStage> {
+    /// Sets the user agent sent by this client.
+    #[inline]
+    pub fn user_agent(self, user_agent: UserAgent) -> Builder {
+        Builder(Complete {
+            service: self.0.service,
+            user_agent,
             uris: vec![],
             security: SecurityConfig::builder().build(),
             proxy: ProxyConfig::Direct,
@@ -81,132 +113,137 @@ impl Builder {
             rng_seed: None,
             blocking_handle: None,
             raw_client_builder: DefaultRawClientBuilder,
-        }
+        })
     }
 }
 
-impl<T> Builder<T> {
+#[cfg(test)]
+impl Builder {
+    pub(crate) fn for_test() -> Self {
+        use crate::Agent;
+
+        Builder::new()
+            .service("test")
+            .user_agent(UserAgent::new(Agent::new("test", "0.0.0")))
+    }
+}
+
+impl<T> Builder<Complete<T>> {
     /// Applies configuration settings from a `ServiceConfig` to the builder.
-    pub fn from_config(&mut self, config: &ServiceConfig) -> &mut Self {
-        self.uris(config.uris().to_vec());
+    #[inline]
+    pub fn from_config(mut self, config: &ServiceConfig) -> Self {
+        self = self.uris(config.uris().to_vec());
 
         if let Some(security) = config.security() {
-            self.security(security.clone());
+            self = self.security(security.clone());
         }
 
         if let Some(proxy) = config.proxy() {
-            self.proxy(proxy.clone());
+            self = self.proxy(proxy.clone());
         }
 
         if let Some(connect_timeout) = config.connect_timeout() {
-            self.connect_timeout(connect_timeout);
+            self = self.connect_timeout(connect_timeout);
         }
 
         if let Some(read_timeout) = config.read_timeout() {
-            self.read_timeout(read_timeout);
+            self = self.read_timeout(read_timeout);
         }
 
         if let Some(write_timeout) = config.write_timeout() {
-            self.write_timeout(write_timeout);
+            self = self.write_timeout(write_timeout);
         }
 
         if let Some(backoff_slot_size) = config.backoff_slot_size() {
-            self.backoff_slot_size(backoff_slot_size);
+            self = self.backoff_slot_size(backoff_slot_size);
         }
 
         if let Some(max_num_retries) = config.max_num_retries() {
-            self.max_num_retries(max_num_retries);
+            self = self.max_num_retries(max_num_retries);
         }
 
-        self
-    }
-
-    /// Sets the name of the service this client will communicate with.
-    ///
-    /// This is used in logging and metrics to allow differentiation between different clients.
-    ///
-    /// Required.
-    pub fn service(&mut self, service: &str) -> &mut Self {
-        self.service = Some(service.to_string());
         self
     }
 
     /// Returns the builder's configured service name.
-    pub fn get_service(&self) -> Option<&str> {
-        self.service.as_deref()
-    }
-
-    /// Sets the user agent sent by this client.
-    ///
-    /// Required.
-    pub fn user_agent(&mut self, user_agent: UserAgent) -> &mut Self {
-        self.user_agent = Some(user_agent);
-        self
+    #[inline]
+    pub fn get_service(&self) -> &str {
+        &self.0.service
     }
 
     /// Returns the builder's configured user agent.
-    pub fn get_user_agent(&self) -> Option<&UserAgent> {
-        self.user_agent.as_ref()
+    #[inline]
+    pub fn get_user_agent(&self) -> &UserAgent {
+        &self.0.user_agent
     }
 
     /// Appends a URI to the URIs list.
     ///
     /// Defaults to an empty list.
-    pub fn uri(&mut self, uri: Url) -> &mut Self {
-        self.uris.push(uri);
+    #[inline]
+    pub fn uri(mut self, uri: Url) -> Self {
+        self.0.uris.push(uri);
         self
     }
 
     /// Sets the URIs list.
     ///
     /// Defaults to an empty list.
-    pub fn uris(&mut self, uris: Vec<Url>) -> &mut Self {
-        self.uris = uris;
+    #[inline]
+    pub fn uris(mut self, uris: Vec<Url>) -> Self {
+        self.0.uris = uris;
         self
     }
 
     /// Returns the builder's configured URIs list.
+    #[inline]
     pub fn get_uris(&self) -> &[Url] {
-        &self.uris
+        &self.0.uris
     }
 
     /// Sets the security configuration.
     ///
     /// Defaults to an empty configuration.
-    pub fn security(&mut self, security: SecurityConfig) -> &mut Self {
-        self.security = security;
+    #[inline]
+    pub fn security(mut self, security: SecurityConfig) -> Self {
+        self.0.security = security;
         self
     }
 
     /// Returns the builder's configured security configuration.
+    #[inline]
     pub fn get_security(&self) -> &SecurityConfig {
-        &self.security
+        &self.0.security
     }
 
     /// Sets the proxy configuration.
     ///
     /// Defaults to `ProxyConfig::Direct` (i.e. no proxy).
-    pub fn proxy(&mut self, proxy: ProxyConfig) -> &mut Self {
-        self.proxy = proxy;
+    #[inline]
+    pub fn proxy(mut self, proxy: ProxyConfig) -> Self {
+        self.0.proxy = proxy;
         self
     }
 
     /// Returns the builder's configured proxy configuration.
+    #[inline]
     pub fn get_proxy(&self) -> &ProxyConfig {
-        &self.proxy
+        &self.0.proxy
     }
 
     /// Sets the connect timeout.
     ///
     /// Defaults to 10 seconds.
-    pub fn connect_timeout(&mut self, connect_timeout: Duration) -> &mut Self {
-        self.connect_timeout = connect_timeout;
+    #[inline]
+    pub fn connect_timeout(mut self, connect_timeout: Duration) -> Self {
+        self.0.connect_timeout = connect_timeout;
         self
     }
 
     /// Returns the builder's configured connect timeout.
+    #[inline]
     pub fn get_connect_timeout(&self) -> Duration {
-        self.connect_timeout
+        self.0.connect_timeout
     }
 
     /// Sets the read timeout.
@@ -214,14 +251,16 @@ impl<T> Builder<T> {
     /// This timeout applies to socket-level read attempts.
     ///
     /// Defaults to 5 minutes.
-    pub fn read_timeout(&mut self, read_timeout: Duration) -> &mut Self {
-        self.read_timeout = read_timeout;
+    #[inline]
+    pub fn read_timeout(mut self, read_timeout: Duration) -> Self {
+        self.0.read_timeout = read_timeout;
         self
     }
 
     /// Returns the builder's configured read timeout.
+    #[inline]
     pub fn get_read_timeout(&self) -> Duration {
-        self.read_timeout
+        self.0.read_timeout
     }
 
     /// Sets the write timeout.
@@ -229,14 +268,16 @@ impl<T> Builder<T> {
     /// This timeout applies to socket-level write attempts.
     ///
     /// Defaults to 5 minutes.
-    pub fn write_timeout(&mut self, write_timeout: Duration) -> &mut Self {
-        self.write_timeout = write_timeout;
+    #[inline]
+    pub fn write_timeout(mut self, write_timeout: Duration) -> Self {
+        self.0.write_timeout = write_timeout;
         self
     }
 
     /// Returns the builder's configured write timeout.
+    #[inline]
     pub fn get_write_timeout(&self) -> Duration {
-        self.write_timeout
+        self.0.write_timeout
     }
 
     /// Sets the backoff slot size.
@@ -245,66 +286,76 @@ impl<T> Builder<T> {
     /// attempts are made for a given request.
     ///
     /// Defaults to 250 milliseconds.
-    pub fn backoff_slot_size(&mut self, backoff_slot_size: Duration) -> &mut Self {
-        self.backoff_slot_size = backoff_slot_size;
+    #[inline]
+    pub fn backoff_slot_size(mut self, backoff_slot_size: Duration) -> Self {
+        self.0.backoff_slot_size = backoff_slot_size;
         self
     }
 
     /// Returns the builder's configured backoff slot size.
+    #[inline]
     pub fn get_backoff_slot_size(&self) -> Duration {
-        self.backoff_slot_size
+        self.0.backoff_slot_size
     }
 
     /// Sets the maximum number of times a request attempt will be retried before giving up.
     ///
     /// Defaults to 4.
-    pub fn max_num_retries(&mut self, max_num_retries: u32) -> &mut Self {
-        self.max_num_retries = max_num_retries;
+    #[inline]
+    pub fn max_num_retries(mut self, max_num_retries: u32) -> Self {
+        self.0.max_num_retries = max_num_retries;
         self
     }
 
     /// Returns the builder's configured maximum number of retries.
+    #[inline]
     pub fn get_max_num_retries(&self) -> u32 {
-        self.max_num_retries
+        self.0.max_num_retries
     }
 
     /// Sets the client's internal rate limiting behavior.
     ///
     /// Defaults to `ClientQos::Enabled`.
-    pub fn client_qos(&mut self, client_qos: ClientQos) -> &mut Self {
-        self.client_qos = client_qos;
+    #[inline]
+    pub fn client_qos(mut self, client_qos: ClientQos) -> Self {
+        self.0.client_qos = client_qos;
         self
     }
 
     /// Returns the builder's configured internal rate limiting behavior.
+    #[inline]
     pub fn get_client_qos(&self) -> ClientQos {
-        self.client_qos
+        self.0.client_qos
     }
 
     /// Sets the client's behavior in response to a QoS error from the server.
     ///
     /// Defaults to `ServerQos::AutomaticRetry`.
-    pub fn server_qos(&mut self, server_qos: ServerQos) -> &mut Self {
-        self.server_qos = server_qos;
+    #[inline]
+    pub fn server_qos(mut self, server_qos: ServerQos) -> Self {
+        self.0.server_qos = server_qos;
         self
     }
 
     /// Returns the builder's configured server QoS behavior.
+    #[inline]
     pub fn get_server_qos(&self) -> ServerQos {
-        self.server_qos
+        self.0.server_qos
     }
 
     /// Sets the client's behavior in response to a service error from the server.
     ///
     /// Defaults to `ServiceError::WrapInNewError`.
-    pub fn service_error(&mut self, service_error: ServiceError) -> &mut Self {
-        self.service_error = service_error;
+    #[inline]
+    pub fn service_error(mut self, service_error: ServiceError) -> Self {
+        self.0.service_error = service_error;
         self
     }
 
     /// Returns the builder's configured service error handling behavior.
+    #[inline]
     pub fn get_service_error(&self) -> ServiceError {
-        self.service_error
+        self.0.service_error
     }
 
     /// Sets the client's behavior to determine if a request is idempotent or not.
@@ -312,56 +363,64 @@ impl<T> Builder<T> {
     /// Only idempotent requests will be retried.
     ///
     /// Defaults to `Idempotency::ByMethod`.
-    pub fn idempotency(&mut self, idempotency: Idempotency) -> &mut Self {
-        self.idempotency = idempotency;
+    #[inline]
+    pub fn idempotency(mut self, idempotency: Idempotency) -> Self {
+        self.0.idempotency = idempotency;
         self
     }
 
     /// Returns the builder's configured idempotency handling behavior.
+    #[inline]
     pub fn get_idempotency(&self) -> Idempotency {
-        self.idempotency
+        self.0.idempotency
     }
 
     /// Sets the client's strategy for selecting a node for a request.
     ///
     /// Defaults to `NodeSelectionStrategy::PinUntilError`.
+    #[inline]
     pub fn node_selection_strategy(
-        &mut self,
+        mut self,
         node_selection_strategy: NodeSelectionStrategy,
-    ) -> &mut Self {
-        self.node_selection_strategy = node_selection_strategy;
+    ) -> Self {
+        self.0.node_selection_strategy = node_selection_strategy;
         self
     }
 
     /// Returns the builder's configured node selection strategy.
+    #[inline]
     pub fn get_node_selection_strategy(&self) -> NodeSelectionStrategy {
-        self.node_selection_strategy
+        self.0.node_selection_strategy
     }
 
     /// Sets the metric registry used to register client metrics.
     ///
     /// Defaults to no registry.
-    pub fn metrics(&mut self, metrics: Arc<MetricRegistry>) -> &mut Self {
-        self.metrics = Some(metrics);
+    #[inline]
+    pub fn metrics(mut self, metrics: Arc<MetricRegistry>) -> Self {
+        self.0.metrics = Some(metrics);
         self
     }
 
     /// Returns the builder's configured metric registry.
+    #[inline]
     pub fn get_metrics(&self) -> Option<&Arc<MetricRegistry>> {
-        self.metrics.as_ref()
+        self.0.metrics.as_ref()
     }
 
     /// Sets the host metrics registry used to track host performance.
     ///
     /// Defaults to no registry.
-    pub fn host_metrics(&mut self, host_metrics: Arc<HostMetricsRegistry>) -> &mut Self {
-        self.host_metrics = Some(host_metrics);
+    #[inline]
+    pub fn host_metrics(mut self, host_metrics: Arc<HostMetricsRegistry>) -> Self {
+        self.0.host_metrics = Some(host_metrics);
         self
     }
 
     /// Returns the builder's configured host metrics registry.
+    #[inline]
     pub fn get_host_metrics(&self) -> Option<&Arc<HostMetricsRegistry>> {
-        self.host_metrics.as_ref()
+        self.0.host_metrics.as_ref()
     }
 
     /// Sets a seed used to initialize the client's random number generators.
@@ -371,14 +430,16 @@ impl<T> Builder<T> {
     /// behavior.
     ///
     /// Defaults to no seed.
-    pub fn rng_seed(&mut self, rng_seed: u64) -> &mut Self {
-        self.rng_seed = Some(rng_seed);
+    #[inline]
+    pub fn rng_seed(mut self, rng_seed: u64) -> Self {
+        self.0.rng_seed = Some(rng_seed);
         self
     }
 
     /// Returns the builder's configured RNG seed.
+    #[inline]
     pub fn get_rng_seed(&self) -> Option<u64> {
-        self.rng_seed
+        self.0.rng_seed
     }
 
     /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
@@ -386,63 +447,68 @@ impl<T> Builder<T> {
     /// This has no effect on async clients.
     ///
     /// Defaults to a `conjure-runtime` internal `Runtime`.
-    pub fn blocking_handle(&mut self, blocking_handle: Handle) -> &mut Self {
-        self.blocking_handle = Some(blocking_handle);
+    #[inline]
+    pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
+        self.0.blocking_handle = Some(blocking_handle);
         self
     }
 
     /// Returns the builder's configured blocking handle.
+    #[inline]
     pub fn get_blocking_handle(&self) -> Option<&Handle> {
-        self.blocking_handle.as_ref()
+        self.0.blocking_handle.as_ref()
     }
 
     /// Sets the raw client builder.
     ///
     /// Defaults to `DefaultRawClientBuilder`.
-    pub fn with_raw_client_builder<U>(self, raw_client_builder: U) -> Builder<U> {
-        Builder {
-            service: self.service,
-            user_agent: self.user_agent,
-            uris: self.uris,
-            security: self.security,
-            proxy: self.proxy,
-            connect_timeout: self.connect_timeout,
-            read_timeout: self.read_timeout,
-            write_timeout: self.write_timeout,
-            backoff_slot_size: self.backoff_slot_size,
-            max_num_retries: self.max_num_retries,
-            client_qos: self.client_qos,
-            server_qos: self.server_qos,
-            service_error: self.service_error,
-            idempotency: self.idempotency,
-            node_selection_strategy: self.node_selection_strategy,
-            metrics: self.metrics,
-            host_metrics: self.host_metrics,
-            rng_seed: self.rng_seed,
-            blocking_handle: self.blocking_handle,
+    #[inline]
+    pub fn raw_client_builder<U>(self, raw_client_builder: U) -> Builder<Complete<U>> {
+        Builder(Complete {
+            service: self.0.service,
+            user_agent: self.0.user_agent,
+            uris: self.0.uris,
+            security: self.0.security,
+            proxy: self.0.proxy,
+            connect_timeout: self.0.connect_timeout,
+            read_timeout: self.0.read_timeout,
+            write_timeout: self.0.write_timeout,
+            backoff_slot_size: self.0.backoff_slot_size,
+            max_num_retries: self.0.max_num_retries,
+            client_qos: self.0.client_qos,
+            server_qos: self.0.server_qos,
+            service_error: self.0.service_error,
+            idempotency: self.0.idempotency,
+            node_selection_strategy: self.0.node_selection_strategy,
+            metrics: self.0.metrics,
+            host_metrics: self.0.host_metrics,
+            rng_seed: self.0.rng_seed,
+            blocking_handle: self.0.blocking_handle,
             raw_client_builder,
-        }
+        })
     }
 
     /// Returns the builder's configured raw client builder.
+    #[inline]
     pub fn get_raw_client_builder(&self) -> &T {
-        &self.raw_client_builder
+        &self.0.raw_client_builder
     }
 
     pub(crate) fn mesh_mode(&self) -> bool {
-        self.uris
+        self.0
+            .uris
             .iter()
             .any(|uri| uri.scheme().starts_with(MESH_PREFIX))
     }
 
     pub(crate) fn postprocessed_uris(&self) -> Result<Cow<'_, [Url]>, Error> {
         if self.mesh_mode() {
-            if self.uris.len() != 1 {
+            if self.0.uris.len() != 1 {
                 return Err(Error::internal_safe("mesh mode expects exactly one URI")
-                    .with_safe_param("uris", &self.uris));
+                    .with_safe_param("uris", &self.0.uris));
             }
 
-            let uri = self.uris[0]
+            let uri = self.0.uris[0]
                 .as_str()
                 .strip_prefix(MESH_PREFIX)
                 .unwrap()
@@ -451,12 +517,12 @@ impl<T> Builder<T> {
 
             Ok(Cow::Owned(vec![uri]))
         } else {
-            Ok(Cow::Borrowed(&self.uris))
+            Ok(Cow::Borrowed(&self.0.uris))
         }
     }
 }
 
-impl<T> Builder<T>
+impl<T> Builder<Complete<T>>
 where
     T: BuildRawClient,
 {
@@ -478,7 +544,7 @@ where
     pub fn build_blocking(&self) -> Result<blocking::Client<T::RawClient>, Error> {
         self.build().map(|client| blocking::Client {
             client,
-            handle: self.blocking_handle.clone(),
+            handle: self.0.blocking_handle.clone(),
         })
     }
 }

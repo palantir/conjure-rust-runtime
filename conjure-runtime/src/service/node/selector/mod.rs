@@ -22,7 +22,7 @@ use crate::service::node::selector::pin_until_error::{
 use crate::service::node::selector::single::{SingleNodeSelectorLayer, SingleNodeSelectorService};
 use crate::service::node::LimitedNode;
 use crate::service::Layer;
-use crate::{Builder, NodeSelectionStrategy};
+use crate::{builder, Builder, NodeSelectionStrategy};
 use conjure_error::Error;
 use http::{Request, Response};
 
@@ -44,16 +44,16 @@ pub enum NodeSelectorLayer {
 }
 
 impl NodeSelectorLayer {
-    pub fn new<T>(service: &str, builder: &Builder<T>) -> Result<NodeSelectorLayer, Error> {
+    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> Result<NodeSelectorLayer, Error> {
         let mut nodes = builder
             .postprocessed_uris()?
             .iter()
             .enumerate()
-            .map(|(i, url)| LimitedNode::new(i, url, service, builder))
+            .map(|(i, url)| LimitedNode::new(i, url, builder.get_service(), builder))
             .collect::<Vec<_>>();
 
         let layer = if nodes.is_empty() {
-            NodeSelectorLayer::Empty(EmptyNodeSelectorLayer::new(service))
+            NodeSelectorLayer::Empty(EmptyNodeSelectorLayer::new(builder.get_service()))
         } else if nodes.len() == 1 {
             NodeSelectorLayer::Single(SingleNodeSelectorLayer::new(nodes.pop().unwrap()))
         } else {

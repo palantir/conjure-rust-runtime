@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::raw::DefaultRawBody;
-use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use conjure_error::Error;
 use conjure_http::client::{AsyncWriteBody, WriteBody};
@@ -47,7 +46,6 @@ pub(crate) struct BodyWriterShim {
     sender: mpsc::Sender<ShimRequest>,
 }
 
-#[async_trait]
 impl AsyncWriteBody<crate::BodyWriter> for BodyWriterShim {
     async fn write_body(
         mut self: Pin<&mut Self>,
@@ -73,10 +71,7 @@ impl AsyncWriteBody<crate::BodyWriter> for BodyWriterShim {
         }
     }
 
-    async fn reset(mut self: Pin<&mut Self>) -> bool
-    where
-        crate::BodyWriter: 'async_trait,
-    {
+    async fn reset(mut self: Pin<&mut Self>) -> bool {
         let (sender, receiver) = oneshot::channel();
         if self.sender.send(ShimRequest::Reset(sender)).await.is_err() {
             return false;

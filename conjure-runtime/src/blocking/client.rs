@@ -13,10 +13,10 @@
 // limitations under the License.
 use crate::blocking::{body, BodyWriter, BodyWriterShim, ResponseBody};
 use crate::raw::{DefaultRawClient, RawBody, Service};
-use crate::Builder;
+use crate::{builder, Builder};
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{self, AsyncClient, AsyncRequestBody, RequestBody};
+use conjure_http::client::{self, AsyncClient, AsyncRequestBody, BoxAsyncWriteBody, RequestBody};
 use futures::channel::oneshot;
 use futures::executor;
 use http::{Request, Response};
@@ -61,7 +61,8 @@ impl<T> Clone for Client<T> {
 
 impl Client {
     /// Returns a new `Builder` for clients.
-    pub fn builder() -> Builder {
+    #[inline]
+    pub fn builder() -> Builder<builder::ServiceStage> {
         Builder::new()
     }
 }
@@ -112,7 +113,9 @@ where
                 let body = match body {
                     ShimBody::Empty => AsyncRequestBody::Empty,
                     ShimBody::Fixed(bytes) => AsyncRequestBody::Fixed(bytes),
-                    ShimBody::Streaming(writer) => AsyncRequestBody::Streaming(Box::pin(writer)),
+                    ShimBody::Streaming(writer) => {
+                        AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(writer))
+                    }
                 };
                 let req = Request::from_parts(parts, body);
 

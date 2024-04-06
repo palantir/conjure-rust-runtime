@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::Builder;
+use crate::{builder, Builder};
 use futures::ready;
 use hyper::rt::{Read, ReadBufCursor, Write};
 use hyper_util::client::legacy::connect::{Connected, Connection};
@@ -32,7 +32,7 @@ pub struct TimeoutLayer {
 }
 
 impl TimeoutLayer {
-    pub fn new<T>(builder: &Builder<T>) -> TimeoutLayer {
+    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> TimeoutLayer {
         TimeoutLayer {
             read_timeout: builder.get_read_timeout(),
             write_timeout: builder.get_write_timeout(),
@@ -161,7 +161,6 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::Client;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::time;
 
@@ -170,7 +169,7 @@ mod test {
         time::pause();
 
         let mut service =
-            TimeoutLayer::new(&Client::builder()).layer(tower_util::service_fn(|_| async {
+            TimeoutLayer::new(&Builder::for_test()).layer(tower_util::service_fn(|_| async {
                 Ok::<_, ()>(TokioIo::new(
                     tokio_test::io::Builder::new().read(b"hello").build(),
                 ))
@@ -187,14 +186,16 @@ mod test {
     async fn read_timeout() {
         time::pause();
 
-        let mut service = TimeoutLayer::new(Client::builder().read_timeout(Duration::from_secs(9)))
-            .layer(tower_util::service_fn(|_| async {
-                Ok::<_, ()>(TokioIo::new(
-                    tokio_test::io::Builder::new()
-                        .wait(Duration::from_secs(10))
-                        .build(),
-                ))
-            }));
+        let mut service = TimeoutLayer::new(
+            &Builder::for_test().read_timeout(Duration::from_secs(9)),
+        )
+        .layer(tower_util::service_fn(|_| async {
+            Ok::<_, ()>(TokioIo::new(
+                tokio_test::io::Builder::new()
+                    .wait(Duration::from_secs(10))
+                    .build(),
+            ))
+        }));
 
         let stream = service.call(()).await.unwrap();
         let mut buf = vec![];
@@ -209,7 +210,7 @@ mod test {
         time::pause();
 
         let mut service =
-            TimeoutLayer::new(&Client::builder()).layer(tower_util::service_fn(|_| async {
+            TimeoutLayer::new(&Builder::for_test()).layer(tower_util::service_fn(|_| async {
                 Ok::<_, ()>(TokioIo::new(
                     tokio_test::io::Builder::new().write(b"hello").build(),
                 ))
@@ -224,7 +225,7 @@ mod test {
         time::pause();
 
         let mut service = TimeoutLayer::new(
-            Client::builder().write_timeout(Duration::from_secs(9)),
+            &Builder::for_test().write_timeout(Duration::from_secs(9)),
         )
         .layer(tower_util::service_fn(|_| async {
             Ok::<_, ()>(TokioIo::new(

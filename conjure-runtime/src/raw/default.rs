@@ -16,7 +16,7 @@ use crate::service::proxy::connector::ProxyConnectorLayer;
 use crate::service::proxy::{ProxyConfig, ProxyConnectorService};
 use crate::service::timeout::{TimeoutLayer, TimeoutService};
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
-use crate::Builder;
+use crate::{builder, Builder};
 use bytes::Bytes;
 use conjure_error::Error;
 use http::{Request, Response};
@@ -57,9 +57,10 @@ pub struct DefaultRawClientBuilder;
 impl BuildRawClient for DefaultRawClientBuilder {
     type RawClient = DefaultRawClient;
 
-    fn build_raw_client(&self, builder: &Builder<Self>) -> Result<Self::RawClient, Error> {
-        let service = builder.get_service().expect("service not set");
-
+    fn build_raw_client(
+        &self,
+        builder: &Builder<builder::Complete<Self>>,
+    ) -> Result<Self::RawClient, Error> {
         let mut connector = HttpConnector::new();
         connector.enforce_http(false);
         connector.set_nodelay(true);
@@ -107,7 +108,7 @@ impl BuildRawClient for DefaultRawClientBuilder {
             .https_or_http()
             .enable_all_versions()
             .wrap_connector(connector);
-        let connector = TlsMetricsLayer::new(service, builder).layer(connector);
+        let connector = TlsMetricsLayer::new(builder).layer(connector);
 
         let client = Client::builder(TokioExecutor::new())
             .pool_idle_timeout(HTTP_KEEPALIVE)

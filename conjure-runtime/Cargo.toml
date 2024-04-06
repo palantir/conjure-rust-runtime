@@ -11,7 +11,7 @@ readme = "../README.md"
 [dependencies]
 arc-swap = "1.0"
 async-trait = "0.1"
-base64 = "0.21"
+base64 = "0.22"
 bytes = "1.0"
 conjure-error = "3.6"
 conjure-http = "3.6"
@@ -28,7 +28,6 @@ hyper = { version = "1", features = ["http1", "http2", "client"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [
     "http1",
     "http2",
-    "ring",
     "tls12",
     "logging",
 ] }
@@ -66,6 +65,7 @@ zipkin = "0.4"
 conjure-codegen = { version = "3", features = ["example-types"] }
 futures-test = "0.3"
 hyper = { version = "1", features = ["server"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc-rs"] }
 openssl = "0.10.50"
 serde_yaml = "0.9"
 tokio-openssl = "0.6"

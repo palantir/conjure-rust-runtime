@@ -18,10 +18,9 @@ use crate::rng::ConjureRng;
 use crate::service::map_error::RawClientError;
 use crate::service::Layer;
 use crate::util::spans::{self, HttpSpanFuture};
-use crate::{BodyWriter, Builder, Idempotency};
-use async_trait::async_trait;
+use crate::{builder, BodyWriter, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
-use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, Endpoint};
+use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody, Endpoint};
 use futures::future;
 use http::request::Parts;
 use http::{Request, Response, StatusCode};
@@ -51,7 +50,7 @@ pub struct RetryLayer {
 }
 
 impl RetryLayer {
-    pub fn new<T>(builder: &Builder<T>) -> RetryLayer {
+    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> RetryLayer {
         RetryLayer {
             idempotency: builder.get_idempotency(),
             max_num_retries: if builder.mesh_mode() {
@@ -139,7 +138,7 @@ where
                 AsyncRequestBody::Fixed(bytes) => AsyncRequestBody::Fixed(bytes.clone()),
                 AsyncRequestBody::Streaming(writer) => {
                     let body =
-                        Box::pin(tracked.insert(ResetTracker::new(writer.as_mut())).writer());
+                        BoxAsyncWriteBody::new(tracked.insert(ResetTracker::new(writer)).writer());
                     AsyncRequestBody::Streaming(body)
                 }
             };
@@ -270,7 +269,7 @@ where
 
     async fn prepare_for_retry(
         &mut self,
-        body: Option<&mut ResetTracker<'_>>,
+        body: Option<&mut ResetTracker<'_, '_>>,
         error: Error,
         retry_after: Option<Duration>,
     ) -> Result<(), Error> {
@@ -282,7 +281,7 @@ where
 
         if let Some(body) = body {
             let needs_reset = body.needs_reset;
-            if needs_reset && !body.body_writer.as_mut().reset().await {
+            if needs_reset && !Pin::new(&mut *body.body_writer).reset().await {
                 info!("unable to reset body when retrying request");
                 return Err(error);
             }
@@ -314,37 +313,36 @@ where
     }
 }
 
-struct ResetTracker<'a> {
+struct ResetTracker<'a, 'b> {
     needs_reset: bool,
-    body_writer: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>,
+    body_writer: &'a mut BoxAsyncWriteBody<'b, BodyWriter>,
 }
 
-impl<'a> ResetTracker<'a> {
-    fn new(body_writer: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>) -> Self {
+impl<'a, 'b> ResetTracker<'a, 'b> {
+    fn new(body_writer: &'a mut BoxAsyncWriteBody<'b, BodyWriter>) -> Self {
         ResetTracker {
             needs_reset: false,
             body_writer,
         }
     }
 
-    fn writer<'b>(&'b mut self) -> ResetTrackingBodyWriter<'b, 'a> {
+    fn writer<'c>(&'c mut self) -> ResetTrackingBodyWriter<'c, 'a, 'b> {
         ResetTrackingBodyWriter { tracker: self }
     }
 }
 
-struct ResetTrackingBodyWriter<'a, 'b> {
-    tracker: &'a mut ResetTracker<'b>,
+struct ResetTrackingBodyWriter<'a, 'b, 'c> {
+    tracker: &'a mut ResetTracker<'b, 'c>,
 }
 
-#[async_trait]
-impl AsyncWriteBody<BodyWriter> for ResetTrackingBodyWriter<'_, '_> {
+impl AsyncWriteBody<BodyWriter> for ResetTrackingBodyWriter<'_, '_, '_> {
     async fn write_body(mut self: Pin<&mut Self>, w: Pin<&mut BodyWriter>) -> Result<(), Error> {
         self.tracker.needs_reset = true;
-        self.tracker.body_writer.as_mut().write_body(w).await
+        Pin::new(&mut *self.tracker.body_writer).write_body(w).await
     }
 
     async fn reset(mut self: Pin<&mut Self>) -> bool {
-        let ok = self.tracker.body_writer.as_mut().reset().await;
+        let ok = Pin::new(&mut *self.tracker.body_writer).reset().await;
         if ok {
             self.tracker.needs_reset = false;
         }
@@ -366,7 +364,6 @@ mod test {
     use crate::raw::RawBodyInner;
     use crate::service;
     use crate::BodyWriter;
-    use async_trait::async_trait;
     use bytes::Bytes;
     use http::Method;
     use http_body_util::BodyExt;
@@ -380,7 +377,7 @@ mod test {
 
     #[tokio::test]
     async fn no_body() {
-        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+        let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 match req.body().inner {
                     RawBodyInner::Empty => {}
@@ -402,7 +399,7 @@ mod test {
     async fn fixed_size_body() {
         let body = "hello world";
 
-        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+        let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 match &req.body().inner {
                     RawBodyInner::Single(chunk) => assert_eq!(chunk.data_ref().unwrap(), body),
@@ -422,7 +419,6 @@ mod test {
 
     struct StreamedBody;
 
-    #[async_trait]
     impl AsyncWriteBody<BodyWriter> for StreamedBody {
         async fn write_body(
             self: Pin<&mut Self>,
@@ -441,7 +437,7 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body() {
-        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+        let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 match req.body().inner {
                     RawBodyInner::Stream { .. } => {}
@@ -456,14 +452,15 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(Box::pin(StreamedBody)))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                StreamedBody,
+            )))
             .unwrap();
         service.call(request).await.unwrap();
     }
 
     struct StreamedInfiniteBody;
 
-    #[async_trait]
     impl AsyncWriteBody<BodyWriter> for StreamedInfiniteBody {
         async fn write_body(
             self: Pin<&mut Self>,
@@ -482,7 +479,7 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body_hangup() {
-        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+        let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 let mut body = pin!(req.into_body());
                 body.frame().await.unwrap().unwrap();
@@ -493,7 +490,9 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(Box::pin(StreamedInfiniteBody)))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                StreamedInfiniteBody,
+            )))
             .unwrap();
         let err = service.call(request).await.err().unwrap();
 
@@ -502,7 +501,6 @@ mod test {
 
     struct StreamedErrorBody;
 
-    #[async_trait]
     impl AsyncWriteBody<BodyWriter> for StreamedErrorBody {
         async fn write_body(
             self: Pin<&mut Self>,
@@ -520,7 +518,7 @@ mod test {
 
     #[tokio::test]
     async fn streamed_body_error() {
-        let service = RetryLayer::new(&Builder::new()).layer(service::service_fn(
+        let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 req.into_body()
                     .collect()
@@ -533,7 +531,9 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(Box::pin(StreamedErrorBody)))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                StreamedErrorBody,
+            )))
             .unwrap();
         let err = service.call(request).await.err().unwrap();
 
@@ -554,7 +554,6 @@ mod test {
         }
     }
 
-    #[async_trait]
     impl AsyncWriteBody<BodyWriter> for RetryingBody {
         async fn write_body(
             mut self: Pin<&mut Self>,
@@ -583,7 +582,7 @@ mod test {
     #[tokio::test]
     async fn retry_after_raw_client_error() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -606,7 +605,9 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(1))))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(1),
+            )))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -614,7 +615,7 @@ mod test {
     #[tokio::test]
     async fn retry_after_unavailable() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -637,7 +638,9 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(1))))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(1),
+            )))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -645,7 +648,7 @@ mod test {
     #[tokio::test]
     async fn retry_after_throttled() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -668,7 +671,9 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(1))))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(1),
+            )))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -676,7 +681,7 @@ mod test {
     #[tokio::test]
     async fn no_retry_after_propagated_unavailable() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -699,7 +704,9 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(0))))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(0),
+            )))
             .unwrap();
         service.call(request).await.err().unwrap();
     }
@@ -707,7 +714,7 @@ mod test {
     #[tokio::test]
     async fn no_retry_after_propagated_throttled() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -730,7 +737,9 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(0))))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(0),
+            )))
             .unwrap();
         service.call(request).await.err().unwrap();
     }
@@ -738,7 +747,7 @@ mod test {
     #[tokio::test]
     async fn no_retry_non_idempotent() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -768,7 +777,7 @@ mod test {
     #[tokio::test]
     async fn retry_non_idempotent_for_qos_errors() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -797,7 +806,7 @@ mod test {
     #[tokio::test]
     async fn no_reset_unread_body() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(2)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -822,7 +831,9 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(0))))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(0),
+            )))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -830,7 +841,7 @@ mod test {
     #[tokio::test]
     async fn give_up_after_limit() {
         let service = RetryLayer::new(
-            Builder::new()
+            &Builder::for_test()
                 .max_num_retries(1)
                 .backoff_slot_size(Duration::from_secs(0)),
         )
@@ -852,7 +863,9 @@ mod test {
 
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(Box::pin(RetryingBody::new(1))))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(1),
+            )))
             .unwrap();
         service.call(request).await.err().unwrap();
     }

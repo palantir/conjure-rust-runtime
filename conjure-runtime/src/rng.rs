@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::Builder;
+use crate::{builder, Builder};
 use parking_lot::Mutex;
 use rand::{RngCore, SeedableRng};
 use rand_pcg::Pcg64;
@@ -23,7 +23,7 @@ pub enum ConjureRng {
 }
 
 impl ConjureRng {
-    pub fn new<T>(builder: &Builder<T>) -> Self {
+    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> Self {
         match builder.get_rng_seed() {
             Some(rng_seed) => ConjureRng::Deterministic(Mutex::new(Pcg64::seed_from_u64(rng_seed))),
             None => ConjureRng::Thread,

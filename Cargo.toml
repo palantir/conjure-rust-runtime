@@ -17,8 +17,8 @@ debug = 1
 debug = 1
 
 [patch.crates-io]
-conjure-codegen = { git = "https://github.com/palantir/conjure-rust" }
-conjure-error = { git = "https://github.com/palantir/conjure-rust" }
-conjure-http = { git = "https://github.com/palantir/conjure-rust" }
-conjure-object = { git = "https://github.com/palantir/conjure-rust" }
-conjure-serde = { git = "https://github.com/palantir/conjure-rust" }
+conjure-codegen = { git = "https://github.com/palantir/conjure-rust", branch = "fix-alias-f64-set" }
+conjure-error = { git = "https://github.com/palantir/conjure-rust", branch = "fix-alias-f64-set" }
+conjure-http = { git = "https://github.com/palantir/conjure-rust", branch = "fix-alias-f64-set" }
+conjure-object = { git = "https://github.com/palantir/conjure-rust", branch = "fix-alias-f64-set" }
+conjure-serde = { git = "https://github.com/palantir/conjure-rust", branch = "fix-alias-f64-set" }

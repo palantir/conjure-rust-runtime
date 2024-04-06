@@ -14,7 +14,7 @@
 use crate::BodyWriter;
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{AsyncRequestBody, AsyncWriteBody};
+use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody};
 use futures::channel::{mpsc, oneshot};
 use futures::{pin_mut, Stream};
 use http_body::{Frame, SizeHint};
@@ -148,7 +148,7 @@ pub(crate) enum Writer<'a> {
     Nop,
     Streaming {
         polled: oneshot::Receiver<()>,
-        body: Pin<Box<dyn AsyncWriteBody<BodyWriter> + 'a + Send>>,
+        body: BoxAsyncWriteBody<'a, BodyWriter>,
         sender: mpsc::Sender<BodyPart>,
     },
 }
@@ -170,7 +170,7 @@ impl<'a> Writer<'a> {
 
                 let writer = BodyWriter::new(sender);
                 pin_mut!(writer);
-                body.as_mut().write_body(writer.as_mut()).await?;
+                Pin::new(&mut body).write_body(writer.as_mut()).await?;
                 writer.finish().await.map_err(Error::internal_safe)?;
 
                 Ok(())

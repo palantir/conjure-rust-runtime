@@ -25,9 +25,8 @@ use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
 use crate::service::wait_for_spans::{WaitForSpansBody, WaitForSpansLayer};
 use crate::service::{Identity, Layer, ServiceBuilder, Stack};
-use crate::{BodyWriter, Builder, ResponseBody};
+use crate::{builder, BodyWriter, Builder, ResponseBody};
 use arc_swap::ArcSwap;
-use async_trait::async_trait;
 use bytes::Bytes;
 use conjure_error::Error;
 use conjure_http::client::{AsyncClient, AsyncRequestBody, AsyncService};
@@ -68,24 +67,22 @@ pub(crate) struct ClientState<T> {
 }
 
 impl<T> ClientState<T> {
-    pub(crate) fn new<U>(builder: &Builder<U>) -> Result<ClientState<T>, Error>
+    pub(crate) fn new<U>(builder: &Builder<builder::Complete<U>>) -> Result<ClientState<T>, Error>
     where
         U: BuildRawClient<RawClient = T>,
     {
-        let service = builder.get_service().expect("service not set");
-
         let client = builder.get_raw_client_builder().build_raw_client(builder)?;
 
         let proxy = ProxyConfig::from_config(builder.get_proxy())?;
 
         let service = ServiceBuilder::new()
             .layer(ResponseBodyLayer)
-            .layer(MetricsLayer::new(service, builder))
+            .layer(MetricsLayer::new(builder))
             .layer(RootSpanLayer)
             .layer(RetryLayer::new(builder))
             .layer(HttpErrorLayer::new(builder))
             .layer(WaitForSpansLayer)
-            .layer(NodeSelectorLayer::new(service, builder)?)
+            .layer(NodeSelectorLayer::new(builder)?)
             .layer(NodeUriLayer)
             .layer(NodeMetricsLayer)
             .layer(ProxyLayer::new(&proxy))
@@ -119,7 +116,8 @@ impl<T> Clone for Client<T> {
 
 impl Client {
     /// Creates a new `Builder` for clients.
-    pub fn builder() -> Builder {
+    #[inline]
+    pub fn builder() -> Builder<builder::ServiceStage> {
         Builder::new()
     }
 }
@@ -142,7 +140,6 @@ impl<T> AsyncService<Client<T>> for Client<T> {
     }
 }
 
-#[async_trait]
 impl<T, B> AsyncClient for Client<T>
 where
     T: Service<http::Request<RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
