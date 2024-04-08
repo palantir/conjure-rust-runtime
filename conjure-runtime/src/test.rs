@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::RemoteError;
+use crate::raw::ResolvedAddr;
 use crate::{blocking, Agent, BodyWriter, Builder, Client, ServerQos, ServiceError, UserAgent};
 use bytes::Bytes;
 use conjure_error::NotFound;
@@ -20,11 +21,12 @@ use conjure_http::client::{
     AsyncClient, AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody, Client as _, Endpoint,
     RequestBody,
 };
-use conjure_runtime_config::ServiceConfig;
+use conjure_runtime_config::{SecurityConfig, ServiceConfig};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures::channel::mpsc;
 use futures::{join, pin_mut, SinkExt};
+use http::header::HOST;
 use http::{request, Method};
 use http_body::Frame;
 use http_body_util::combinators::BoxBody;
@@ -36,10 +38,11 @@ use hyper::server::conn::http1;
 use hyper::service::Service;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use openssl::ssl::{Ssl, SslAcceptor, SslFiletype, SslMethod};
+use openssl::ssl::{NameType, Ssl, SslAcceptor, SslFiletype, SslMethod};
 use std::convert::Infallible;
 use std::future::Future;
 use std::io::Write;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -750,4 +753,65 @@ security:
         },
     )
     .await
+}
+
+#[tokio::test]
+async fn raw_resolved_addr() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let server = async {
+        let mut acceptor = SslAcceptor::mozilla_modern(SslMethod::tls()).unwrap();
+        acceptor
+            .set_private_key_file(test_dir().join("test-invalid-key.pem"), SslFiletype::PEM)
+            .unwrap();
+        acceptor
+            .set_certificate_chain_file(test_dir().join("test-invalid-cert.cer"))
+            .unwrap();
+        let acceptor = acceptor.build();
+
+        let socket = listener.accept().await.unwrap().0;
+        let ssl = Ssl::new(acceptor.context()).unwrap();
+        let mut socket = SslStream::new(ssl, socket).unwrap();
+        Pin::new(&mut socket).accept().await.unwrap();
+
+        assert_eq!(
+            socket.ssl().servername(NameType::HOST_NAME),
+            Some("test.invalid"),
+        );
+
+        let handler = |req: Request<Incoming>| async move {
+            assert_eq!(req.headers().get(HOST).unwrap(), "test.inavlid");
+            Ok(Response::new(Empty::new().boxed()))
+        };
+
+        let _ = http1::Builder::new()
+            .keep_alive(false)
+            .serve_connection(TokioIo::new(socket), TestService(&handler))
+            .await;
+    };
+
+    let client = async {
+        Client::builder()
+            .service("service")
+            .user_agent(UserAgent::new(Agent::new("test", "1.0")))
+            .uri(format!("https://test.invalid:{port}").parse().unwrap())
+            .security(
+                SecurityConfig::builder()
+                    .ca_file(test_dir().join("test-invalid-cert.cer"))
+                    .build(),
+            )
+            .build()
+            .unwrap()
+            .send(
+                req()
+                    .extension(ResolvedAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST)))
+                    .body(AsyncRequestBody::Empty)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+    };
+
+    join!(server, client);
 }
