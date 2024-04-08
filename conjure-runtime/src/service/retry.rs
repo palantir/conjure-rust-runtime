@@ -20,7 +20,7 @@ use crate::service::Layer;
 use crate::util::spans::{self, HttpSpanFuture};
 use crate::{builder, BodyWriter, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
-use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody, Endpoint};
+use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody};
 use futures::future;
 use http::request::Parts;
 use http::{Request, Response, StatusCode};
@@ -165,10 +165,7 @@ where
         *new_req.method_mut() = parts.method.clone();
         *new_req.uri_mut() = parts.uri.clone();
         *new_req.headers_mut() = parts.headers.clone();
-
-        if let Some(endpoint) = parts.extensions.get::<Endpoint>() {
-            new_req.extensions_mut().insert(endpoint.clone());
-        }
+        *new_req.extensions_mut() = parts.extensions.clone();
 
         let parts = new_req.into_parts().0;
         Request::from_parts(parts, body)
@@ -365,6 +362,7 @@ mod test {
     use crate::service;
     use crate::BodyWriter;
     use bytes::Bytes;
+    use conjure_http::client::Endpoint;
     use http::Method;
     use http_body_util::BodyExt;
     use std::pin::pin;

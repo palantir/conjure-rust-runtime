@@ -22,3 +22,4 @@ conjure-error = { git = "https://github.com/palantir/conjure-rust" }
 conjure-http = { git = "https://github.com/palantir/conjure-rust" }
 conjure-object = { git = "https://github.com/palantir/conjure-rust" }
 conjure-serde = { git = "https://github.com/palantir/conjure-rust" }
+hyper-rustls = { git = "https://github.com/sfackler/hyper-rustls", branch = "custom-servername" }

@@ -19,36 +19,45 @@ use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
 use crate::{builder, Builder};
 use bytes::Bytes;
 use conjure_error::Error;
-use http::{Request, Response};
+use http::header::HOST;
+use http::uri::Authority;
+use http::{HeaderValue, Request, Response, Uri};
 use http_body::{Body, Frame, SizeHint};
 use hyper::body::Incoming;
+use hyper_rustls::ResolveServerName;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
+use hyper_util::client::legacy::connect::dns::{GaiAddrs, GaiFuture, GaiResolver, Name};
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use pin_project::pin_project;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pemfile::Item;
-use std::error;
 use std::fmt;
+use std::fmt::Write;
 use std::fs::File;
 use std::io::BufReader;
 use std::marker::PhantomPinned;
+use std::net::IpAddr;
 use std::path::Path;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
+use std::{error, io};
 use tower_layer::Layer;
 use webpki_roots::TLS_SERVER_ROOTS;
+
+use super::ResolvedAddr;
 
 // This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
 const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
 // Most servers time out idle connections after 60 seconds, so we'll set the client timeout a bit below that.
 const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 
-type ConjureConnector =
-    TlsMetricsService<HttpsConnector<ProxyConnectorService<TimeoutService<HttpConnector>>>>;
+type ConjureConnector = TlsMetricsService<
+    HttpsConnector<ProxyConnectorService<TimeoutService<HttpConnector<DefaultResolver>>>>,
+>;
 
 /// The default raw client builder used by `conjure_runtime`.
 #[derive(Copy, Clone)]
@@ -61,7 +70,7 @@ impl BuildRawClient for DefaultRawClientBuilder {
         &self,
         builder: &Builder<builder::Complete<Self>>,
     ) -> Result<Self::RawClient, Error> {
-        let mut connector = HttpConnector::new();
+        let mut connector = HttpConnector::new_with_resolver(DefaultResolver::new());
         connector.enforce_http(false);
         connector.set_nodelay(true);
         connector.set_keepalive(Some(TCP_KEEPALIVE));
@@ -106,6 +115,7 @@ impl BuildRawClient for DefaultRawClientBuilder {
         let connector = HttpsConnectorBuilder::new()
             .with_tls_config(client_config)
             .https_or_http()
+            .with_server_name_resolver(DefaultServerNameResolver)
             .enable_all_versions()
             .wrap_connector(connector);
         let connector = TlsMetricsLayer::new(builder).layer(connector);
@@ -161,7 +171,21 @@ impl Service<Request<RawBody>> for DefaultRawClient {
     type Response = Response<DefaultRawBody>;
     type Error = DefaultRawError;
 
-    async fn call(&self, req: Request<RawBody>) -> Result<Self::Response, Self::Error> {
+    async fn call(&self, mut req: Request<RawBody>) -> Result<Self::Response, Self::Error> {
+        // Manually set the Host header since we're messing with the URI before giving it to Hyper.
+        if let Some(host) = req
+            .uri()
+            .host()
+            .map(HeaderValue::from_str)
+            .transpose()
+            .unwrap()
+        {
+            req.headers_mut().insert(HOST, host);
+        }
+
+        let resolved_ip = req.extensions().get::<ResolvedAddr>().map(|r| r.ip());
+        *req.uri_mut() = encode_uri(req.uri(), resolved_ip);
+
         self.0
             .request(req)
             .await
@@ -230,4 +254,86 @@ impl error::Error for DefaultRawError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         error::Error::source(&*self.0)
     }
+}
+
+#[derive(Clone)]
+struct DefaultResolver {
+    inner: GaiResolver,
+}
+
+impl DefaultResolver {
+    fn new() -> Self {
+        DefaultResolver {
+            inner: GaiResolver::new(),
+        }
+    }
+}
+
+impl tower_service::Service<Name> for DefaultResolver {
+    type Response = GaiAddrs;
+
+    type Error = io::Error;
+
+    type Future = GaiFuture;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Name) -> Self::Future {
+        let (host, ip) = decode_host(req.as_str());
+        let ip = ip.map(|ip| ip.to_string());
+        let name = ip.as_deref().unwrap_or(host).parse().unwrap();
+
+        self.inner.call(name)
+    }
+}
+
+struct DefaultServerNameResolver;
+
+impl ResolveServerName for DefaultServerNameResolver {
+    fn resolve(
+        &self,
+        uri: &Uri,
+    ) -> Result<ServerName<'static>, Box<dyn error::Error + Sync + Send>> {
+        let Some(host) = uri.host() else {
+            return Err("URI missing host".into());
+        };
+
+        let (host, _) = decode_host(host);
+
+        ServerName::try_from(host.to_string()).map_err(|e| Box::new(e) as _)
+    }
+}
+
+fn encode_uri(uri: &Uri, ip: Option<IpAddr>) -> Uri {
+    let mut parts = uri.clone().into_parts();
+
+    // NB: this ignores any userinfo in the authority, which isn't relevant at this layer
+    if let Some(authority) = parts.authority {
+        let mut new_authority = match ip {
+            Some(ip) => ip.to_string().replace('.', "-"),
+            None => String::new(),
+        };
+        write!(new_authority, ".{}", authority.host()).unwrap();
+
+        if let Some(port) = authority.port() {
+            write!(new_authority, ":{port}").unwrap();
+        }
+
+        parts.authority = Some(Authority::try_from(new_authority).unwrap());
+    };
+
+    Uri::from_parts(parts).unwrap()
+}
+
+fn decode_host(host: &str) -> (&str, Option<IpAddr>) {
+    let (ip, host) = host.split_once('.').unwrap();
+    let ip = if ip.is_empty() {
+        None
+    } else {
+        Some(ip.replace('-', ".").parse().unwrap())
+    };
+
+    (host, ip)
 }
