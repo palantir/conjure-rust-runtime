@@ -781,7 +781,7 @@ async fn raw_resolved_addr() {
         );
 
         let handler = |req: Request<Incoming>| async move {
-            assert_eq!(req.headers().get(HOST).unwrap(), "test.inavlid");
+            assert_eq!(req.headers().get(HOST).unwrap(), "test.invalid");
             Ok(Response::new(Empty::new().boxed()))
         };
 
