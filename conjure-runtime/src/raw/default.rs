@@ -173,14 +173,14 @@ impl Service<Request<RawBody>> for DefaultRawClient {
 
     async fn call(&self, mut req: Request<RawBody>) -> Result<Self::Response, Self::Error> {
         // Manually set the Host header since we're messing with the URI before giving it to Hyper.
-        if let Some(host) = req
-            .uri()
-            .host()
-            .map(HeaderValue::from_str)
-            .transpose()
-            .unwrap()
-        {
-            req.headers_mut().insert(HOST, host);
+        if let Some(authority) = req.uri().authority() {
+            let mut host = authority.host().to_string();
+            if let Some(port) = authority.port() {
+                write!(host, ":{port}").unwrap();
+            }
+
+            req.headers_mut()
+                .insert(HOST, HeaderValue::try_from(host).unwrap());
         }
 
         let resolved_ip = req.extensions().get::<ResolvedAddr>().map(|r| r.ip());
