@@ -24,7 +24,7 @@ http-body-util = "0.1"
 http-zipkin = "0.4"
 http = "1"
 hyper = { version = "1", features = ["http1", "http2", "client"] }
-hyper-rustls = { version = "0.27", default-features = false, features = [
+hyper-rustls = { version = "0.27.1", default-features = false, features = [
     "http1",
     "http2",
     "tls12",
