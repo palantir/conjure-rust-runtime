@@ -28,7 +28,7 @@ hyper-rustls = { version = "0.24.0", default-features = false, features = [
     "http2",
     "tls12",
 ] }
-hyper = { version = "0.14", features = ["http1", "http2", "client", "tcp"] }
+hyper = { version = "1.3", features = ["http1", "http2", "client", "tcp"] }
 once_cell = "1.0"
 parking_lot = "0.12"
 percent-encoding = "2.1"
@@ -55,7 +55,7 @@ zipkin = "0.4"
 [dev-dependencies]
 conjure-codegen = { version = "3", features = ["example-types"] }
 futures-test = "0.3"
-hyper = { version = "0.14", features = ["server"] }
+hyper = { version = "1.3", features = ["server"] }
 openssl = "0.10.50"
 serde_yaml = "0.9"
 tokio-openssl = "0.6"
