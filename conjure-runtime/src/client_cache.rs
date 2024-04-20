@@ -12,21 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    sync::{Arc, Weak},
-    time::Duration,
-};
+use std::sync::{Arc, Weak};
 
 use conjure_error::Error;
-use conjure_runtime_config::{ProxyConfig, SecurityConfig};
 use linked_hash_map::LinkedHashMap;
 use parking_lot::Mutex;
-use url::Url;
 
-use crate::{
-    raw::DefaultRawClient, Builder, ClientQos, ClientState, Idempotency, NodeSelectionStrategy,
-    ServerQos, ServiceError, UserAgent,
-};
+use crate::{builder::CachedConfig, raw::DefaultRawClient, Builder, ClientState};
 
 const MAX_CACHED_CHANNELS: usize = 1_000;
 
@@ -36,7 +28,7 @@ struct CachedState {
 }
 
 struct Inner {
-    cache: LinkedHashMap<Arc<CacheKey>, CachedState>,
+    cache: LinkedHashMap<Arc<CachedConfig>, CachedState>,
     next_id: usize,
 }
 
@@ -56,24 +48,7 @@ impl ClientCache {
     }
 
     pub fn get(&self, builder: &Builder) -> Result<Arc<ClientState<DefaultRawClient>>, Error> {
-        let key = Arc::new(CacheKey {
-            service: builder.get_service().to_string(),
-            user_agent: builder.get_user_agent().clone(),
-            uris: builder.get_uris().to_vec(),
-            security: builder.get_security().clone(),
-            proxy: builder.get_proxy().clone(),
-            connect_timeout: builder.get_connect_timeout(),
-            read_timeout: builder.get_read_timeout(),
-            write_timeout: builder.get_write_timeout(),
-            backoff_slot_size: builder.get_backoff_slot_size(),
-            max_num_retries: builder.get_max_num_retries(),
-            client_qos: builder.get_client_qos(),
-            server_qos: builder.get_server_qos(),
-            service_error: builder.get_service_error(),
-            idempotency: builder.get_idempotency(),
-            node_selection_strategy: builder.get_node_selection_strategy(),
-            rng_seed: builder.get_rng_seed(),
-        });
+        let key = Arc::new(builder.cached_config().clone());
 
         let mut inner = self.inner.lock();
         if let Some(state) = inner
@@ -107,29 +82,9 @@ impl ClientCache {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct CacheKey {
-    service: String,
-    user_agent: UserAgent,
-    uris: Vec<Url>,
-    security: SecurityConfig,
-    proxy: ProxyConfig,
-    connect_timeout: Duration,
-    read_timeout: Duration,
-    write_timeout: Duration,
-    backoff_slot_size: Duration,
-    max_num_retries: u32,
-    client_qos: ClientQos,
-    server_qos: ServerQos,
-    service_error: ServiceError,
-    idempotency: Idempotency,
-    node_selection_strategy: NodeSelectionStrategy,
-    rng_seed: Option<u64>,
-}
-
 pub struct CacheEvictor {
     inner: Weak<Mutex<Inner>>,
-    key: Arc<CacheKey>,
+    key: Arc<CachedConfig>,
     id: usize,
 }
 

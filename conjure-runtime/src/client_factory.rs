@@ -13,8 +13,10 @@
 // limitations under the License.
 //! The client factory.
 use crate::blocking;
+use crate::builder::UncachedConfig;
 use crate::client_cache::ClientCache;
 use crate::config::{ServiceConfig, ServicesConfig};
+use crate::raw::DefaultRawClientBuilder;
 use crate::{
     Client, ClientQos, HostMetricsRegistry, Idempotency, NodeSelectionStrategy, ServerQos,
     ServiceError, UserAgent,
@@ -39,20 +41,34 @@ pub struct UserAgentStage {
     config: Arc<Refreshable<ServicesConfig, Error>>,
 }
 
+#[derive(Clone)]
+struct CacheManager {
+    uncached_inner: UncachedConfig<DefaultRawClientBuilder>,
+    cache: ClientCache,
+}
+
+impl CacheManager {
+    fn uncached(&self) -> &UncachedConfig<DefaultRawClientBuilder> {
+        &self.uncached_inner
+    }
+
+    fn uncached_mut(&mut self) -> &mut UncachedConfig<DefaultRawClientBuilder> {
+        self.cache = ClientCache::new();
+        &mut self.uncached_inner
+    }
+}
+
 /// The complete builder stage.
 #[derive(Clone)]
 pub struct Complete {
     config: Arc<Refreshable<ServicesConfig, Error>>,
     user_agent: UserAgent,
-    metrics: Option<Arc<MetricRegistry>>,
-    host_metrics: Option<Arc<HostMetricsRegistry>>,
     client_qos: ClientQos,
     server_qos: ServerQos,
     service_error: ServiceError,
     idempotency: Idempotency,
     node_selection_strategy: NodeSelectionStrategy,
-    blocking_handle: Option<Handle>,
-    cache: ClientCache,
+    cache_manager: CacheManager,
 }
 
 impl Default for ClientFactory<ConfigStage> {
@@ -88,25 +104,26 @@ impl ClientFactory<UserAgentStage> {
         ClientFactory(Complete {
             config: self.0.config,
             user_agent,
-            metrics: None,
-            host_metrics: None,
             client_qos: ClientQos::Enabled,
             server_qos: ServerQos::AutomaticRetry,
             service_error: ServiceError::WrapInNewError,
             idempotency: Idempotency::ByMethod,
             node_selection_strategy: NodeSelectionStrategy::PinUntilError,
-            blocking_handle: None,
-            cache: ClientCache::new(),
+            cache_manager: CacheManager {
+                uncached_inner: UncachedConfig {
+                    metrics: None,
+                    host_metrics: None,
+
+                    blocking_handle: None,
+                    raw_client_builder: DefaultRawClientBuilder,
+                },
+                cache: ClientCache::new(),
+            },
         })
     }
 }
 
 impl ClientFactory {
-    // Some state can't be tracked in the cache key, so we instead swap to a new cache.
-    fn swap_cache(&mut self) {
-        self.0.cache = ClientCache::new();
-    }
-
     /// Sets the user agent sent by clients.
     #[inline]
     pub fn user_agent(mut self, user_agent: UserAgent) -> Self {
@@ -205,15 +222,14 @@ impl ClientFactory {
     /// Defaults to no registry.
     #[inline]
     pub fn metrics(mut self, metrics: Arc<MetricRegistry>) -> Self {
-        self.0.metrics = Some(metrics);
-        self.swap_cache();
+        self.0.cache_manager.uncached_mut().metrics = Some(metrics);
         self
     }
 
     /// Returns the configured metrics registry.
     #[inline]
     pub fn get_metrics(&self) -> Option<&Arc<MetricRegistry>> {
-        self.0.metrics.as_ref()
+        self.0.cache_manager.uncached().metrics.as_ref()
     }
 
     /// Sets the host metrics registry used to track host performance.
@@ -221,15 +237,14 @@ impl ClientFactory {
     /// Defaults to no registry.
     #[inline]
     pub fn host_metrics(mut self, host_metrics: Arc<HostMetricsRegistry>) -> Self {
-        self.0.host_metrics = Some(host_metrics);
-        self.swap_cache();
+        self.0.cache_manager.uncached_mut().host_metrics = Some(host_metrics);
         self
     }
 
     /// Returns the configured host metrics registry.
     #[inline]
     pub fn get_host_metrics(&self) -> Option<&Arc<HostMetricsRegistry>> {
-        self.0.host_metrics.as_ref()
+        self.0.cache_manager.uncached().host_metrics.as_ref()
     }
 
     /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
@@ -239,15 +254,14 @@ impl ClientFactory {
     /// Defaults to a `conjure-runtime` internal `Runtime`.
     #[inline]
     pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
-        self.0.blocking_handle = Some(blocking_handle);
-        self.swap_cache();
+        self.0.cache_manager.uncached_mut().blocking_handle = Some(blocking_handle);
         self
     }
 
     /// Returns the configured blocking handle.
     #[inline]
     pub fn get_blocking_handle(&self) -> Option<&Handle> {
-        self.0.blocking_handle.as_ref()
+        self.0.cache_manager.uncached().blocking_handle.as_ref()
     }
 
     /// Creates a new client for the specified service.
@@ -278,14 +292,14 @@ impl ClientFactory {
 
         let service = service.to_string();
         let user_agent = self.0.user_agent.clone();
-        let metrics = self.0.metrics.clone();
-        let host_metrics = self.0.host_metrics.clone();
+        let metrics = self.0.cache_manager.uncached().metrics.clone();
+        let host_metrics = self.0.cache_manager.uncached().host_metrics.clone();
         let client_qos = self.0.client_qos;
         let server_qos = self.0.server_qos;
         let service_error = self.0.service_error;
         let idempotency = self.0.idempotency;
         let node_selection_strategy = self.0.node_selection_strategy;
-        let cache = self.0.cache.clone();
+        let cache = self.0.cache_manager.cache.clone();
 
         let make_state = move |config: &ServiceConfig| {
             let mut builder = Client::builder()
@@ -347,7 +361,7 @@ impl ClientFactory {
     fn blocking_client_inner(&self, service: &str) -> Result<blocking::Client, Error> {
         self.client_inner(service).map(|client| blocking::Client {
             client,
-            handle: self.0.blocking_handle.clone(),
+            handle: self.0.cache_manager.uncached().blocking_handle.clone(),
         })
     }
 }
