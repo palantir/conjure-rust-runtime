@@ -48,17 +48,14 @@ impl ClientCache {
     }
 
     pub fn get(&self, builder: &Builder) -> Result<Arc<ClientState<DefaultRawClient>>, Error> {
-        let key = Arc::new(builder.cached_config().clone());
+        let key = builder.cached_config();
 
         let mut inner = self.inner.lock();
-        if let Some(state) = inner
-            .cache
-            .get_refresh(&key)
-            .and_then(|w| w.state.upgrade())
-        {
+        if let Some(state) = inner.cache.get_refresh(key).and_then(|w| w.state.upgrade()) {
             return Ok(state.clone());
         }
 
+        let key = Arc::new(key.clone());
         let mut state = ClientState::new(builder)?;
         let id = inner.next_id;
         inner.next_id += 1;
