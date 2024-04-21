@@ -115,7 +115,6 @@ impl ClientFactory<UserAgentStage> {
                 uncached_inner: UncachedConfig {
                     metrics: None,
                     host_metrics: None,
-
                     blocking_handle: None,
                     raw_client_builder: DefaultRawClientBuilder,
                 },
