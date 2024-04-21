@@ -183,6 +183,7 @@ mod test {
         assert_eq!(**value2, 1);
 
         drop((value1, value2));
+        assert_eq!(cache.inner.lock().cache.len(), 0);
 
         let value3 = cache.get(&(), |_| &0, |_| Ok(2)).unwrap();
         assert_eq!(**value3, 2);
