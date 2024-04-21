@@ -13,10 +13,10 @@
 // limitations under the License.
 //! The client factory.
 use crate::builder::{CachedConfig, UncachedConfig};
-use crate::client_cache::ClientCache;
 use crate::config::{ServiceConfig, ServicesConfig};
 use crate::raw::{DefaultRawClient, DefaultRawClientBuilder};
-use crate::{blocking, ClientState};
+use crate::weak_cache::WeakCache;
+use crate::{blocking, Builder, ClientState};
 use crate::{
     Client, ClientQos, HostMetricsRegistry, Idempotency, NodeSelectionStrategy, ServerQos,
     ServiceError, UserAgent,
@@ -28,6 +28,8 @@ use refreshable::Refreshable;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use witchcraft_metrics::MetricRegistry;
+
+const STATE_CACHE_CAPACITY: usize = 10_000;
 
 /// A factory type which can create clients that will live-reload in response to configuration updates.
 #[derive(Clone)]
@@ -44,7 +46,7 @@ pub struct UserAgentStage {
 #[derive(Clone)]
 struct CacheManager {
     uncached_inner: UncachedConfig<DefaultRawClientBuilder>,
-    cache: ClientCache<CachedConfig, ClientState<DefaultRawClient>>,
+    cache: WeakCache<CachedConfig, ClientState<DefaultRawClient>>,
 }
 
 impl CacheManager {
@@ -53,7 +55,7 @@ impl CacheManager {
     }
 
     fn uncached_mut(&mut self) -> &mut UncachedConfig<DefaultRawClientBuilder> {
-        self.cache = ClientCache::new();
+        self.cache = WeakCache::new(STATE_CACHE_CAPACITY);
         &mut self.uncached_inner
     }
 }
@@ -117,7 +119,7 @@ impl ClientFactory<UserAgentStage> {
                     blocking_handle: None,
                     raw_client_builder: DefaultRawClientBuilder,
                 },
-                cache: ClientCache::new(),
+                cache: WeakCache::new(STATE_CACHE_CAPACITY),
             },
         })
     }
@@ -320,7 +322,7 @@ impl ClientFactory {
                 builder = builder.host_metrics(host_metrics);
             }
 
-            cache.get(&builder, |b| b.cached_config(), ClientState::new)
+            cache.get(&builder, Builder::cached_config, ClientState::new)
         };
 
         let state = make_state(&service_config.get())?;

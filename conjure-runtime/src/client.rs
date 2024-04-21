@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::builder::CachedConfig;
-use crate::client_cache::Cached;
 use crate::raw::{BuildRawClient, DefaultRawClient, RawBody, Service};
 use crate::service::gzip::{DecodedBody, GzipLayer};
 use crate::service::http_error::HttpErrorLayer;
@@ -27,6 +26,7 @@ use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
 use crate::service::wait_for_spans::{WaitForSpansBody, WaitForSpansLayer};
 use crate::service::{Identity, Layer, ServiceBuilder, Stack};
+use crate::weak_cache::Cached;
 use crate::{builder, BodyWriter, Builder, ResponseBody};
 use arc_swap::ArcSwap;
 use async_trait::async_trait;

@@ -14,9 +14,9 @@
 //! The client builder.
 use crate::blocking;
 use crate::client::ClientState;
-use crate::client_cache::Cached;
 use crate::config::{ProxyConfig, SecurityConfig, ServiceConfig};
 use crate::raw::{BuildRawClient, DefaultRawClientBuilder};
+use crate::weak_cache::Cached;
 use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;

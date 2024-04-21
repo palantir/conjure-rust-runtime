@@ -204,7 +204,6 @@ pub mod blocking;
 mod body;
 pub mod builder;
 mod client;
-mod client_cache;
 pub mod client_factory;
 pub mod errors;
 mod host_metrics;
@@ -215,6 +214,7 @@ mod service;
 mod test;
 mod user_agent;
 mod util;
+mod weak_cache;
 
 /// Client configuration.
 ///

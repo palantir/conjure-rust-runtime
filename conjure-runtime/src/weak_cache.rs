@@ -22,8 +22,6 @@ use conjure_error::Error;
 use linked_hash_map::LinkedHashMap;
 use parking_lot::Mutex;
 
-const MAX_CACHED_CHANNELS: usize = 1_000;
-
 pub struct Cached<K, V>
 where
     K: Eq + Hash,
@@ -96,36 +94,38 @@ where
     K: Eq + Hash,
 {
     cache: LinkedHashMap<Arc<K>, CachedValue<K, V>>,
+    capacity: usize,
     next_id: usize,
 }
 
-pub struct ClientCache<K, V>
+pub struct WeakCache<K, V>
 where
     K: Eq + Hash,
 {
     inner: Arc<Mutex<Inner<K, V>>>,
 }
 
-impl<K, V> Clone for ClientCache<K, V>
+impl<K, V> Clone for WeakCache<K, V>
 where
     K: Eq + Hash,
 {
     #[inline]
     fn clone(&self) -> Self {
-        ClientCache {
+        WeakCache {
             inner: self.inner.clone(),
         }
     }
 }
 
-impl<K, V> ClientCache<K, V>
+impl<K, V> WeakCache<K, V>
 where
     K: Eq + Hash + Clone,
 {
-    pub fn new() -> Self {
-        ClientCache {
+    pub fn new(capacity: usize) -> Self {
+        WeakCache {
             inner: Arc::new(Mutex::new(Inner {
                 cache: LinkedHashMap::new(),
+                capacity,
                 next_id: 0,
             })),
         }
@@ -133,11 +133,11 @@ where
 
     pub fn get<T>(
         &self,
-        builder: &T,
+        seed: &T,
         get_key: impl FnOnce(&T) -> &K,
         make_value: impl FnOnce(&T) -> Result<V, Error>,
     ) -> Result<Arc<Cached<K, V>>, Error> {
-        let key = get_key(builder);
+        let key = get_key(seed);
 
         let mut inner = self.inner.lock();
         if let Some(state) = inner.cache.get_refresh(key).and_then(|w| w.value.upgrade()) {
@@ -145,7 +145,7 @@ where
         }
 
         let key = Arc::new(key.clone());
-        let value = make_value(builder)?;
+        let value = make_value(seed)?;
         let id = inner.next_id;
         inner.next_id += 1;
         let value = Arc::new(Cached {
@@ -162,10 +162,53 @@ where
         };
         inner.cache.insert(key, cached_value);
 
-        while inner.cache.len() > MAX_CACHED_CHANNELS {
+        while inner.cache.len() > inner.capacity {
             inner.cache.pop_front();
         }
 
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn cleanup_after_drop() {
+        let cache = WeakCache::new(2);
+        let value1 = cache.get(&(), |_| &0, |_| Ok(1)).unwrap();
+        let value2 = cache.get(&(), |_| &0, |_| panic!()).unwrap();
+        assert_eq!(**value1, 1);
+        assert_eq!(**value2, 1);
+
+        drop((value1, value2));
+
+        let value3 = cache.get(&(), |_| &0, |_| Ok(2)).unwrap();
+        assert_eq!(**value3, 2);
+    }
+
+    #[test]
+    fn lru_eviction() {
+        let cache = WeakCache::new(2);
+        let _value1 = cache.get(&(), |_| &0, |_| Ok(1)).unwrap();
+        let _value2 = cache.get(&(), |_| &1, |_| Ok(2)).unwrap();
+
+        // insert 2, evict 0
+        let _value3 = cache.get(&(), |_| &2, |_| Ok(3)).unwrap();
+
+        // insert 0, evict 1
+        let value4 = cache.get(&(), |_| &0, |_| Ok(4)).unwrap();
+        assert_eq!(**value4, 4);
+
+        // refresh 2
+        cache.get(&(), |_| &2, |_| panic!()).unwrap();
+
+        // insert 3, evict 0
+        cache.get(&(), |_| &3, |_| Ok(5)).unwrap();
+
+        // insert 0, evict 2
+        let value5 = cache.get(&(), |_| &0, |_| Ok(6)).unwrap();
+        assert_eq!(**value5, 6);
     }
 }
