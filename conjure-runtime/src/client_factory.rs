@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //! The client factory.
-use crate::blocking;
-use crate::builder::UncachedConfig;
+use crate::builder::{CachedConfig, UncachedConfig};
 use crate::client_cache::ClientCache;
 use crate::config::{ServiceConfig, ServicesConfig};
-use crate::raw::DefaultRawClientBuilder;
+use crate::raw::{DefaultRawClient, DefaultRawClientBuilder};
+use crate::{blocking, ClientState};
 use crate::{
     Client, ClientQos, HostMetricsRegistry, Idempotency, NodeSelectionStrategy, ServerQos,
     ServiceError, UserAgent,
@@ -44,7 +44,7 @@ pub struct UserAgentStage {
 #[derive(Clone)]
 struct CacheManager {
     uncached_inner: UncachedConfig<DefaultRawClientBuilder>,
-    cache: ClientCache,
+    cache: ClientCache<CachedConfig, ClientState<DefaultRawClient>>,
 }
 
 impl CacheManager {
@@ -320,7 +320,7 @@ impl ClientFactory {
                 builder = builder.host_metrics(host_metrics);
             }
 
-            cache.get(&builder)
+            cache.get(&builder, |b| b.cached_config(), ClientState::new)
         };
 
         let state = make_state(&service_config.get())?;

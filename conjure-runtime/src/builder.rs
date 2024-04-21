@@ -14,6 +14,7 @@
 //! The client builder.
 use crate::blocking;
 use crate::client::ClientState;
+use crate::client_cache::Cached;
 use crate::config::{ProxyConfig, SecurityConfig, ServiceConfig};
 use crate::raw::{BuildRawClient, DefaultRawClientBuilder};
 use crate::{Client, HostMetricsRegistry, UserAgent};
@@ -539,7 +540,10 @@ where
     /// Panics if `service` or `user_agent` is not set.
     pub fn build(&self) -> Result<Client<T::RawClient>, Error> {
         let state = ClientState::new(self)?;
-        Ok(Client::new(Arc::new(ArcSwap::new(Arc::new(state))), None))
+        Ok(Client::new(
+            Arc::new(ArcSwap::new(Arc::new(Cached::uncached(state)))),
+            None,
+        ))
     }
 
     /// Creates a new `blocking::Client`.

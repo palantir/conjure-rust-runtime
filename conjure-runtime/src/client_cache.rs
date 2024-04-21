@@ -12,80 +12,63 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{Arc, Weak};
+use std::{
+    hash::Hash,
+    ops::Deref,
+    sync::{Arc, Weak},
+};
 
 use conjure_error::Error;
 use linked_hash_map::LinkedHashMap;
 use parking_lot::Mutex;
 
-use crate::{builder::CachedConfig, raw::DefaultRawClient, Builder, ClientState};
-
 const MAX_CACHED_CHANNELS: usize = 1_000;
 
-struct CachedState {
-    state: Weak<ClientState<DefaultRawClient>>,
-    id: usize,
+pub struct Cached<K, V>
+where
+    K: Eq + Hash,
+{
+    value: V,
+    _evictor: Option<CacheEvictor<K, V>>,
 }
 
-struct Inner {
-    cache: LinkedHashMap<Arc<CachedConfig>, CachedState>,
-    next_id: usize,
-}
-
-#[derive(Clone)]
-pub struct ClientCache {
-    inner: Arc<Mutex<Inner>>,
-}
-
-impl ClientCache {
-    pub fn new() -> Self {
-        ClientCache {
-            inner: Arc::new(Mutex::new(Inner {
-                cache: LinkedHashMap::new(),
-                next_id: 0,
-            })),
+impl<K, V> Cached<K, V>
+where
+    K: Eq + Hash,
+{
+    pub fn uncached(value: V) -> Self {
+        Cached {
+            value,
+            _evictor: None,
         }
     }
+}
 
-    pub fn get(&self, builder: &Builder) -> Result<Arc<ClientState<DefaultRawClient>>, Error> {
-        let key = builder.cached_config();
+impl<K, V> Deref for Cached<K, V>
+where
+    K: Eq + Hash,
+{
+    type Target = V;
 
-        let mut inner = self.inner.lock();
-        if let Some(state) = inner.cache.get_refresh(key).and_then(|w| w.state.upgrade()) {
-            return Ok(state.clone());
-        }
-
-        let key = Arc::new(key.clone());
-        let mut state = ClientState::new(builder)?;
-        let id = inner.next_id;
-        inner.next_id += 1;
-        state.evictor = Some(CacheEvictor {
-            inner: Arc::downgrade(&self.inner),
-            key: key.clone(),
-            id,
-        });
-        let state = Arc::new(state);
-        let cached_state = CachedState {
-            state: Arc::downgrade(&state),
-            id,
-        };
-        inner.cache.insert(key, cached_state);
-
-        while inner.cache.len() > MAX_CACHED_CHANNELS {
-            inner.cache.pop_front();
-        }
-
-        Ok(state)
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.value
     }
 }
 
-pub struct CacheEvictor {
-    inner: Weak<Mutex<Inner>>,
-    key: Arc<CachedConfig>,
+pub struct CacheEvictor<K, V>
+where
+    K: Eq + Hash,
+{
+    inner: Weak<Mutex<Inner<K, V>>>,
+    key: Arc<K>,
     id: usize,
 }
 
-impl Drop for CacheEvictor {
+impl<K, V> Drop for CacheEvictor<K, V>
+where
+    K: Eq + Hash,
+{
     fn drop(&mut self) {
         let Some(inner) = self.inner.upgrade() else {
             return;
@@ -97,5 +80,92 @@ impl Drop for CacheEvictor {
                 inner.cache.remove(&self.key);
             }
         }
+    }
+}
+
+struct CachedValue<K, V>
+where
+    K: Eq + Hash,
+{
+    value: Weak<Cached<K, V>>,
+    id: usize,
+}
+
+struct Inner<K, V>
+where
+    K: Eq + Hash,
+{
+    cache: LinkedHashMap<Arc<K>, CachedValue<K, V>>,
+    next_id: usize,
+}
+
+pub struct ClientCache<K, V>
+where
+    K: Eq + Hash,
+{
+    inner: Arc<Mutex<Inner<K, V>>>,
+}
+
+impl<K, V> Clone for ClientCache<K, V>
+where
+    K: Eq + Hash,
+{
+    #[inline]
+    fn clone(&self) -> Self {
+        ClientCache {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<K, V> ClientCache<K, V>
+where
+    K: Eq + Hash + Clone,
+{
+    pub fn new() -> Self {
+        ClientCache {
+            inner: Arc::new(Mutex::new(Inner {
+                cache: LinkedHashMap::new(),
+                next_id: 0,
+            })),
+        }
+    }
+
+    pub fn get<T>(
+        &self,
+        builder: &T,
+        get_key: impl FnOnce(&T) -> &K,
+        make_value: impl FnOnce(&T) -> Result<V, Error>,
+    ) -> Result<Arc<Cached<K, V>>, Error> {
+        let key = get_key(builder);
+
+        let mut inner = self.inner.lock();
+        if let Some(state) = inner.cache.get_refresh(key).and_then(|w| w.value.upgrade()) {
+            return Ok(state.clone());
+        }
+
+        let key = Arc::new(key.clone());
+        let value = make_value(builder)?;
+        let id = inner.next_id;
+        inner.next_id += 1;
+        let value = Arc::new(Cached {
+            value,
+            _evictor: Some(CacheEvictor {
+                inner: Arc::downgrade(&self.inner),
+                key: key.clone(),
+                id,
+            }),
+        });
+        let cached_value = CachedValue {
+            value: Arc::downgrade(&value),
+            id,
+        };
+        inner.cache.insert(key, cached_value);
+
+        while inner.cache.len() > MAX_CACHED_CHANNELS {
+            inner.cache.pop_front();
+        }
+
+        Ok(value)
     }
 }
