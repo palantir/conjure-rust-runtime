@@ -209,7 +209,7 @@ impl ServiceConfig {
 }
 
 /// Security configuration used to communicate with a service.
-#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[staged_builder]
 #[builder(update)]
@@ -247,7 +247,7 @@ impl SecurityConfig {
 }
 
 /// Proxy configuration used to connect to a service.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "type")]
 #[non_exhaustive]
 pub enum ProxyConfig {
@@ -265,7 +265,7 @@ impl Default for ProxyConfig {
 }
 
 /// Configuration for an HTTP proxy.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[staged_builder]
 #[builder(update)]
@@ -288,7 +288,7 @@ impl HttpProxyConfig {
 }
 
 /// A host and port identifier of a server.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HostAndPort {
     host: String,
     port: u16,
@@ -343,7 +343,7 @@ impl HostAndPort {
 }
 
 /// Credentials used to authenticate with an HTTP proxy.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
 pub struct BasicCredentials {
     username: String,
     password: String,

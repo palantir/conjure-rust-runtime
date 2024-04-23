@@ -214,6 +214,7 @@ mod service;
 mod test;
 mod user_agent;
 mod util;
+mod weak_cache;
 
 /// Client configuration.
 ///
