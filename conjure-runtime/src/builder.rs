@@ -58,6 +58,7 @@ pub(crate) struct CachedConfig {
     idempotency: Idempotency,
     node_selection_strategy: NodeSelectionStrategy,
     rng_seed: Option<u64>,
+    override_host_index: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -121,6 +122,7 @@ impl Builder<UserAgentStage> {
                 idempotency: Idempotency::ByMethod,
                 node_selection_strategy: NodeSelectionStrategy::PinUntilError,
                 rng_seed: None,
+                override_host_index: None,
             },
             uncached: UncachedConfig {
                 metrics: None,
@@ -478,6 +480,19 @@ impl<T> Builder<Complete<T>> {
         self.0.uncached.blocking_handle.as_ref()
     }
 
+    /// Overrides the `hostIndex` field included in metrics.
+    #[inline]
+    pub fn override_host_index(mut self, override_host_index: usize) -> Self {
+        self.0.cached.override_host_index = Some(override_host_index);
+        self
+    }
+
+    /// Returns the builder's `hostIndex` override.
+    #[inline]
+    pub fn get_override_host_index(&self) -> Option<usize> {
+        self.0.cached.override_host_index
+    }
+
     /// Sets the raw client builder.
     ///
     /// Defaults to `DefaultRawClientBuilder`.
@@ -534,10 +549,6 @@ where
     T: BuildRawClient,
 {
     /// Creates a new `Client`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `service` or `user_agent` is not set.
     pub fn build(&self) -> Result<Client<T::RawClient>, Error> {
         let state = ClientState::new(self)?;
         Ok(Client::new(
@@ -547,10 +558,6 @@ where
     }
 
     /// Creates a new `blocking::Client`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `service` or `user_agent` is not set.
     pub fn build_blocking(&self) -> Result<blocking::Client<T::RawClient>, Error> {
         self.build().map(|client| blocking::Client {
             client,

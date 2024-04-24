@@ -49,7 +49,14 @@ impl NodeSelectorLayer {
             .postprocessed_uris()?
             .iter()
             .enumerate()
-            .map(|(i, url)| LimitedNode::new(i, url, builder.get_service(), builder))
+            .map(|(i, url)| {
+                LimitedNode::new(
+                    builder.get_override_host_index().unwrap_or(i),
+                    url,
+                    builder.get_service(),
+                    builder,
+                )
+            })
             .collect::<Vec<_>>();
 
         let layer = if nodes.is_empty() {

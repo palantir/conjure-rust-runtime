@@ -1,0 +1,5 @@
+type: feature
+feature:
+  description: Added APIs to create separate clients for each replica of a service.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/202
