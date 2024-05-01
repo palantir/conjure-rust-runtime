@@ -760,7 +760,6 @@ async fn empty_body_has_content_length() {
         STOCK_CONFIG,
         1,
         |req| async move {
-            println!("{:#?}", req.headers());
             assert_eq!(req.headers().get(CONTENT_LENGTH), None);
             assert_eq!(req.headers().get(TRANSFER_ENCODING), None);
             Ok(Response::new(hyper::Body::empty()))
