@@ -755,7 +755,7 @@ security:
 }
 
 #[tokio::test]
-async fn empty_body_has_content_length() {
+async fn empty_body_has_no_transfer_encoding() {
     test(
         STOCK_CONFIG,
         1,
