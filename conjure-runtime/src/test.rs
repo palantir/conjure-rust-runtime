@@ -24,7 +24,7 @@ use conjure_runtime_config::ServiceConfig;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures::{join, pin_mut};
-use http::header::CONTENT_LENGTH;
+use http::header::{CONTENT_LENGTH, TRANSFER_ENCODING};
 use http::{request, Method};
 use hyper::body;
 use hyper::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
@@ -755,14 +755,14 @@ security:
 }
 
 #[tokio::test]
-#[ignore = "https://github.com/hyperium/hyper/issues/3654"]
 async fn empty_body_has_content_length() {
     test(
         STOCK_CONFIG,
         1,
         |req| async move {
             println!("{:#?}", req.headers());
-            assert_eq!(req.headers().get(CONTENT_LENGTH).unwrap(), "0");
+            assert_eq!(req.headers().get(CONTENT_LENGTH), None);
+            assert_eq!(req.headers().get(TRANSFER_ENCODING), None);
             Ok(Response::new(hyper::Body::empty()))
         },
         |builder| async move {
@@ -789,6 +789,7 @@ async fn fixed_body_has_content_length() {
         1,
         |req| async move {
             assert_eq!(req.headers().get(CONTENT_LENGTH).unwrap(), "4");
+            assert_eq!(req.headers().get(TRANSFER_ENCODING), None);
             Ok(Response::new(hyper::Body::empty()))
         },
         |builder| async move {
