@@ -198,6 +198,8 @@ pub use crate::client::*;
 #[doc(inline)]
 pub use crate::client_factory::ClientFactory;
 pub use crate::host_metrics::*;
+#[doc(inline)]
+pub use crate::per_host_clients::{Host, PerHostClients};
 pub use crate::user_agent::*;
 
 pub mod blocking;
@@ -207,6 +209,7 @@ mod client;
 pub mod client_factory;
 pub mod errors;
 mod host_metrics;
+pub mod per_host_clients;
 pub mod raw;
 mod rng;
 mod service;
@@ -214,6 +217,7 @@ mod service;
 mod test;
 mod user_agent;
 mod util;
+mod weak_cache;
 
 /// Client configuration.
 ///

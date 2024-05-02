@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::builder::CachedConfig;
 use crate::raw::{BuildRawClient, DefaultRawClient, RawBody, Service};
 use crate::service::gzip::{DecodedBody, GzipLayer};
 use crate::service::http_error::HttpErrorLayer;
@@ -25,6 +26,7 @@ use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
 use crate::service::wait_for_spans::{WaitForSpansBody, WaitForSpansLayer};
 use crate::service::{Identity, Layer, ServiceBuilder, Stack};
+use crate::weak_cache::Cached;
 use crate::{builder, BodyWriter, Builder, ResponseBody};
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -101,7 +103,7 @@ impl<T> ClientState<T> {
 /// It implements the Conjure `AsyncClient` trait, but also offers a "raw" request interface for use with services that
 /// don't provide Conjure service definitions.
 pub struct Client<T = DefaultRawClient> {
-    state: Arc<ArcSwap<ClientState<T>>>,
+    state: Arc<ArcSwap<Cached<CachedConfig, ClientState<T>>>>,
     subscription: Option<Arc<Subscription<ServiceConfig, Error>>>,
 }
 
@@ -124,7 +126,7 @@ impl Client {
 
 impl<T> Client<T> {
     pub(crate) fn new(
-        state: Arc<ArcSwap<ClientState<T>>>,
+        state: Arc<ArcSwap<Cached<CachedConfig, ClientState<T>>>>,
         subscription: Option<Subscription<ServiceConfig, Error>>,
     ) -> Client<T> {
         Client {

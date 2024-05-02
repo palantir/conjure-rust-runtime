@@ -24,7 +24,7 @@ static VALID_VERSION: Lazy<Regex> =
 const DEFAULT_VERSION: &str = "0.0.0";
 
 /// A representation of an HTTP `User-Agent` header value.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UserAgent {
     node_id: Option<String>,
     primary: Agent,
@@ -91,7 +91,7 @@ impl UserAgent {
 }
 
 /// A component of a [`UserAgent`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Agent {
     name: String,
     version: String,

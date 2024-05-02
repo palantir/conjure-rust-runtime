@@ -16,6 +16,7 @@ use crate::blocking;
 use crate::client::ClientState;
 use crate::config::{ProxyConfig, SecurityConfig, ServiceConfig};
 use crate::raw::{BuildRawClient, DefaultRawClientBuilder};
+use crate::weak_cache::Cached;
 use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
@@ -39,8 +40,8 @@ pub struct UserAgentStage {
     service: String,
 }
 
-/// The complete builder stage.
-pub struct Complete<T = DefaultRawClientBuilder> {
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CachedConfig {
     service: String,
     user_agent: UserAgent,
     uris: Vec<Url>,
@@ -56,11 +57,22 @@ pub struct Complete<T = DefaultRawClientBuilder> {
     service_error: ServiceError,
     idempotency: Idempotency,
     node_selection_strategy: NodeSelectionStrategy,
-    metrics: Option<Arc<MetricRegistry>>,
-    host_metrics: Option<Arc<HostMetricsRegistry>>,
     rng_seed: Option<u64>,
-    blocking_handle: Option<Handle>,
-    raw_client_builder: T,
+    override_host_index: Option<usize>,
+}
+
+#[derive(Clone)]
+pub(crate) struct UncachedConfig<T> {
+    pub(crate) metrics: Option<Arc<MetricRegistry>>,
+    pub(crate) host_metrics: Option<Arc<HostMetricsRegistry>>,
+    pub(crate) blocking_handle: Option<Handle>,
+    pub(crate) raw_client_builder: T,
+}
+
+/// The complete builder stage.
+pub struct Complete<T = DefaultRawClientBuilder> {
+    cached: CachedConfig,
+    uncached: UncachedConfig<T>,
 }
 
 impl Default for Builder<ServiceStage> {
@@ -93,26 +105,31 @@ impl Builder<UserAgentStage> {
     #[inline]
     pub fn user_agent(self, user_agent: UserAgent) -> Builder {
         Builder(Complete {
-            service: self.0.service,
-            user_agent,
-            uris: vec![],
-            security: SecurityConfig::builder().build(),
-            proxy: ProxyConfig::Direct,
-            connect_timeout: Duration::from_secs(10),
-            read_timeout: Duration::from_secs(5 * 60),
-            write_timeout: Duration::from_secs(5 * 60),
-            backoff_slot_size: Duration::from_millis(250),
-            max_num_retries: 4,
-            client_qos: ClientQos::Enabled,
-            server_qos: ServerQos::AutomaticRetry,
-            service_error: ServiceError::WrapInNewError,
-            idempotency: Idempotency::ByMethod,
-            node_selection_strategy: NodeSelectionStrategy::PinUntilError,
-            metrics: None,
-            host_metrics: None,
-            rng_seed: None,
-            blocking_handle: None,
-            raw_client_builder: DefaultRawClientBuilder,
+            cached: CachedConfig {
+                service: self.0.service,
+                user_agent,
+                uris: vec![],
+                security: SecurityConfig::builder().build(),
+                proxy: ProxyConfig::Direct,
+                connect_timeout: Duration::from_secs(10),
+                read_timeout: Duration::from_secs(5 * 60),
+                write_timeout: Duration::from_secs(5 * 60),
+                backoff_slot_size: Duration::from_millis(250),
+                max_num_retries: 4,
+                client_qos: ClientQos::Enabled,
+                server_qos: ServerQos::AutomaticRetry,
+                service_error: ServiceError::WrapInNewError,
+                idempotency: Idempotency::ByMethod,
+                node_selection_strategy: NodeSelectionStrategy::PinUntilError,
+                rng_seed: None,
+                override_host_index: None,
+            },
+            uncached: UncachedConfig {
+                metrics: None,
+                host_metrics: None,
+                blocking_handle: None,
+                raw_client_builder: DefaultRawClientBuilder,
+            },
         })
     }
 }
@@ -129,6 +146,10 @@ impl Builder {
 }
 
 impl<T> Builder<Complete<T>> {
+    pub(crate) fn cached_config(&self) -> &CachedConfig {
+        &self.0.cached
+    }
+
     /// Applies configuration settings from a `ServiceConfig` to the builder.
     #[inline]
     pub fn from_config(mut self, config: &ServiceConfig) -> Self {
@@ -168,13 +189,13 @@ impl<T> Builder<Complete<T>> {
     /// Returns the builder's configured service name.
     #[inline]
     pub fn get_service(&self) -> &str {
-        &self.0.service
+        &self.0.cached.service
     }
 
     /// Returns the builder's configured user agent.
     #[inline]
     pub fn get_user_agent(&self) -> &UserAgent {
-        &self.0.user_agent
+        &self.0.cached.user_agent
     }
 
     /// Appends a URI to the URIs list.
@@ -182,7 +203,7 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to an empty list.
     #[inline]
     pub fn uri(mut self, uri: Url) -> Self {
-        self.0.uris.push(uri);
+        self.0.cached.uris.push(uri);
         self
     }
 
@@ -191,14 +212,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to an empty list.
     #[inline]
     pub fn uris(mut self, uris: Vec<Url>) -> Self {
-        self.0.uris = uris;
+        self.0.cached.uris = uris;
         self
     }
 
     /// Returns the builder's configured URIs list.
     #[inline]
     pub fn get_uris(&self) -> &[Url] {
-        &self.0.uris
+        &self.0.cached.uris
     }
 
     /// Sets the security configuration.
@@ -206,14 +227,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to an empty configuration.
     #[inline]
     pub fn security(mut self, security: SecurityConfig) -> Self {
-        self.0.security = security;
+        self.0.cached.security = security;
         self
     }
 
     /// Returns the builder's configured security configuration.
     #[inline]
     pub fn get_security(&self) -> &SecurityConfig {
-        &self.0.security
+        &self.0.cached.security
     }
 
     /// Sets the proxy configuration.
@@ -221,14 +242,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to `ProxyConfig::Direct` (i.e. no proxy).
     #[inline]
     pub fn proxy(mut self, proxy: ProxyConfig) -> Self {
-        self.0.proxy = proxy;
+        self.0.cached.proxy = proxy;
         self
     }
 
     /// Returns the builder's configured proxy configuration.
     #[inline]
     pub fn get_proxy(&self) -> &ProxyConfig {
-        &self.0.proxy
+        &self.0.cached.proxy
     }
 
     /// Sets the connect timeout.
@@ -236,14 +257,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to 10 seconds.
     #[inline]
     pub fn connect_timeout(mut self, connect_timeout: Duration) -> Self {
-        self.0.connect_timeout = connect_timeout;
+        self.0.cached.connect_timeout = connect_timeout;
         self
     }
 
     /// Returns the builder's configured connect timeout.
     #[inline]
     pub fn get_connect_timeout(&self) -> Duration {
-        self.0.connect_timeout
+        self.0.cached.connect_timeout
     }
 
     /// Sets the read timeout.
@@ -253,14 +274,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to 5 minutes.
     #[inline]
     pub fn read_timeout(mut self, read_timeout: Duration) -> Self {
-        self.0.read_timeout = read_timeout;
+        self.0.cached.read_timeout = read_timeout;
         self
     }
 
     /// Returns the builder's configured read timeout.
     #[inline]
     pub fn get_read_timeout(&self) -> Duration {
-        self.0.read_timeout
+        self.0.cached.read_timeout
     }
 
     /// Sets the write timeout.
@@ -270,14 +291,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to 5 minutes.
     #[inline]
     pub fn write_timeout(mut self, write_timeout: Duration) -> Self {
-        self.0.write_timeout = write_timeout;
+        self.0.cached.write_timeout = write_timeout;
         self
     }
 
     /// Returns the builder's configured write timeout.
     #[inline]
     pub fn get_write_timeout(&self) -> Duration {
-        self.0.write_timeout
+        self.0.cached.write_timeout
     }
 
     /// Sets the backoff slot size.
@@ -288,14 +309,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to 250 milliseconds.
     #[inline]
     pub fn backoff_slot_size(mut self, backoff_slot_size: Duration) -> Self {
-        self.0.backoff_slot_size = backoff_slot_size;
+        self.0.cached.backoff_slot_size = backoff_slot_size;
         self
     }
 
     /// Returns the builder's configured backoff slot size.
     #[inline]
     pub fn get_backoff_slot_size(&self) -> Duration {
-        self.0.backoff_slot_size
+        self.0.cached.backoff_slot_size
     }
 
     /// Sets the maximum number of times a request attempt will be retried before giving up.
@@ -303,14 +324,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to 4.
     #[inline]
     pub fn max_num_retries(mut self, max_num_retries: u32) -> Self {
-        self.0.max_num_retries = max_num_retries;
+        self.0.cached.max_num_retries = max_num_retries;
         self
     }
 
     /// Returns the builder's configured maximum number of retries.
     #[inline]
     pub fn get_max_num_retries(&self) -> u32 {
-        self.0.max_num_retries
+        self.0.cached.max_num_retries
     }
 
     /// Sets the client's internal rate limiting behavior.
@@ -318,14 +339,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to `ClientQos::Enabled`.
     #[inline]
     pub fn client_qos(mut self, client_qos: ClientQos) -> Self {
-        self.0.client_qos = client_qos;
+        self.0.cached.client_qos = client_qos;
         self
     }
 
     /// Returns the builder's configured internal rate limiting behavior.
     #[inline]
     pub fn get_client_qos(&self) -> ClientQos {
-        self.0.client_qos
+        self.0.cached.client_qos
     }
 
     /// Sets the client's behavior in response to a QoS error from the server.
@@ -333,14 +354,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to `ServerQos::AutomaticRetry`.
     #[inline]
     pub fn server_qos(mut self, server_qos: ServerQos) -> Self {
-        self.0.server_qos = server_qos;
+        self.0.cached.server_qos = server_qos;
         self
     }
 
     /// Returns the builder's configured server QoS behavior.
     #[inline]
     pub fn get_server_qos(&self) -> ServerQos {
-        self.0.server_qos
+        self.0.cached.server_qos
     }
 
     /// Sets the client's behavior in response to a service error from the server.
@@ -348,14 +369,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to `ServiceError::WrapInNewError`.
     #[inline]
     pub fn service_error(mut self, service_error: ServiceError) -> Self {
-        self.0.service_error = service_error;
+        self.0.cached.service_error = service_error;
         self
     }
 
     /// Returns the builder's configured service error handling behavior.
     #[inline]
     pub fn get_service_error(&self) -> ServiceError {
-        self.0.service_error
+        self.0.cached.service_error
     }
 
     /// Sets the client's behavior to determine if a request is idempotent or not.
@@ -365,14 +386,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to `Idempotency::ByMethod`.
     #[inline]
     pub fn idempotency(mut self, idempotency: Idempotency) -> Self {
-        self.0.idempotency = idempotency;
+        self.0.cached.idempotency = idempotency;
         self
     }
 
     /// Returns the builder's configured idempotency handling behavior.
     #[inline]
     pub fn get_idempotency(&self) -> Idempotency {
-        self.0.idempotency
+        self.0.cached.idempotency
     }
 
     /// Sets the client's strategy for selecting a node for a request.
@@ -383,14 +404,14 @@ impl<T> Builder<Complete<T>> {
         mut self,
         node_selection_strategy: NodeSelectionStrategy,
     ) -> Self {
-        self.0.node_selection_strategy = node_selection_strategy;
+        self.0.cached.node_selection_strategy = node_selection_strategy;
         self
     }
 
     /// Returns the builder's configured node selection strategy.
     #[inline]
     pub fn get_node_selection_strategy(&self) -> NodeSelectionStrategy {
-        self.0.node_selection_strategy
+        self.0.cached.node_selection_strategy
     }
 
     /// Sets the metric registry used to register client metrics.
@@ -398,14 +419,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to no registry.
     #[inline]
     pub fn metrics(mut self, metrics: Arc<MetricRegistry>) -> Self {
-        self.0.metrics = Some(metrics);
+        self.0.uncached.metrics = Some(metrics);
         self
     }
 
     /// Returns the builder's configured metric registry.
     #[inline]
     pub fn get_metrics(&self) -> Option<&Arc<MetricRegistry>> {
-        self.0.metrics.as_ref()
+        self.0.uncached.metrics.as_ref()
     }
 
     /// Sets the host metrics registry used to track host performance.
@@ -413,14 +434,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to no registry.
     #[inline]
     pub fn host_metrics(mut self, host_metrics: Arc<HostMetricsRegistry>) -> Self {
-        self.0.host_metrics = Some(host_metrics);
+        self.0.uncached.host_metrics = Some(host_metrics);
         self
     }
 
     /// Returns the builder's configured host metrics registry.
     #[inline]
     pub fn get_host_metrics(&self) -> Option<&Arc<HostMetricsRegistry>> {
-        self.0.host_metrics.as_ref()
+        self.0.uncached.host_metrics.as_ref()
     }
 
     /// Sets a seed used to initialize the client's random number generators.
@@ -432,14 +453,14 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to no seed.
     #[inline]
     pub fn rng_seed(mut self, rng_seed: u64) -> Self {
-        self.0.rng_seed = Some(rng_seed);
+        self.0.cached.rng_seed = Some(rng_seed);
         self
     }
 
     /// Returns the builder's configured RNG seed.
     #[inline]
     pub fn get_rng_seed(&self) -> Option<u64> {
-        self.0.rng_seed
+        self.0.cached.rng_seed
     }
 
     /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
@@ -449,14 +470,27 @@ impl<T> Builder<Complete<T>> {
     /// Defaults to a `conjure-runtime` internal `Runtime`.
     #[inline]
     pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
-        self.0.blocking_handle = Some(blocking_handle);
+        self.0.uncached.blocking_handle = Some(blocking_handle);
         self
     }
 
     /// Returns the builder's configured blocking handle.
     #[inline]
     pub fn get_blocking_handle(&self) -> Option<&Handle> {
-        self.0.blocking_handle.as_ref()
+        self.0.uncached.blocking_handle.as_ref()
+    }
+
+    /// Overrides the `hostIndex` field included in metrics.
+    #[inline]
+    pub fn override_host_index(mut self, override_host_index: usize) -> Self {
+        self.0.cached.override_host_index = Some(override_host_index);
+        self
+    }
+
+    /// Returns the builder's `hostIndex` override.
+    #[inline]
+    pub fn get_override_host_index(&self) -> Option<usize> {
+        self.0.cached.override_host_index
     }
 
     /// Sets the raw client builder.
@@ -465,37 +499,25 @@ impl<T> Builder<Complete<T>> {
     #[inline]
     pub fn raw_client_builder<U>(self, raw_client_builder: U) -> Builder<Complete<U>> {
         Builder(Complete {
-            service: self.0.service,
-            user_agent: self.0.user_agent,
-            uris: self.0.uris,
-            security: self.0.security,
-            proxy: self.0.proxy,
-            connect_timeout: self.0.connect_timeout,
-            read_timeout: self.0.read_timeout,
-            write_timeout: self.0.write_timeout,
-            backoff_slot_size: self.0.backoff_slot_size,
-            max_num_retries: self.0.max_num_retries,
-            client_qos: self.0.client_qos,
-            server_qos: self.0.server_qos,
-            service_error: self.0.service_error,
-            idempotency: self.0.idempotency,
-            node_selection_strategy: self.0.node_selection_strategy,
-            metrics: self.0.metrics,
-            host_metrics: self.0.host_metrics,
-            rng_seed: self.0.rng_seed,
-            blocking_handle: self.0.blocking_handle,
-            raw_client_builder,
+            cached: self.0.cached,
+            uncached: UncachedConfig {
+                metrics: self.0.uncached.metrics,
+                host_metrics: self.0.uncached.host_metrics,
+                blocking_handle: self.0.uncached.blocking_handle,
+                raw_client_builder,
+            },
         })
     }
 
     /// Returns the builder's configured raw client builder.
     #[inline]
     pub fn get_raw_client_builder(&self) -> &T {
-        &self.0.raw_client_builder
+        &self.0.uncached.raw_client_builder
     }
 
     pub(crate) fn mesh_mode(&self) -> bool {
         self.0
+            .cached
             .uris
             .iter()
             .any(|uri| uri.scheme().starts_with(MESH_PREFIX))
@@ -503,12 +525,12 @@ impl<T> Builder<Complete<T>> {
 
     pub(crate) fn postprocessed_uris(&self) -> Result<Cow<'_, [Url]>, Error> {
         if self.mesh_mode() {
-            if self.0.uris.len() != 1 {
+            if self.0.cached.uris.len() != 1 {
                 return Err(Error::internal_safe("mesh mode expects exactly one URI")
-                    .with_safe_param("uris", &self.0.uris));
+                    .with_safe_param("uris", &self.0.cached.uris));
             }
 
-            let uri = self.0.uris[0]
+            let uri = self.0.cached.uris[0]
                 .as_str()
                 .strip_prefix(MESH_PREFIX)
                 .unwrap()
@@ -517,7 +539,7 @@ impl<T> Builder<Complete<T>> {
 
             Ok(Cow::Owned(vec![uri]))
         } else {
-            Ok(Cow::Borrowed(&self.0.uris))
+            Ok(Cow::Borrowed(&self.0.cached.uris))
         }
     }
 }
@@ -527,30 +549,25 @@ where
     T: BuildRawClient,
 {
     /// Creates a new `Client`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `service` or `user_agent` is not set.
     pub fn build(&self) -> Result<Client<T::RawClient>, Error> {
         let state = ClientState::new(self)?;
-        Ok(Client::new(Arc::new(ArcSwap::new(Arc::new(state))), None))
+        Ok(Client::new(
+            Arc::new(ArcSwap::new(Arc::new(Cached::uncached(state)))),
+            None,
+        ))
     }
 
     /// Creates a new `blocking::Client`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `service` or `user_agent` is not set.
     pub fn build_blocking(&self) -> Result<blocking::Client<T::RawClient>, Error> {
         self.build().map(|client| blocking::Client {
             client,
-            handle: self.0.blocking_handle.clone(),
+            handle: self.0.uncached.blocking_handle.clone(),
         })
     }
 }
 
 /// Specifies the beahavior of client-side sympathetic rate limiting.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ClientQos {
     /// Enable client side rate limiting.
@@ -568,7 +585,7 @@ pub enum ClientQos {
 /// Specifies the behavior of a client in response to a `QoS` error from a server.
 ///
 /// QoS errors have status codes 429 or 503.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ServerQos {
     /// The client will automatically retry the request when possible in response to a QoS error.
@@ -586,7 +603,7 @@ pub enum ServerQos {
 /// Specifies the behavior of the client in response to a service error from a server.
 ///
 /// Service errors are encoded as responses with a 4xx or 5xx response code and a body containing a `SerializableError`.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ServiceError {
     /// The service error will be propagated as a new internal service error.
@@ -605,7 +622,7 @@ pub enum ServiceError {
 }
 
 /// Specifies the manner in which the client decides if a request is idempotent or not.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Idempotency {
     /// All requests are assumed to be idempotent.
@@ -622,7 +639,7 @@ pub enum Idempotency {
 }
 
 /// Specifies the strategy used to select a node of a service to use for a request attempt.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NodeSelectionStrategy {
     /// Pin to a single host as long as it continues to successfully respond to requests.

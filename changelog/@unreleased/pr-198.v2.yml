@@ -1,0 +1,5 @@
+type: feature
+feature:
+  description: Client state is now cached and shared between clients.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/198
