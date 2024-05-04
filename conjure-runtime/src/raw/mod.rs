@@ -31,6 +31,10 @@
 //! configuration, and proxy configuration. The default raw client respects these settings, but other implementations
 //! will need to handle them on their own.
 //!
+//! If a request's extensions contains [`ResolvedAddr`], the raw client should connect to the specified IP address.
+//! The request should be handled as normal otherwise (e.g. the `Host` header and TLS certificate validation should
+//! use the hostname in the request's URI).
+//!
 //! [`conjure_runtime::Client`]: crate::Client
 //! [`AsyncBody`]: conjure_http::client::AsyncBody
 use crate::builder;
@@ -39,6 +43,7 @@ pub use crate::raw::default::*;
 use crate::Builder;
 use conjure_error::Error;
 use std::future::Future;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 mod body;
@@ -83,4 +88,22 @@ pub trait BuildRawClient {
     ) -> Result<Self::RawClient, Error>
     where
         Self: Sized;
+}
+
+/// A pre-resolved IP address.
+#[derive(Debug, Clone)]
+pub struct ResolvedAddr {
+    ip: IpAddr,
+}
+
+impl ResolvedAddr {
+    /// Creates a new `ResolvedAddr`.
+    pub fn new(ip: IpAddr) -> Self {
+        ResolvedAddr { ip }
+    }
+
+    /// Returns the resolved IP address.
+    pub fn ip(&self) -> IpAddr {
+        self.ip
+    }
 }
