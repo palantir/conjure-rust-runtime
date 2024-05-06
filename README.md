@@ -1,5 +1,5 @@
 <p align="right">
-<a href="https://autorelease.general.dmz.palantir.tech/palantir/conjure-rust-runtime"><img src="https://img.shields.io/badge/Perform%20an-Autorelease-success.svg" alt="Autorelease"></a>
+<a href="https://autorelease3.general.dmz.palantir.tech/repos/palantir/conjure-rust-runtime"><img src="https://img.shields.io/badge/Perform%20an-Autorelease-success.svg" alt="Autorelease"></a>
 </p>
 
 # Conjure Rust Runtime
