@@ -17,6 +17,7 @@ use conjure_error::Error;
 use conjure_http::client::{AsyncRequestBody, AsyncWriteBody};
 use futures::channel::{mpsc, oneshot};
 use futures::{pin_mut, Stream};
+use http_body::SizeHint;
 use hyper::HeaderMap;
 use pin_project::pin_project;
 use std::io::Cursor;
@@ -145,6 +146,14 @@ impl http_body::Body for RawBody {
 
     fn is_end_stream(&self) -> bool {
         matches!(self.inner, RawBodyInner::Empty)
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        match &self.inner {
+            RawBodyInner::Empty => SizeHint::with_exact(0),
+            RawBodyInner::Single(buf) => SizeHint::with_exact(buf.len() as u64),
+            RawBodyInner::Stream { .. } => SizeHint::new(),
+        }
     }
 }
 
