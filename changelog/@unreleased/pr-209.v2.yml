@@ -1,0 +1,5 @@
+type: fix
+fix:
+  description: Fixed-size request bodies now set a `Content-Length`.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/209
