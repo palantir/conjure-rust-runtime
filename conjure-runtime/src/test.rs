@@ -25,6 +25,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures::channel::mpsc;
 use futures::{join, pin_mut, SinkExt};
+use http::header::{CONTENT_LENGTH, TRANSFER_ENCODING};
 use http::{request, Method};
 use http_body::Frame;
 use http_body_util::combinators::BoxBody;
@@ -745,6 +746,60 @@ security:
                 .build()
                 .unwrap()
                 .send(req().body(AsyncRequestBody::Empty).unwrap())
+                .await
+                .unwrap();
+        },
+    )
+    .await
+}
+
+#[tokio::test]
+async fn empty_body_has_no_transfer_encoding() {
+    test(
+        STOCK_CONFIG,
+        1,
+        |req| async move {
+            assert_eq!(req.headers().get(CONTENT_LENGTH), None);
+            assert_eq!(req.headers().get(TRANSFER_ENCODING), None);
+            Ok(Response::new(hyper::Body::empty()))
+        },
+        |builder| async move {
+            builder
+                .build()
+                .unwrap()
+                .send(
+                    req()
+                        .method(Method::POST)
+                        .body(AsyncRequestBody::Empty)
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        },
+    )
+    .await
+}
+
+#[tokio::test]
+async fn fixed_body_has_content_length() {
+    test(
+        STOCK_CONFIG,
+        1,
+        |req| async move {
+            assert_eq!(req.headers().get(CONTENT_LENGTH).unwrap(), "4");
+            assert_eq!(req.headers().get(TRANSFER_ENCODING), None);
+            Ok(Response::new(hyper::Body::empty()))
+        },
+        |builder| async move {
+            builder
+                .build()
+                .unwrap()
+                .send(
+                    req()
+                        .method(Method::POST)
+                        .body(AsyncRequestBody::Fixed(Bytes::from_static(b"1234")))
+                        .unwrap(),
+                )
                 .await
                 .unwrap();
         },
