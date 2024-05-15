@@ -761,7 +761,7 @@ async fn empty_body_has_no_transfer_encoding() {
         |req| async move {
             assert_eq!(req.headers().get(CONTENT_LENGTH), None);
             assert_eq!(req.headers().get(TRANSFER_ENCODING), None);
-            Ok(Response::new(hyper::Body::empty()))
+            Ok(Response::new(http_body_util::Empty::new().boxed()))
         },
         |builder| async move {
             builder
@@ -788,7 +788,7 @@ async fn fixed_body_has_content_length() {
         |req| async move {
             assert_eq!(req.headers().get(CONTENT_LENGTH).unwrap(), "4");
             assert_eq!(req.headers().get(TRANSFER_ENCODING), None);
-            Ok(Response::new(hyper::Body::empty()))
+            Ok(Response::new(http_body_util::Empty::new().boxed()))
         },
         |builder| async move {
             builder
