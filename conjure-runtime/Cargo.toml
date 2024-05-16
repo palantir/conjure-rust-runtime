@@ -57,7 +57,7 @@ tower-layer = "0.3"
 tower-service = "0.3"
 url = "2.0"
 webpki-roots = "0.26"
-witchcraft-log = "3"
+witchcraft-log = "4.0.0-rc1"
 witchcraft-metrics = "1"
 zipkin = "0.4"
 

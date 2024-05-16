@@ -15,6 +15,3 @@ debug = 1
 
 [profile.bench]
 debug = 1
-
-[patch.crates-io]
-witchcraft-log = { git = "https://github.com/palantir/witchcraft-rust-logging", branch = "conjure-4-rc" }
