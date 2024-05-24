@@ -246,11 +246,7 @@ where
     }
 
     fn is_end_stream(&self) -> bool {
-        if self.done {
-            true
-        } else {
-            self.body.is_end_stream()
-        }
+        self.done || self.body.is_end_stream()
     }
 
     fn size_hint(&self) -> SizeHint {
