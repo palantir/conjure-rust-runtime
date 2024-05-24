@@ -16,7 +16,7 @@ use crate::raw::{DefaultRawClient, RawBody, Service};
 use crate::{builder, Builder};
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{self, AsyncClient, AsyncRequestBody, RequestBody};
+use conjure_http::client::{self, AsyncClient, AsyncRequestBody, BoxAsyncWriteBody, RequestBody};
 use futures::channel::oneshot;
 use futures::executor;
 use http::{Request, Response};
@@ -110,14 +110,11 @@ where
             let client = self.client.clone();
             async move {
                 let (parts, body) = req.into_parts();
-                let mut body_writer;
                 let body = match body {
                     ShimBody::Empty => AsyncRequestBody::Empty,
                     ShimBody::Fixed(bytes) => AsyncRequestBody::Fixed(bytes),
                     ShimBody::Streaming(writer) => {
-                        body_writer = writer;
-                        let writer = Pin::new(&mut body_writer);
-                        AsyncRequestBody::Streaming(writer)
+                        AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(writer))
                     }
                 };
                 let req = Request::from_parts(parts, body);

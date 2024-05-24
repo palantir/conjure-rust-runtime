@@ -19,9 +19,8 @@ use crate::service::map_error::RawClientError;
 use crate::service::Layer;
 use crate::util::spans::{self, HttpSpanFuture};
 use crate::{builder, BodyWriter, Builder, Idempotency};
-use async_trait::async_trait;
 use conjure_error::{Error, ErrorKind};
-use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, Endpoint};
+use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody, Endpoint};
 use futures::future;
 use http::request::Parts;
 use http::{Request, Response, StatusCode};
@@ -139,7 +138,7 @@ where
                 AsyncRequestBody::Fixed(bytes) => AsyncRequestBody::Fixed(bytes.clone()),
                 AsyncRequestBody::Streaming(writer) => {
                     let body =
-                        Pin::new(tracked.insert(ResetTrackingBodyWriter::new(writer.as_mut())));
+                        BoxAsyncWriteBody::new(tracked.insert(ResetTracker::new(writer)).writer());
                     AsyncRequestBody::Streaming(body)
                 }
             };
@@ -270,7 +269,7 @@ where
 
     async fn prepare_for_retry(
         &mut self,
-        body: Option<&mut ResetTrackingBodyWriter<'_>>,
+        body: Option<&mut ResetTracker<'_, '_>>,
         error: Error,
         retry_after: Option<Duration>,
     ) -> Result<(), Error> {
@@ -282,7 +281,7 @@ where
 
         if let Some(body) = body {
             let needs_reset = body.needs_reset;
-            if needs_reset && !body.body_writer.as_mut().reset().await {
+            if needs_reset && !Pin::new(&mut *body.body_writer).reset().await {
                 info!("unable to reset body when retrying request");
                 return Err(error);
             }
@@ -314,33 +313,38 @@ where
     }
 }
 
-struct ResetTrackingBodyWriter<'a> {
+struct ResetTracker<'a, 'b> {
     needs_reset: bool,
-    body_writer: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>,
+    body_writer: &'a mut BoxAsyncWriteBody<'b, BodyWriter>,
 }
 
-impl<'a> ResetTrackingBodyWriter<'a> {
-    fn new(
-        body_writer: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>,
-    ) -> ResetTrackingBodyWriter<'a> {
-        ResetTrackingBodyWriter {
+impl<'a, 'b> ResetTracker<'a, 'b> {
+    fn new(body_writer: &'a mut BoxAsyncWriteBody<'b, BodyWriter>) -> Self {
+        ResetTracker {
             needs_reset: false,
             body_writer,
         }
     }
+
+    fn writer<'c>(&'c mut self) -> ResetTrackingBodyWriter<'c, 'a, 'b> {
+        ResetTrackingBodyWriter { tracker: self }
+    }
 }
 
-#[async_trait]
-impl AsyncWriteBody<BodyWriter> for ResetTrackingBodyWriter<'_> {
+struct ResetTrackingBodyWriter<'a, 'b, 'c> {
+    tracker: &'a mut ResetTracker<'b, 'c>,
+}
+
+impl AsyncWriteBody<BodyWriter> for ResetTrackingBodyWriter<'_, '_, '_> {
     async fn write_body(mut self: Pin<&mut Self>, w: Pin<&mut BodyWriter>) -> Result<(), Error> {
-        self.needs_reset = true;
-        self.body_writer.as_mut().write_body(w).await
+        self.tracker.needs_reset = true;
+        Pin::new(&mut *self.tracker.body_writer).write_body(w).await
     }
 
     async fn reset(mut self: Pin<&mut Self>) -> bool {
-        let ok = self.body_writer.as_mut().reset().await;
+        let ok = Pin::new(&mut *self.tracker.body_writer).reset().await;
         if ok {
-            self.needs_reset = false;
+            self.tracker.needs_reset = false;
         }
         ok
     }
@@ -360,11 +364,10 @@ mod test {
     use crate::raw::RawBodyInner;
     use crate::service;
     use crate::BodyWriter;
-    use async_trait::async_trait;
     use bytes::Bytes;
-    use futures::pin_mut;
     use http::Method;
-    use http_body::Body as _;
+    use http_body_util::BodyExt;
+    use std::pin::pin;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::AsyncWriteExt;
 
@@ -399,7 +402,7 @@ mod test {
         let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
                 match &req.body().inner {
-                    RawBodyInner::Single(chunk) => assert_eq!(chunk, body),
+                    RawBodyInner::Single(chunk) => assert_eq!(chunk.data_ref().unwrap(), body),
                     _ => panic!("expected single chunk body"),
                 }
 
@@ -416,7 +419,6 @@ mod test {
 
     struct StreamedBody;
 
-    #[async_trait]
     impl AsyncWriteBody<BodyWriter> for StreamedBody {
         async fn write_body(
             self: Pin<&mut Self>,
@@ -441,25 +443,24 @@ mod test {
                     RawBodyInner::Stream { .. } => {}
                     _ => panic!("expected streaming body"),
                 }
-                let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                assert_eq!(body, "hello world");
+                let body = req.into_body().collect().await.unwrap();
+                assert_eq!(body.to_bytes(), "hello world");
 
                 Ok(Response::new(()))
             },
         ));
 
-        let body = StreamedBody;
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                StreamedBody,
+            )))
             .unwrap();
         service.call(request).await.unwrap();
     }
 
     struct StreamedInfiniteBody;
 
-    #[async_trait]
     impl AsyncWriteBody<BodyWriter> for StreamedInfiniteBody {
         async fn write_body(
             self: Pin<&mut Self>,
@@ -480,19 +481,18 @@ mod test {
     async fn streamed_body_hangup() {
         let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
-                let body = req.into_body();
-                pin_mut!(body);
-                body.data().await.unwrap().unwrap();
+                let mut body = pin!(req.into_body());
+                body.frame().await.unwrap().unwrap();
 
                 Err::<Response<()>, _>(Error::internal_safe("blammo"))
             },
         ));
 
-        let body = StreamedInfiniteBody;
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                StreamedInfiniteBody,
+            )))
             .unwrap();
         let err = service.call(request).await.err().unwrap();
 
@@ -501,7 +501,6 @@ mod test {
 
     struct StreamedErrorBody;
 
-    #[async_trait]
     impl AsyncWriteBody<BodyWriter> for StreamedErrorBody {
         async fn write_body(
             self: Pin<&mut Self>,
@@ -521,7 +520,8 @@ mod test {
     async fn streamed_body_error() {
         let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
             |req: Request<RawBody>| async move {
-                hyper::body::to_bytes(req.into_body())
+                req.into_body()
+                    .collect()
                     .await
                     .map_err(Error::internal_safe)?;
 
@@ -529,11 +529,11 @@ mod test {
             },
         ));
 
-        let body = StreamedErrorBody;
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                StreamedErrorBody,
+            )))
             .unwrap();
         let err = service.call(request).await.err().unwrap();
 
@@ -554,7 +554,6 @@ mod test {
         }
     }
 
-    #[async_trait]
     impl AsyncWriteBody<BodyWriter> for RetryingBody {
         async fn write_body(
             mut self: Pin<&mut Self>,
@@ -592,8 +591,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 => Err(Error::internal_safe(RawClientError("blammo".into()))),
@@ -604,11 +603,11 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(1);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(1),
+            )))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -625,8 +624,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 => Err(Error::internal_safe(UnavailableError(()))),
@@ -637,11 +636,11 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(1);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(1),
+            )))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -658,8 +657,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 => Err(Error::internal_safe(ThrottledError { retry_after: None })),
@@ -670,11 +669,11 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(1);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(1),
+            )))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -691,8 +690,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 => Err(Error::throttle_safe(UnavailableError(()))),
@@ -703,11 +702,11 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(0);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(0),
+            )))
             .unwrap();
         service.call(request).await.err().unwrap();
     }
@@ -724,8 +723,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 => Err(Error::throttle_safe(ThrottledError { retry_after: None })),
@@ -736,11 +735,11 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(0);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(0),
+            )))
             .unwrap();
         service.call(request).await.err().unwrap();
     }
@@ -819,8 +818,8 @@ mod test {
                     match attempt {
                         0 => Err(Error::internal_safe(UnavailableError(()))),
                         1 => {
-                            let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                            assert_eq!(body, "hello world");
+                            let body = req.into_body().collect().await.unwrap();
+                            assert_eq!(body.to_bytes(), "hello world");
 
                             Ok(Response::new(()))
                         }
@@ -830,11 +829,11 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(0);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(0),
+            )))
             .unwrap();
         service.call(request).await.unwrap();
     }
@@ -851,8 +850,8 @@ mod test {
             move |req: Request<RawBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    assert_eq!(body, "hello world");
+                    let body = req.into_body().collect().await.unwrap();
+                    assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
                         0 | 1 => Err::<Response<()>, _>(Error::internal_safe(UnavailableError(()))),
@@ -862,11 +861,11 @@ mod test {
             }
         }));
 
-        let body = RetryingBody::new(1);
-        pin_mut!(body);
         let request = Request::builder()
             .extension(endpoint())
-            .body(AsyncRequestBody::Streaming(body))
+            .body(AsyncRequestBody::Streaming(BoxAsyncWriteBody::new(
+                RetryingBody::new(1),
+            )))
             .unwrap();
         service.call(request).await.err().unwrap();
     }

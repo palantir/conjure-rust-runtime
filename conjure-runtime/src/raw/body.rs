@@ -14,14 +14,10 @@
 use crate::BodyWriter;
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{AsyncRequestBody, AsyncWriteBody};
+use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody};
 use futures::channel::{mpsc, oneshot};
 use futures::{pin_mut, Stream};
-use http_body::SizeHint;
-use hyper::HeaderMap;
-use pin_project::pin_project;
-use std::io::Cursor;
-use std::marker::PhantomPinned;
+use http_body::{Frame, SizeHint};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{error, fmt, mem};
@@ -40,13 +36,13 @@ impl fmt::Display for BodyError {
 impl error::Error for BodyError {}
 
 pub(crate) enum BodyPart {
-    Chunk(Bytes),
+    Frame(Frame<Bytes>),
     Done,
 }
 
 pub(crate) enum RawBodyInner {
     Empty,
-    Single(Bytes),
+    Single(Frame<Bytes>),
     Stream {
         receiver: mpsc::Receiver<BodyPart>,
         polled: Option<oneshot::Sender<()>>,
@@ -54,11 +50,8 @@ pub(crate) enum RawBodyInner {
 }
 
 /// The request body type passed to the raw HTTP client.
-#[pin_project]
 pub struct RawBody {
     pub(crate) inner: RawBodyInner,
-    #[pin]
-    _p: PhantomPinned,
 }
 
 impl RawBody {
@@ -67,14 +60,12 @@ impl RawBody {
             AsyncRequestBody::Empty => (
                 RawBody {
                     inner: RawBodyInner::Empty,
-                    _p: PhantomPinned,
                 },
                 Writer::Nop,
             ),
             AsyncRequestBody::Fixed(body) => (
                 RawBody {
-                    inner: RawBodyInner::Single(body),
-                    _p: PhantomPinned,
+                    inner: RawBodyInner::Single(Frame::data(body)),
                 },
                 Writer::Nop,
             ),
@@ -87,7 +78,6 @@ impl RawBody {
                             receiver: body_receiver,
                             polled: Some(polled_sender),
                         },
-                        _p: PhantomPinned,
                     },
                     Writer::Streaming {
                         polled: polled_receiver,
@@ -101,18 +91,16 @@ impl RawBody {
 }
 
 impl http_body::Body for RawBody {
-    type Data = Cursor<Bytes>;
+    type Data = Bytes;
     type Error = BodyError;
 
-    fn poll_data(
-        self: Pin<&mut Self>,
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-        let this = self.project();
-
-        match mem::replace(this.inner, RawBodyInner::Empty) {
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        match mem::replace(&mut self.inner, RawBodyInner::Empty) {
             RawBodyInner::Empty => Poll::Ready(None),
-            RawBodyInner::Single(chunk) => Poll::Ready(Some(Ok(Cursor::new(chunk)))),
+            RawBodyInner::Single(frame) => Poll::Ready(Some(Ok(frame))),
             RawBodyInner::Stream {
                 mut receiver,
                 mut polled,
@@ -122,26 +110,19 @@ impl http_body::Body for RawBody {
                 }
 
                 match Pin::new(&mut receiver).poll_next(cx) {
-                    Poll::Ready(Some(BodyPart::Chunk(bytes))) => {
-                        *this.inner = RawBodyInner::Stream { receiver, polled };
-                        Poll::Ready(Some(Ok(Cursor::new(bytes))))
+                    Poll::Ready(Some(BodyPart::Frame(frame))) => {
+                        self.inner = RawBodyInner::Stream { receiver, polled };
+                        Poll::Ready(Some(Ok(frame)))
                     }
                     Poll::Ready(Some(BodyPart::Done)) => Poll::Ready(None),
                     Poll::Ready(None) => Poll::Ready(Some(Err(BodyError(())))),
                     Poll::Pending => {
-                        *this.inner = RawBodyInner::Stream { receiver, polled };
+                        self.inner = RawBodyInner::Stream { receiver, polled };
                         Poll::Pending
                     }
                 }
             }
         }
-    }
-
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        _: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
-        Poll::Ready(Ok(None))
     }
 
     fn is_end_stream(&self) -> bool {
@@ -151,7 +132,13 @@ impl http_body::Body for RawBody {
     fn size_hint(&self) -> SizeHint {
         match &self.inner {
             RawBodyInner::Empty => SizeHint::with_exact(0),
-            RawBodyInner::Single(buf) => SizeHint::with_exact(buf.len() as u64),
+            RawBodyInner::Single(frame) => {
+                let len = match frame.data_ref() {
+                    Some(buf) => buf.len(),
+                    None => 0,
+                };
+                SizeHint::with_exact(len as u64)
+            }
             RawBodyInner::Stream { .. } => SizeHint::new(),
         }
     }
@@ -161,7 +148,7 @@ pub(crate) enum Writer<'a> {
     Nop,
     Streaming {
         polled: oneshot::Receiver<()>,
-        body: Pin<&'a mut (dyn AsyncWriteBody<BodyWriter> + Send)>,
+        body: BoxAsyncWriteBody<'a, BodyWriter>,
         sender: mpsc::Sender<BodyPart>,
     },
 }
@@ -172,7 +159,7 @@ impl<'a> Writer<'a> {
             Writer::Nop => Ok(()),
             Writer::Streaming {
                 polled,
-                body,
+                mut body,
                 sender,
             } => {
                 // wait for hyper to actually ask for the body so we don't start reading it if the request fails early
@@ -183,7 +170,7 @@ impl<'a> Writer<'a> {
 
                 let writer = BodyWriter::new(sender);
                 pin_mut!(writer);
-                body.write_body(writer.as_mut()).await?;
+                Pin::new(&mut body).write_body(writer.as_mut()).await?;
                 writer.finish().await.map_err(Error::internal_safe)?;
 
                 Ok(())

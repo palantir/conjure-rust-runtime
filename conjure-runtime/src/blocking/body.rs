@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::raw::DefaultRawBody;
-use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use conjure_error::Error;
 use conjure_http::client::{AsyncWriteBody, WriteBody};
@@ -26,7 +25,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::runtime::Handle;
 
 pub(crate) fn shim(
-    body_writer: &mut dyn WriteBody<BodyWriter>,
+    body_writer: Box<dyn WriteBody<BodyWriter> + '_>,
 ) -> (BodyWriterShim, BodyStreamer<'_>) {
     let (sender, receiver) = mpsc::channel(1);
     (
@@ -47,7 +46,6 @@ pub(crate) struct BodyWriterShim {
     sender: mpsc::Sender<ShimRequest>,
 }
 
-#[async_trait]
 impl AsyncWriteBody<crate::BodyWriter> for BodyWriterShim {
     async fn write_body(
         mut self: Pin<&mut Self>,
@@ -73,10 +71,7 @@ impl AsyncWriteBody<crate::BodyWriter> for BodyWriterShim {
         }
     }
 
-    async fn reset(mut self: Pin<&mut Self>) -> bool
-    where
-        crate::BodyWriter: 'async_trait,
-    {
+    async fn reset(mut self: Pin<&mut Self>) -> bool {
         let (sender, receiver) = oneshot::channel();
         if self.sender.send(ShimRequest::Reset(sender)).await.is_err() {
             return false;
@@ -87,7 +82,7 @@ impl AsyncWriteBody<crate::BodyWriter> for BodyWriterShim {
 }
 
 pub(crate) struct BodyStreamer<'a> {
-    body_writer: &'a mut dyn WriteBody<BodyWriter>,
+    body_writer: Box<dyn WriteBody<BodyWriter> + 'a>,
     receiver: mpsc::Receiver<ShimRequest>,
 }
 

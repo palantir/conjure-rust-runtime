@@ -27,6 +27,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - checkout
+      - run: apt-get update && apt-get install -y cmake
       - run: rustup component add rustfmt clippy
       - *RESTORE_REGISTRY
       - run: cargo generate-lockfile

@@ -29,7 +29,6 @@ use crate::service::{Identity, Layer, ServiceBuilder, Stack};
 use crate::weak_cache::Cached;
 use crate::{builder, BodyWriter, Builder, ResponseBody};
 use arc_swap::ArcSwap;
-use async_trait::async_trait;
 use bytes::Bytes;
 use conjure_error::Error;
 use conjure_http::client::{AsyncClient, AsyncRequestBody, AsyncService};
@@ -143,7 +142,6 @@ impl<T> AsyncService<Client<T>> for Client<T> {
     }
 }
 
-#[async_trait]
 impl<T, B> AsyncClient for Client<T>
 where
     T: Service<http::Request<RawBody>, Response = http::Response<B>> + 'static + Sync + Send,

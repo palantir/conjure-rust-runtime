@@ -20,8 +20,8 @@ use conjure_error::Error;
 use conjure_serde::json;
 use http::header::RETRY_AFTER;
 use http::{Request, Response, StatusCode};
-use http_body::{Body, Limited};
-use hyper::body;
+use http_body::Body;
+use http_body_util::{BodyExt, Limited};
 use std::error;
 use std::time::Duration;
 use witchcraft_log::info;
@@ -119,8 +119,8 @@ where
             _ => {
                 let (parts, body) = response.into_parts();
 
-                let body = match body::to_bytes(Limited::new(body, 10 * 1024)).await {
-                    Ok(body) => body,
+                let body = match Limited::new(body, 10 * 1024).collect().await {
+                    Ok(body) => body.to_bytes(),
                     Err(e) => {
                         info!("error reading response body", error: Error::internal(e));
                         Bytes::new()
@@ -160,6 +160,7 @@ mod test {
     use conjure_error::{ErrorCode, ErrorKind, SerializableError};
     use conjure_object::Uuid;
     use http::header::CONTENT_TYPE;
+    use http_body_util::{Empty, Full};
 
     #[tokio::test]
     async fn success_is_ok() {
@@ -167,7 +168,7 @@ mod test {
             HttpErrorLayer::new(&Builder::for_test()).layer(service::service_fn(|_| async move {
                 Ok(Response::builder()
                     .status(StatusCode::OK)
-                    .body(hyper::Body::empty())
+                    .body(Empty::<Bytes>::new())
                     .unwrap())
             }));
 
@@ -183,7 +184,7 @@ mod test {
                 Ok(Response::builder()
                     .status(StatusCode::TOO_MANY_REQUESTS)
                     .header(RETRY_AFTER, "100")
-                    .body(hyper::Body::empty())
+                    .body(Empty::<Bytes>::new())
                     .unwrap())
             }));
 
@@ -206,7 +207,7 @@ mod test {
             Ok(Response::builder()
                 .status(StatusCode::TOO_MANY_REQUESTS)
                 .header(RETRY_AFTER, "100")
-                .body(hyper::Body::empty())
+                .body(Empty::<Bytes>::new())
                 .unwrap())
         }));
 
@@ -225,7 +226,7 @@ mod test {
             HttpErrorLayer::new(&Builder::for_test()).layer(service::service_fn(|_| async move {
                 Ok(Response::builder()
                     .status(StatusCode::SERVICE_UNAVAILABLE)
-                    .body(hyper::Body::empty())
+                    .body(Empty::<Bytes>::new())
                     .unwrap())
             }));
 
@@ -246,7 +247,7 @@ mod test {
         .layer(service::service_fn(|_| async move {
             Ok(Response::builder()
                 .status(StatusCode::SERVICE_UNAVAILABLE)
-                .body(hyper::Body::empty())
+                .body(Empty::<Bytes>::new())
                 .unwrap())
         }));
 
@@ -274,7 +275,7 @@ mod test {
                     Ok(Response::builder()
                         .status(StatusCode::CONFLICT)
                         .header(CONTENT_TYPE, "application/json")
-                        .body(hyper::Body::from(json))
+                        .body(Full::new(Bytes::from(json)))
                         .unwrap())
                 }
             })
@@ -315,7 +316,7 @@ mod test {
                     Ok(Response::builder()
                         .status(StatusCode::CONFLICT)
                         .header(CONTENT_TYPE, "application/json")
-                        .body(hyper::Body::from(json))
+                        .body(Full::new(Bytes::from(json)))
                         .unwrap())
                 }
             })
