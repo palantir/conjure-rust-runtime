@@ -12,11 +12,11 @@ readme = "../README.md"
 arc-swap = "1.0"
 base64 = "0.22"
 bytes = "1.0"
-conjure-error = "4.0.0-rc3"
-conjure-http = "4.0.0-rc3"
-conjure-object = "4.0.0-rc3"
+conjure-error = "4"
+conjure-http = "4"
+conjure-object = "4"
 conjure-runtime-config = { version = "5.0.0-rc1", path = "../conjure-runtime-config" }
-conjure-serde = "4.0.0-rc3"
+conjure-serde = "4"
 flate2 = "1.0"
 futures = "0.3"
 http-body = "1"
@@ -57,12 +57,12 @@ tower-layer = "0.3"
 tower-service = "0.3"
 url = "2.0"
 webpki-roots = "0.26"
-witchcraft-log = "4.0.0-rc1"
+witchcraft-log = "4"
 witchcraft-metrics = "1"
 zipkin = "0.4"
 
 [dev-dependencies]
-conjure-codegen = { version = "4.0.0-rc3", features = ["example-types"] }
+conjure-codegen = { version = "4", features = ["example-types"] }
 futures-test = "0.3"
 hyper = { version = "1", features = ["server"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [
