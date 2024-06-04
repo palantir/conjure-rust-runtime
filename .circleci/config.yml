@@ -38,3 +38,10 @@ jobs:
       - run: cargo clippy --all --all-targets
       - run: cargo test --all
       - *SAVE_DEPS
+
+workflows:
+  version: 2
+  main:
+    jobs:
+      - circle-all:
+          filters: { tags: { only: /.*/ } }
