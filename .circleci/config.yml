@@ -20,7 +20,7 @@ save_deps: &SAVE_DEPS
 
 version: 2
 jobs:
-  build:
+  circle-all:
     docker:
       - image: rust:1.75.0
     environment:
