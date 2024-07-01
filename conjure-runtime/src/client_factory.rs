@@ -25,10 +25,12 @@ use arc_swap::ArcSwap;
 use conjure_error::Error;
 use conjure_http::client::{AsyncService, Service};
 use conjure_runtime_config::service_config;
-use refreshable::Refreshable;
+use refreshable::{RefreshHandle, Refreshable};
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Handle;
+use witchcraft_log::warn;
 use witchcraft_metrics::MetricRegistry;
 
 const STATE_CACHE_CAPACITY: usize = 10_000;
@@ -301,16 +303,27 @@ impl ClientFactory {
             let service = service.to_string();
             move |c| c.merged_service(&service).unwrap_or_default()
         });
-
         let state_builder = self.state_builder(service);
+        Self::raw_client(state_builder, service_config, None)
+    }
 
-        let state = state_builder.build(&service_config.get(), None)?;
+    fn raw_client<T>(
+        state_builder: T,
+        service_config: Refreshable<ServiceConfig, Error>,
+        override_host_index: Option<usize>,
+    ) -> Result<Client, Error>
+    where
+        T: Borrow<StateBuilder> + 'static + Sync + Send,
+    {
+        let state = state_builder
+            .borrow()
+            .build(&service_config.get(), override_host_index)?;
         let state = Arc::new(ArcSwap::new(state));
 
         let subscription = service_config.try_subscribe({
             let state = state.clone();
             move |config| {
-                let new_state = state_builder.build(config, None)?;
+                let new_state = state_builder.borrow().build(config, override_host_index)?;
                 state.store(new_state);
                 Ok(())
             }
@@ -392,7 +405,7 @@ impl ClientFactory {
     where
         T: 'static + Sync + Send,
     {
-        let state_builder = self.state_builder(service);
+        let state_builder = Arc::new(self.state_builder(service));
 
         self.0
             .config
@@ -401,8 +414,11 @@ impl ClientFactory {
                 move |c| c.merged_service(&service).unwrap_or_default()
             })
             .try_map({
+                let mut client_handles = HashMap::<Host, ClientHandle>::new();
                 move |c| {
+                    let mut new_client_handles = HashMap::new();
                     let mut clients = HashMap::new();
+                    let mut errors = vec![];
 
                     for (i, uri) in c.uris().iter().enumerate() {
                         let host = Host { uri: uri.clone() };
@@ -410,17 +426,52 @@ impl ClientFactory {
                             .uris([uri.clone()])
                             .build();
 
-                        let state = state_builder.build(&host_config, Some(i))?;
-                        let state = Arc::new(ArcSwap::new(state));
-                        let client = make_client(Client::new(state, None));
+                        let client_handle = match client_handles.remove(&host) {
+                            Some(mut client_handle) => {
+                                if let Err(es) = client_handle.handle.refresh(host_config) {
+                                    errors.extend(es);
+                                }
+                                client_handle
+                            }
+                            None => {
+                                let (host_config, handle) = Refreshable::new(host_config);
+                                let client = match Self::raw_client(
+                                    state_builder.clone(),
+                                    host_config,
+                                    Some(i),
+                                ) {
+                                    Ok(state) => state,
+                                    Err(e) => {
+                                        errors.push(e);
+                                        continue;
+                                    }
+                                };
+                                ClientHandle { client, handle }
+                            }
+                        };
 
-                        clients.insert(host, client);
+                        clients.insert(host.clone(), make_client(client_handle.client.clone()));
+                        new_client_handles.insert(host, client_handle);
                     }
 
-                    Ok(PerHostClients { clients })
+                    client_handles = new_client_handles;
+                    match errors.pop() {
+                        Some(e) => {
+                            for e2 in errors {
+                                warn!("error reloading per-host clients", error: e2);
+                            }
+                            Err(e)
+                        }
+                        None => Ok(PerHostClients { clients }),
+                    }
                 }
             })
     }
+}
+
+struct ClientHandle {
+    client: Client,
+    handle: RefreshHandle<ServiceConfig, Error>,
 }
 
 struct StateBuilder {
