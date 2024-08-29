@@ -1,0 +1,5 @@
+type: fix
+fix:
+  description: Explicitly configure rustls's crypto provider.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/221
