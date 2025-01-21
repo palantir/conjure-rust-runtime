@@ -27,7 +27,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use pin_project::pin_project;
-use rustls::crypto::aws_lc_rs;
+use rustls::crypto::ring;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pemfile::Item;
@@ -81,12 +81,10 @@ impl BuildRawClient for DefaultRawClientBuilder {
             let certs = load_certs_file(ca_file)?;
             roots.add_parsable_certificates(certs);
         }
-
-        let client_config =
-            ClientConfig::builder_with_provider(Arc::new(aws_lc_rs::default_provider()))
-                .with_safe_default_protocol_versions()
-                .map_err(Error::internal_safe)?
-                .with_root_certificates(roots);
+        let client_config = ClientConfig::builder_with_provider(Arc::new(ring::default_provider()))
+            .with_safe_default_protocol_versions()
+            .map_err(Error::internal_safe)?
+            .with_root_certificates(roots);
 
         let client_config = match (
             builder.get_security().cert_file(),
