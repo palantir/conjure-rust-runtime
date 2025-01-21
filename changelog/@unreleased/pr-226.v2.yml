@@ -1,5 +1,5 @@
 type: feature
 feature:
-  description: 'Add features to choose crypto backend (ring/aws-lc-rs) #226'
+  description: 'Switch crypto backend from aws-lc-rs to ring #226'
   links:
   - https://github.com/palantir/conjure-rust-runtime/pull/226
