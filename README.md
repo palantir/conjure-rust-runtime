@@ -2,10 +2,6 @@
 <a href="https://autorelease.general.dmz.palantir.tech/palantir/conjure-rust-runtime"><img src="https://img.shields.io/badge/Perform%20an-Autorelease-success.svg" alt="Autorelease"></a>
 </p>
 
-<p align="right">
-<a href="https://autorelease3.general.dmz.palantir.tech/repos/palantir/conjure-rust-runtime"><img src="https://img.shields.io/badge/Perform%20an-Autorelease-success.svg" alt="Autorelease"></a>
-</p>
-
 # Conjure Rust Runtime
 
 [![CircleCI](https://circleci.com/gh/palantir/conjure-rust-runtime.svg?style=shield)](https://circleci.com/gh/palantir/conjure-rust-runtime)
