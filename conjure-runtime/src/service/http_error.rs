@@ -119,7 +119,7 @@ where
             _ => {
                 let (parts, body) = response.into_parts();
 
-                let body = match Limited::new(body, 10 * 1024).collect().await {
+                let body = match Limited::new(body, 500 * 1024).collect().await {
                     Ok(body) => body.to_bytes(),
                     Err(e) => {
                         info!("error reading response body", error: Error::internal(e));
