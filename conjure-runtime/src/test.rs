@@ -73,9 +73,9 @@ fn cert_file() -> PathBuf {
 fn ssl_acceptor() -> SslAcceptor {
     let mut acceptor = SslAcceptor::mozilla_modern(SslMethod::tls()).unwrap();
     acceptor
-        .set_private_key_file(&key_file(), SslFiletype::PEM)
+        .set_private_key_file(key_file(), SslFiletype::PEM)
         .unwrap();
-    acceptor.set_certificate_chain_file(&cert_file()).unwrap();
+    acceptor.set_certificate_chain_file(cert_file()).unwrap();
     acceptor.build()
 }
 
@@ -165,7 +165,7 @@ fn parse_config(config: &str, port: u16) -> ServiceConfig {
 
 struct TestService<'a, F>(&'a F);
 
-impl<'a, F, G> Service<Request<Incoming>> for TestService<'a, F>
+impl<F, G> Service<Request<Incoming>> for TestService<'_, F>
 where
     F: Fn(Request<Incoming>) -> G,
     G: Future<Output = Result<Response<BoxBody<Bytes, Infallible>>, &'static str>> + 'static + Send,

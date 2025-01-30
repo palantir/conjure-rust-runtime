@@ -298,7 +298,7 @@ where
                 } else {
                     self.service
                         .rng
-                        .with(|rng| rng.gen_range(Duration::from_secs(0)..max))
+                        .with(|rng| rng.random_range(Duration::from_secs(0)..max))
                 }
             }
         };

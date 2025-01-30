@@ -19,7 +19,7 @@ use crate::{builder, Builder};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
 use http::{Request, Response};
-use rand::distributions::uniform::SampleUniform;
+use rand::distr::uniform::SampleUniform;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -45,7 +45,7 @@ impl Entropy for RandEntropy {
     where
         T: SampleUniform + PartialOrd,
     {
-        self.0.with(|rng| rng.gen_range(start..end))
+        self.0.with(|rng| rng.random_range(start..end))
     }
 
     fn shuffle<T>(&self, slice: &mut [T]) {
