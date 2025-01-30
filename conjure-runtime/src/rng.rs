@@ -35,7 +35,7 @@ impl ConjureRng {
         F: FnOnce(&mut dyn RngCore) -> R,
     {
         match self {
-            ConjureRng::Thread => f(&mut rand::thread_rng()),
+            ConjureRng::Thread => f(&mut rand::rng()),
             ConjureRng::Deterministic(rng) => f(&mut *rng.lock()),
         }
     }
