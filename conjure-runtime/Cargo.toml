@@ -21,7 +21,7 @@ flate2 = "1.0"
 futures = "0.3"
 http-body = "1"
 http-body-util = "0.1"
-http-zipkin = "0.4"
+http-zipkin = "1.0"
 http = "1"
 hyper = { version = "1", features = ["http1", "http2", "client"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [
