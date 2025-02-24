@@ -213,7 +213,7 @@ where
                     && error
                         .cause()
                         .downcast_ref::<RemoteError>()
-                        .map_or(false, |e| *e.status() == StatusCode::INTERNAL_SERVER_ERROR)
+                        .is_some_and(|e| *e.status() == StatusCode::INTERNAL_SERVER_ERROR)
                 {
                     Ok(AttemptOutcome::Retry {
                         error,

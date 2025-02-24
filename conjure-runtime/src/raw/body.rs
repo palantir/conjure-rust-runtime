@@ -153,7 +153,7 @@ pub(crate) enum Writer<'a> {
     },
 }
 
-impl<'a> Writer<'a> {
+impl Writer<'_> {
     pub async fn write(self) -> Result<(), Error> {
         match self {
             Writer::Nop => Ok(()),

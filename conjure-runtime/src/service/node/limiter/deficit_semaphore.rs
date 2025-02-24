@@ -234,11 +234,7 @@ impl Future for Acquire {
             Poll::Ready(permit)
         } else {
             // if the future jumped executors (uncommon but possible), update the waker
-            if !node
-                .waker
-                .as_ref()
-                .map_or(false, |w| w.will_wake(cx.waker()))
-            {
+            if !node.waker.as_ref().is_some_and(|w| w.will_wake(cx.waker())) {
                 node.waker = Some(cx.waker().clone());
             }
 
