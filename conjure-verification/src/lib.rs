@@ -88,6 +88,7 @@ impl Drop for VerificationServer {
 }
 
 impl VerificationServer {
+    #[allow(clippy::zombie_processes)]
     fn start() -> VerificationServer {
         let binary = Path::new(env!("VERIFICATION_SERVER"));
         let test_cases = Path::new(env!("TEST_CASES"));
