@@ -1,5 +1,5 @@
 type: fix
 fix:
-description: Avoid LengthLimitError for large error response bodies
+  description: Avoid LengthLimitError for large error response bodies
   links:
   - https://github.com/palantir/conjure-rust-runtime/pull/232
