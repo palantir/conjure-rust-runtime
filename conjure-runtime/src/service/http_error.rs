@@ -172,6 +172,7 @@ mod test {
     use conjure_object::Uuid;
     use http::header::CONTENT_TYPE;
     use http_body_util::{Empty, Full};
+    use bytes::Bytes;
 
     #[tokio::test]
     async fn success_is_ok() {
