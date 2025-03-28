@@ -168,11 +168,11 @@ where
 mod test {
     use super::*;
     use crate::service;
+    use bytes::Bytes;
     use conjure_error::{ErrorCode, ErrorKind, SerializableError};
     use conjure_object::Uuid;
     use http::header::CONTENT_TYPE;
     use http_body_util::{Empty, Full};
-    use bytes::Bytes;
 
     #[tokio::test]
     async fn success_is_ok() {
