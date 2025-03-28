@@ -18,12 +18,13 @@ use crate::{builder, Builder, ServerQos, ServiceError};
 use bytes::{BufMut, BytesMut};
 use conjure_error::Error;
 use conjure_serde::json;
-use futures::{pin_mut, StreamExt};
+use futures::StreamExt;
 use http::header::RETRY_AFTER;
 use http::{Request, Response, StatusCode};
 use http_body::Body;
 use http_body_util::BodyExt;
 use std::error;
+use std::pin::pin;
 use std::time::Duration;
 use witchcraft_log::info;
 
@@ -119,8 +120,7 @@ where
             }
             _ => {
                 let (parts, body) = response.into_parts();
-                let stream = body.into_data_stream();
-                pin_mut!(stream);
+                let mut stream = pin!(body.into_data_stream());
 
                 let mut body = BytesMut::new();
                 while let Some(chunk) = stream.next().await {
