@@ -125,8 +125,8 @@ where
                 let mut body = BytesMut::new();
                 while let Some(chunk) = stream.next().await {
                     match chunk {
-                        Ok(frame) => {
-                            body.put(frame);
+                        Ok(chunk) => {
+                            body.put(chunk);
                             if body.len() > 500 * 1024 {
                                 break;
                             }
