@@ -15,14 +15,16 @@ use crate::errors::{RemoteError, ThrottledError, UnavailableError};
 use crate::raw::Service;
 use crate::service::Layer;
 use crate::{builder, Builder, ServerQos, ServiceError};
-use bytes::Bytes;
+use bytes::{BufMut, BytesMut};
 use conjure_error::Error;
 use conjure_serde::json;
+use futures::StreamExt;
 use http::header::RETRY_AFTER;
 use http::{Request, Response, StatusCode};
 use http_body::Body;
-use http_body_util::{BodyExt, Limited};
+use http_body_util::BodyExt;
 use std::error;
+use std::pin::pin;
 use std::time::Duration;
 use witchcraft_log::info;
 
@@ -118,14 +120,23 @@ where
             }
             _ => {
                 let (parts, body) = response.into_parts();
+                let mut stream = pin!(body.into_data_stream());
 
-                let body = match Limited::new(body, 10 * 1024).collect().await {
-                    Ok(body) => body.to_bytes(),
-                    Err(e) => {
-                        info!("error reading response body", error: Error::internal(e));
-                        Bytes::new()
+                let mut body = BytesMut::new();
+                while let Some(chunk) = stream.next().await {
+                    match chunk {
+                        Ok(chunk) => {
+                            body.put(chunk);
+                            if body.len() > 500 * 1024 {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            info!("error reading response body", error: Error::internal(e));
+                            break;
+                        }
                     }
-                };
+                }
 
                 let error = RemoteError {
                     status: parts.status,
@@ -157,6 +168,7 @@ where
 mod test {
     use super::*;
     use crate::service;
+    use bytes::Bytes;
     use conjure_error::{ErrorCode, ErrorKind, SerializableError};
     use conjure_object::Uuid;
     use http::header::CONTENT_TYPE;
