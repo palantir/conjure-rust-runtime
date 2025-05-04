@@ -25,15 +25,13 @@ use http_body::{Body, Frame, SizeHint};
 use hyper::body::Incoming;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::{self, Client};
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use pin_project::pin_project;
 use rustls::crypto::ring;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pemfile::Item;
-use std::error;
-use std::fmt;
 use std::fs::File;
 use std::io::BufReader;
 use std::marker::PhantomPinned;
@@ -125,19 +123,15 @@ impl RawClient {
 
 impl Service<Request<RawRequestBody>> for RawClient {
     type Response = Response<RawResponseBody>;
-    type Error = DefaultRawError;
+    type Error = legacy::Error;
 
     async fn call(&self, req: Request<RawRequestBody>) -> Result<Self::Response, Self::Error> {
-        self.0
-            .request(req)
-            .await
-            .map(|r| {
-                r.map(|inner| RawResponseBody {
-                    inner,
-                    _p: PhantomPinned,
-                })
+        self.0.request(req).await.map(|r| {
+            r.map(|inner| RawResponseBody {
+                inner,
+                _p: PhantomPinned,
             })
-            .map_err(DefaultRawError::new)
+        })
     }
 }
 
@@ -184,16 +178,13 @@ pub struct RawResponseBody {
 
 impl Body for RawResponseBody {
     type Data = Bytes;
-    type Error = DefaultRawError;
+    type Error = hyper::Error;
 
     fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        self.project()
-            .inner
-            .poll_frame(cx)
-            .map(|o| o.map(|r| r.map_err(DefaultRawError::new)))
+        self.project().inner.poll_frame(cx)
     }
 
     fn is_end_stream(&self) -> bool {
@@ -202,30 +193,5 @@ impl Body for RawResponseBody {
 
     fn size_hint(&self) -> SizeHint {
         self.inner.size_hint()
-    }
-}
-
-/// The error type used by `DefaultRawClient`.
-#[derive(Debug)]
-pub struct DefaultRawError(Box<dyn error::Error + Sync + Send>);
-
-impl DefaultRawError {
-    fn new<T>(e: T) -> Self
-    where
-        T: Into<Box<dyn error::Error + Sync + Send>>,
-    {
-        DefaultRawError(e.into())
-    }
-}
-
-impl fmt::Display for DefaultRawError {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, fmt)
-    }
-}
-
-impl error::Error for DefaultRawError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        error::Error::source(&*self.0)
     }
 }
