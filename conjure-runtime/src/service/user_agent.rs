@@ -11,8 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::Service;
-use crate::service::Layer;
+use crate::service::{Layer, Service};
 use crate::{builder, Agent, Builder, UserAgent};
 use conjure_http::client::Endpoint;
 use http::header::USER_AGENT;
@@ -28,7 +27,7 @@ pub struct UserAgentLayer {
 }
 
 impl UserAgentLayer {
-    pub fn new<B>(builder: &Builder<builder::Complete<B>>) -> UserAgentLayer {
+    pub fn new(builder: &Builder<builder::Complete>) -> UserAgentLayer {
         UserAgentLayer {
             user_agent: builder.get_user_agent().clone(),
         }

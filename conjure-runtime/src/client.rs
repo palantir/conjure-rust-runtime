@@ -12,30 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::builder::CachedConfig;
-use crate::raw::{BuildRawClient, DefaultRawClient, RawBody, Service};
 use crate::service::gzip::{DecodedBody, GzipLayer};
 use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
 use crate::service::metrics::MetricsLayer;
 use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
 use crate::service::proxy::{ProxyConfig, ProxyLayer};
+use crate::service::raw::{RawClient, RawResponseBody};
 use crate::service::response_body::ResponseBodyLayer;
 use crate::service::retry::RetryLayer;
 use crate::service::root_span::RootSpanLayer;
 use crate::service::trace_propagation::TracePropagationLayer;
 use crate::service::user_agent::UserAgentLayer;
 use crate::service::wait_for_spans::{WaitForSpansBody, WaitForSpansLayer};
+use crate::service::Service;
 use crate::service::{Identity, Layer, ServiceBuilder, Stack};
 use crate::weak_cache::Cached;
 use crate::{builder, BodyWriter, Builder, ResponseBody};
 use arc_swap::ArcSwap;
-use bytes::Bytes;
 use conjure_error::Error;
 use conjure_http::client::{AsyncClient, AsyncRequestBody, AsyncService};
 use conjure_runtime_config::ServiceConfig;
 use http::{Request, Response};
 use refreshable::Subscription;
-use std::error;
 use std::sync::Arc;
 
 macro_rules! layers {
@@ -60,20 +59,17 @@ type BaseLayer = layers!(
     MapErrorLayer,
 );
 
-type BaseService<T> = <BaseLayer as Layer<T>>::Service;
+type BaseService = <BaseLayer as Layer<RawClient>>::Service;
 
-pub(crate) type BaseBody<B> = WaitForSpansBody<DecodedBody<B>>;
+pub(crate) type BaseBody = WaitForSpansBody<DecodedBody<RawResponseBody>>;
 
-pub(crate) struct ClientState<T> {
-    service: BaseService<T>,
+pub(crate) struct ClientState {
+    service: BaseService,
 }
 
-impl<T> ClientState<T> {
-    pub(crate) fn new<U>(builder: &Builder<builder::Complete<U>>) -> Result<ClientState<T>, Error>
-    where
-        U: BuildRawClient<RawClient = T>,
-    {
-        let client = builder.get_raw_client_builder().build_raw_client(builder)?;
+impl ClientState {
+    pub(crate) fn new(builder: &Builder<builder::Complete>) -> Result<ClientState, Error> {
+        let client = RawClient::new(builder)?;
 
         let proxy = ProxyConfig::from_config(builder.get_proxy())?;
 
@@ -99,21 +95,10 @@ impl<T> ClientState<T> {
 }
 
 /// An asynchronous HTTP client to a remote service.
-///
-/// It implements the Conjure `AsyncClient` trait, but also offers a "raw" request interface for use with services that
-/// don't provide Conjure service definitions.
-pub struct Client<T = DefaultRawClient> {
-    state: Arc<ArcSwap<Cached<CachedConfig, ClientState<T>>>>,
-    subscription: Option<Arc<Subscription<ServiceConfig, Error>>>,
-}
-
-impl<T> Clone for Client<T> {
-    fn clone(&self) -> Self {
-        Client {
-            state: self.state.clone(),
-            subscription: self.subscription.clone(),
-        }
-    }
+#[derive(Clone)]
+pub struct Client {
+    state: Arc<ArcSwap<Cached<CachedConfig, ClientState>>>,
+    _subscription: Option<Arc<Subscription<ServiceConfig, Error>>>,
 }
 
 impl Client {
@@ -124,34 +109,28 @@ impl Client {
     }
 }
 
-impl<T> Client<T> {
+impl Client {
     pub(crate) fn new(
-        state: Arc<ArcSwap<Cached<CachedConfig, ClientState<T>>>>,
+        state: Arc<ArcSwap<Cached<CachedConfig, ClientState>>>,
         subscription: Option<Subscription<ServiceConfig, Error>>,
-    ) -> Client<T> {
+    ) -> Client {
         Client {
             state,
-            subscription: subscription.map(Arc::new),
+            _subscription: subscription.map(Arc::new),
         }
     }
 }
 
-impl<T> AsyncService<Client<T>> for Client<T> {
-    fn new(client: Client<T>) -> Self {
+impl AsyncService<Client> for Client {
+    fn new(client: Client) -> Self {
         client
     }
 }
 
-impl<T, B> AsyncClient for Client<T>
-where
-    T: Service<http::Request<RawBody>, Response = http::Response<B>> + 'static + Sync + Send,
-    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
-    B: http_body::Body<Data = Bytes> + 'static + Send,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
+impl AsyncClient for Client {
     type BodyWriter = BodyWriter;
 
-    type ResponseBody = ResponseBody<B>;
+    type ResponseBody = ResponseBody;
 
     async fn send(
         &self,

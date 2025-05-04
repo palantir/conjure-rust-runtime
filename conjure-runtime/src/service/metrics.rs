@@ -11,9 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::service::Layer;
+use crate::builder;
+use crate::service::{Layer, Service};
 use crate::Builder;
-use crate::{builder, raw::Service};
 use conjure_error::Error;
 use conjure_http::client::Endpoint;
 use http::{Request, Response};
@@ -34,7 +34,7 @@ pub struct MetricsLayer {
 }
 
 impl MetricsLayer {
-    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> MetricsLayer {
+    pub fn new(builder: &Builder<builder::Complete>) -> MetricsLayer {
         MetricsLayer {
             metrics: builder.get_metrics().map(|m| Metrics {
                 metrics: m.clone(),

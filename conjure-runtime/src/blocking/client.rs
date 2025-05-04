@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::blocking::{body, BodyWriter, BodyWriterShim, ResponseBody};
-use crate::raw::{DefaultRawClient, RawBody, Service};
 use crate::{builder, Builder};
 use bytes::Bytes;
 use conjure_error::Error;
@@ -23,9 +22,9 @@ use http::{Request, Response};
 use once_cell::sync::OnceCell;
 use pin_project::pin_project;
 use std::future::Future;
+use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::{error, io};
 use tokio::runtime::{self, Handle, Runtime};
 use zipkin::TraceContext;
 
@@ -45,18 +44,10 @@ fn default_handle() -> io::Result<&'static Handle> {
 ///
 /// It implements the Conjure `Client` trait, but also offers a "raw" request interface for use with services that don't
 /// provide Conjure service definitions.
-pub struct Client<T = DefaultRawClient> {
-    pub(crate) client: crate::Client<T>,
+#[derive(Clone)]
+pub struct Client {
+    pub(crate) client: crate::Client,
     pub(crate) handle: Option<Handle>,
-}
-
-impl<T> Clone for Client<T> {
-    fn clone(&self) -> Self {
-        Client {
-            client: self.client.clone(),
-            handle: self.handle.clone(),
-        }
-    }
 }
 
 impl Client {
@@ -67,22 +58,16 @@ impl Client {
     }
 }
 
-impl<T> client::Service<Client<T>> for Client<T> {
-    fn new(client: Client<T>) -> Self {
+impl client::Service<Client> for Client {
+    fn new(client: Client) -> Self {
         client
     }
 }
 
-impl<T, B> conjure_http::client::Client for Client<T>
-where
-    T: Service<Request<RawBody>, Response = Response<B>> + 'static + Sync + Send,
-    T::Error: Into<Box<dyn error::Error + Sync + Send>>,
-    B: http_body::Body<Data = Bytes> + 'static + Send,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
+impl conjure_http::client::Client for Client {
     type BodyWriter = BodyWriter;
 
-    type ResponseBody = ResponseBody<B>;
+    type ResponseBody = ResponseBody;
 
     fn send(
         &self,

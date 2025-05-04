@@ -11,9 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::Service;
 use crate::service::node::LimitedNode;
-use crate::service::Layer;
+use crate::service::{Layer, Service};
 use conjure_error::Error;
 use http::{Request, Response};
 

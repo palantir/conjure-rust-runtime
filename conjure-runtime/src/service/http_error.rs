@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{RemoteError, ThrottledError, UnavailableError};
-use crate::raw::Service;
-use crate::service::Layer;
+use crate::service::{Layer, Service};
 use crate::{builder, Builder, ServerQos, ServiceError};
 use bytes::{BufMut, BytesMut};
 use conjure_error::Error;
@@ -44,7 +43,7 @@ pub struct HttpErrorLayer {
 }
 
 impl HttpErrorLayer {
-    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> HttpErrorLayer {
+    pub fn new(builder: &Builder<builder::Complete>) -> HttpErrorLayer {
         HttpErrorLayer {
             server_qos: builder.get_server_qos(),
             service_error: builder.get_service_error(),

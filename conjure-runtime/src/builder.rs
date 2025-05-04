@@ -15,7 +15,6 @@
 use crate::blocking;
 use crate::client::ClientState;
 use crate::config::{ProxyConfig, SecurityConfig, ServiceConfig};
-use crate::raw::{BuildRawClient, DefaultRawClientBuilder};
 use crate::weak_cache::Cached;
 use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
@@ -61,17 +60,16 @@ pub(crate) struct CachedConfig {
 }
 
 #[derive(Clone)]
-pub(crate) struct UncachedConfig<T> {
+pub(crate) struct UncachedConfig {
     pub(crate) metrics: Option<Arc<MetricRegistry>>,
     pub(crate) host_metrics: Option<Arc<HostMetricsRegistry>>,
     pub(crate) blocking_handle: Option<Handle>,
-    pub(crate) raw_client_builder: T,
 }
 
 /// The complete builder stage.
-pub struct Complete<T = DefaultRawClientBuilder> {
+pub struct Complete {
     cached: CachedConfig,
-    uncached: UncachedConfig<T>,
+    uncached: UncachedConfig,
 }
 
 impl Default for Builder<ServiceStage> {
@@ -126,7 +124,6 @@ impl Builder<UserAgentStage> {
                 metrics: None,
                 host_metrics: None,
                 blocking_handle: None,
-                raw_client_builder: DefaultRawClientBuilder,
             },
         })
     }
@@ -143,7 +140,7 @@ impl Builder {
     }
 }
 
-impl<T> Builder<Complete<T>> {
+impl Builder<Complete> {
     pub(crate) fn cached_config(&self) -> &CachedConfig {
         &self.0.cached
     }
@@ -472,28 +469,6 @@ impl<T> Builder<Complete<T>> {
         self.0.cached.override_host_index
     }
 
-    /// Sets the raw client builder.
-    ///
-    /// Defaults to `DefaultRawClientBuilder`.
-    #[inline]
-    pub fn raw_client_builder<U>(self, raw_client_builder: U) -> Builder<Complete<U>> {
-        Builder(Complete {
-            cached: self.0.cached,
-            uncached: UncachedConfig {
-                metrics: self.0.uncached.metrics,
-                host_metrics: self.0.uncached.host_metrics,
-                blocking_handle: self.0.uncached.blocking_handle,
-                raw_client_builder,
-            },
-        })
-    }
-
-    /// Returns the builder's configured raw client builder.
-    #[inline]
-    pub fn get_raw_client_builder(&self) -> &T {
-        &self.0.uncached.raw_client_builder
-    }
-
     pub(crate) fn mesh_mode(&self) -> bool {
         self.0
             .cached
@@ -523,12 +498,9 @@ impl<T> Builder<Complete<T>> {
     }
 }
 
-impl<T> Builder<Complete<T>>
-where
-    T: BuildRawClient,
-{
+impl Builder<Complete> {
     /// Creates a new `Client`.
-    pub fn build(&self) -> Result<Client<T::RawClient>, Error> {
+    pub fn build(&self) -> Result<Client, Error> {
         let state = ClientState::new(self)?;
         Ok(Client::new(
             Arc::new(ArcSwap::new(Arc::new(Cached::uncached(state)))),
@@ -537,7 +509,7 @@ where
     }
 
     /// Creates a new `blocking::Client`.
-    pub fn build_blocking(&self) -> Result<blocking::Client<T::RawClient>, Error> {
+    pub fn build_blocking(&self) -> Result<blocking::Client, Error> {
         self.build().map(|client| blocking::Client {
             client,
             handle: self.0.uncached.blocking_handle.clone(),

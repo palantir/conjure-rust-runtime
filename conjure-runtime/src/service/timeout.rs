@@ -32,7 +32,7 @@ pub struct TimeoutLayer {
 }
 
 impl TimeoutLayer {
-    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> TimeoutLayer {
+    pub fn new(builder: &Builder<builder::Complete>) -> TimeoutLayer {
         TimeoutLayer {
             read_timeout: builder.get_read_timeout(),
             write_timeout: builder.get_write_timeout(),

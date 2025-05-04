@@ -210,7 +210,6 @@ pub mod client_factory;
 pub mod errors;
 mod host_metrics;
 pub mod per_host_clients;
-pub mod raw;
 mod service;
 #[cfg(test)]
 mod test;

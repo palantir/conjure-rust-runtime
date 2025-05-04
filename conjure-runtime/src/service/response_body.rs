@@ -11,12 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::Service;
-use crate::service::Layer;
+use crate::service::{Layer, Service};
 use crate::{BaseBody, ResponseBody};
-use bytes::Bytes;
 use http::Response;
-use http_body::Body;
 
 /// A layer which wraps the response body in the conjure-runtime public `ResponseBody` type.
 pub struct ResponseBodyLayer;
@@ -33,13 +30,12 @@ pub struct ResponseBodyService<S> {
     inner: S,
 }
 
-impl<S, R, B> Service<R> for ResponseBodyService<S>
+impl<S, R> Service<R> for ResponseBodyService<S>
 where
-    S: Service<R, Response = Response<BaseBody<B>>> + Sync + Send,
+    S: Service<R, Response = Response<BaseBody>> + Sync + Send,
     R: Send,
-    B: Body<Data = Bytes>,
 {
-    type Response = Response<ResponseBody<B>>;
+    type Response = Response<ResponseBody>;
     type Error = S::Error;
 
     async fn call(&self, req: R) -> Result<Self::Response, Self::Error> {

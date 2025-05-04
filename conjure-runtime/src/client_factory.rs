@@ -14,7 +14,6 @@
 //! The client factory.
 use crate::builder::{CachedConfig, UncachedConfig};
 use crate::config::{ServiceConfig, ServicesConfig};
-use crate::raw::{DefaultRawClient, DefaultRawClientBuilder};
 use crate::weak_cache::{Cached, WeakCache};
 use crate::{blocking, Builder, ClientState, Host, PerHostClients};
 use crate::{
@@ -49,16 +48,16 @@ pub struct UserAgentStage {
 
 #[derive(Clone)]
 struct CacheManager {
-    uncached_inner: UncachedConfig<DefaultRawClientBuilder>,
-    cache: WeakCache<CachedConfig, ClientState<DefaultRawClient>>,
+    uncached_inner: UncachedConfig,
+    cache: WeakCache<CachedConfig, ClientState>,
 }
 
 impl CacheManager {
-    fn uncached(&self) -> &UncachedConfig<DefaultRawClientBuilder> {
+    fn uncached(&self) -> &UncachedConfig {
         &self.uncached_inner
     }
 
-    fn uncached_mut(&mut self) -> &mut UncachedConfig<DefaultRawClientBuilder> {
+    fn uncached_mut(&mut self) -> &mut UncachedConfig {
         self.cache = WeakCache::new(STATE_CACHE_CAPACITY);
         &mut self.uncached_inner
     }
@@ -120,7 +119,6 @@ impl ClientFactory<UserAgentStage> {
                     metrics: None,
                     host_metrics: None,
                     blocking_handle: None,
-                    raw_client_builder: DefaultRawClientBuilder,
                 },
                 cache: WeakCache::new(STATE_CACHE_CAPACITY),
             },
@@ -490,7 +488,7 @@ impl StateBuilder {
         &self,
         config: &ServiceConfig,
         override_host_index: Option<usize>,
-    ) -> Result<Arc<Cached<CachedConfig, ClientState<DefaultRawClient>>>, Error> {
+    ) -> Result<Arc<Cached<CachedConfig, ClientState>>, Error> {
         let mut builder = Client::builder()
             .service(&self.service)
             .user_agent(self.user_agent.clone())

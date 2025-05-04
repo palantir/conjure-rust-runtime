@@ -11,8 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::Service;
-use crate::service::Layer;
+use crate::service::{Layer, Service};
 use http::Response;
 use http_body::{Body, Frame, SizeHint};
 use pin_project::pin_project;

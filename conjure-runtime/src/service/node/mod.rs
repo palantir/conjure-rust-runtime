@@ -11,11 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::Service;
 use crate::service::node::limiter::{InFlightReducer, LimitReducer, Limiter, Permit};
 pub use crate::service::node::metrics::NodeMetricsLayer;
 pub use crate::service::node::selector::NodeSelectorLayer;
 pub use crate::service::node::uri::NodeUriLayer;
+use crate::service::Service;
 use crate::util::weak_reducing_gauge::WeakReducingGauge;
 use crate::{builder, Builder, ClientQos, HostMetrics};
 use conjure_error::Error;
@@ -44,12 +44,7 @@ impl LimitedNode {
         }
     }
 
-    pub fn new<T>(
-        idx: usize,
-        url: &Url,
-        service: &str,
-        builder: &Builder<builder::Complete<T>>,
-    ) -> Self {
+    pub fn new(idx: usize, url: &Url, service: &str, builder: &Builder<builder::Complete>) -> Self {
         let node = LimitedNode {
             node: Arc::new(Node {
                 idx,

@@ -23,49 +23,49 @@ use std::task::{Context, Poll};
 use std::{error, fmt, mem};
 use witchcraft_log::debug;
 
-/// The error type returned by `RawBody`.
+/// The error type returned by `RawRequestBody`.
 #[derive(Debug)]
-pub struct BodyError(());
+pub struct RequestBodyError(());
 
-impl fmt::Display for BodyError {
+impl fmt::Display for RequestBodyError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.write_str("error writing body")
     }
 }
 
-impl error::Error for BodyError {}
+impl error::Error for RequestBodyError {}
 
-pub(crate) enum BodyPart {
+pub(crate) enum RequestBodyPart {
     Frame(Frame<Bytes>),
     Done,
 }
 
-pub(crate) enum RawBodyInner {
+pub(crate) enum RawRequestBodyInner {
     Empty,
     Single(Frame<Bytes>),
     Stream {
-        receiver: mpsc::Receiver<BodyPart>,
+        receiver: mpsc::Receiver<RequestBodyPart>,
         polled: Option<oneshot::Sender<()>>,
     },
 }
 
 /// The request body type passed to the raw HTTP client.
-pub struct RawBody {
-    pub(crate) inner: RawBodyInner,
+pub struct RawRequestBody {
+    pub(crate) inner: RawRequestBodyInner,
 }
 
-impl RawBody {
-    pub(crate) fn new(body: AsyncRequestBody<'_, BodyWriter>) -> (RawBody, Writer<'_>) {
+impl RawRequestBody {
+    pub(crate) fn new(body: AsyncRequestBody<'_, BodyWriter>) -> (RawRequestBody, Writer<'_>) {
         match body {
             AsyncRequestBody::Empty => (
-                RawBody {
-                    inner: RawBodyInner::Empty,
+                RawRequestBody {
+                    inner: RawRequestBodyInner::Empty,
                 },
                 Writer::Nop,
             ),
             AsyncRequestBody::Fixed(body) => (
-                RawBody {
-                    inner: RawBodyInner::Single(Frame::data(body)),
+                RawRequestBody {
+                    inner: RawRequestBodyInner::Single(Frame::data(body)),
                 },
                 Writer::Nop,
             ),
@@ -73,8 +73,8 @@ impl RawBody {
                 let (body_sender, body_receiver) = mpsc::channel(1);
                 let (polled_sender, polled_receiver) = oneshot::channel();
                 (
-                    RawBody {
-                        inner: RawBodyInner::Stream {
+                    RawRequestBody {
+                        inner: RawRequestBodyInner::Stream {
                             receiver: body_receiver,
                             polled: Some(polled_sender),
                         },
@@ -90,18 +90,18 @@ impl RawBody {
     }
 }
 
-impl http_body::Body for RawBody {
+impl http_body::Body for RawRequestBody {
     type Data = Bytes;
-    type Error = BodyError;
+    type Error = RequestBodyError;
 
     fn poll_frame(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        match mem::replace(&mut self.inner, RawBodyInner::Empty) {
-            RawBodyInner::Empty => Poll::Ready(None),
-            RawBodyInner::Single(frame) => Poll::Ready(Some(Ok(frame))),
-            RawBodyInner::Stream {
+        match mem::replace(&mut self.inner, RawRequestBodyInner::Empty) {
+            RawRequestBodyInner::Empty => Poll::Ready(None),
+            RawRequestBodyInner::Single(frame) => Poll::Ready(Some(Ok(frame))),
+            RawRequestBodyInner::Stream {
                 mut receiver,
                 mut polled,
             } => {
@@ -110,14 +110,14 @@ impl http_body::Body for RawBody {
                 }
 
                 match Pin::new(&mut receiver).poll_next(cx) {
-                    Poll::Ready(Some(BodyPart::Frame(frame))) => {
-                        self.inner = RawBodyInner::Stream { receiver, polled };
+                    Poll::Ready(Some(RequestBodyPart::Frame(frame))) => {
+                        self.inner = RawRequestBodyInner::Stream { receiver, polled };
                         Poll::Ready(Some(Ok(frame)))
                     }
-                    Poll::Ready(Some(BodyPart::Done)) => Poll::Ready(None),
-                    Poll::Ready(None) => Poll::Ready(Some(Err(BodyError(())))),
+                    Poll::Ready(Some(RequestBodyPart::Done)) => Poll::Ready(None),
+                    Poll::Ready(None) => Poll::Ready(Some(Err(RequestBodyError(())))),
                     Poll::Pending => {
-                        self.inner = RawBodyInner::Stream { receiver, polled };
+                        self.inner = RawRequestBodyInner::Stream { receiver, polled };
                         Poll::Pending
                     }
                 }
@@ -126,20 +126,20 @@ impl http_body::Body for RawBody {
     }
 
     fn is_end_stream(&self) -> bool {
-        matches!(self.inner, RawBodyInner::Empty)
+        matches!(self.inner, RawRequestBodyInner::Empty)
     }
 
     fn size_hint(&self) -> SizeHint {
         match &self.inner {
-            RawBodyInner::Empty => SizeHint::with_exact(0),
-            RawBodyInner::Single(frame) => {
+            RawRequestBodyInner::Empty => SizeHint::with_exact(0),
+            RawRequestBodyInner::Single(frame) => {
                 let len = match frame.data_ref() {
                     Some(buf) => buf.len(),
                     None => 0,
                 };
                 SizeHint::with_exact(len as u64)
             }
-            RawBodyInner::Stream { .. } => SizeHint::new(),
+            RawRequestBodyInner::Stream { .. } => SizeHint::new(),
         }
     }
 }
@@ -149,7 +149,7 @@ pub(crate) enum Writer<'a> {
     Streaming {
         polled: oneshot::Receiver<()>,
         body: BoxAsyncWriteBody<'a, BodyWriter>,
-        sender: mpsc::Sender<BodyPart>,
+        sender: mpsc::Sender<RequestBodyPart>,
     },
 }
 
