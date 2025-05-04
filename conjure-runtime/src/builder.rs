@@ -57,7 +57,6 @@ pub(crate) struct CachedConfig {
     service_error: ServiceError,
     idempotency: Idempotency,
     node_selection_strategy: NodeSelectionStrategy,
-    rng_seed: Option<u64>,
     override_host_index: Option<usize>,
 }
 
@@ -121,7 +120,6 @@ impl Builder<UserAgentStage> {
                 service_error: ServiceError::WrapInNewError,
                 idempotency: Idempotency::ByMethod,
                 node_selection_strategy: NodeSelectionStrategy::PinUntilError,
-                rng_seed: None,
                 override_host_index: None,
             },
             uncached: UncachedConfig {
@@ -442,25 +440,6 @@ impl<T> Builder<Complete<T>> {
     #[inline]
     pub fn get_host_metrics(&self) -> Option<&Arc<HostMetricsRegistry>> {
         self.0.uncached.host_metrics.as_ref()
-    }
-
-    /// Sets a seed used to initialize the client's random number generators.
-    ///
-    /// Several components of the client rely on entropy. If set, the client will use the seed to initialize its
-    /// internal random number generators such that clients created with the same configuration will produce the same
-    /// behavior.
-    ///
-    /// Defaults to no seed.
-    #[inline]
-    pub fn rng_seed(mut self, rng_seed: u64) -> Self {
-        self.0.cached.rng_seed = Some(rng_seed);
-        self
-    }
-
-    /// Returns the builder's configured RNG seed.
-    #[inline]
-    pub fn get_rng_seed(&self) -> Option<u64> {
-        self.0.cached.rng_seed
     }
 
     /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.

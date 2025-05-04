@@ -14,7 +14,6 @@
 use crate::errors::{RemoteError, ThrottledError, UnavailableError};
 use crate::raw::Service;
 use crate::raw::{BodyError, RawBody};
-use crate::rng::ConjureRng;
 use crate::service::map_error::RawClientError;
 use crate::service::Layer;
 use crate::util::spans::{self, HttpSpanFuture};
@@ -46,7 +45,6 @@ pub struct RetryLayer {
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
-    rng: ConjureRng,
 }
 
 impl RetryLayer {
@@ -59,7 +57,6 @@ impl RetryLayer {
                 builder.get_max_num_retries()
             },
             backoff_slot_size: builder.get_backoff_slot_size(),
-            rng: ConjureRng::new(builder),
         }
     }
 }
@@ -73,7 +70,6 @@ impl<S> Layer<S> for RetryLayer {
             idempotency: self.idempotency,
             max_num_retries: self.max_num_retries,
             backoff_slot_size: self.backoff_slot_size,
-            rng: self.rng,
         }
     }
 }
@@ -83,7 +79,6 @@ pub struct RetryService<S> {
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
-    rng: ConjureRng,
 }
 
 impl<'a, S, B> Service<Request<AsyncRequestBody<'a, BodyWriter>>> for RetryService<S>
@@ -296,9 +291,7 @@ where
                 if max == Duration::from_secs(0) {
                     Duration::from_secs(0)
                 } else {
-                    self.service
-                        .rng
-                        .with(|rng| rng.random_range(Duration::from_secs(0)..max))
+                    rand::rng().random_range(Duration::from_secs(0)..max)
                 }
             }
         };
