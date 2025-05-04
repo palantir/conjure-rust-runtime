@@ -23,7 +23,6 @@ use std::task::{Context, Poll};
 use std::{error, fmt, mem};
 use witchcraft_log::debug;
 
-/// The error type returned by `RawRequestBody`.
 #[derive(Debug)]
 pub struct RequestBodyError(());
 
@@ -49,7 +48,6 @@ pub(crate) enum RawRequestBodyInner {
     },
 }
 
-/// The request body type passed to the raw HTTP client.
 pub struct RawRequestBody {
     pub(crate) inner: RawRequestBodyInner,
 }

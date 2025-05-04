@@ -53,9 +53,6 @@ const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 type ConjureConnector =
     TlsMetricsService<HttpsConnector<ProxyConnectorService<TimeoutService<HttpConnector>>>>;
 
-/// The default raw client implementation used by `conjure_runtime`.
-///
-/// This is currently implemented with `hyper` and `rustls`, but that is subject to change at any time.
 pub struct RawClient(Client<ConjureConnector, RawRequestBody>);
 
 impl RawClient {
@@ -167,7 +164,6 @@ fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, Error> {
     }
 }
 
-/// The body type used by `DefaultRawClient`.
 #[pin_project]
 pub struct RawResponseBody {
     #[pin]
