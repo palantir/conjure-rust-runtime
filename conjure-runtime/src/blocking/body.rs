@@ -11,14 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::DefaultRawBody;
 use bytes::{Bytes, BytesMut};
 use conjure_error::Error;
 use conjure_http::client::{AsyncWriteBody, WriteBody};
 use futures::channel::{mpsc, oneshot};
 use futures::{executor, SinkExt, Stream, StreamExt};
-use http_body::Body;
-use std::error;
 use std::io::{self, BufRead, Read, Write};
 use std::pin::Pin;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt};
@@ -167,13 +164,13 @@ impl Write for BodyWriter {
 }
 
 /// A blocking streaming response body.
-pub struct ResponseBody<B = DefaultRawBody> {
-    inner: Pin<Box<crate::ResponseBody<B>>>,
+pub struct ResponseBody {
+    inner: Pin<Box<crate::ResponseBody>>,
     handle: Handle,
 }
 
-impl<B> ResponseBody<B> {
-    pub(crate) fn new(inner: crate::ResponseBody<B>, handle: Handle) -> Self {
+impl ResponseBody {
+    pub(crate) fn new(inner: crate::ResponseBody, handle: Handle) -> Self {
         ResponseBody {
             inner: Box::pin(inner),
             handle,
@@ -181,11 +178,7 @@ impl<B> ResponseBody<B> {
     }
 }
 
-impl<B> Iterator for ResponseBody<B>
-where
-    B: Body<Data = Bytes>,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
+impl Iterator for ResponseBody {
     type Item = Result<Bytes, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -197,21 +190,13 @@ where
     }
 }
 
-impl<B> Read for ResponseBody<B>
-where
-    B: Body<Data = Bytes>,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
+impl Read for ResponseBody {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.handle.block_on(self.inner.as_mut().read(buf))
     }
 }
 
-impl<B> BufRead for ResponseBody<B>
-where
-    B: Body<Data = Bytes>,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
+impl BufRead for ResponseBody {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         // lifetime shenanigans mean we can't return the value of fill_buf directly
         self.handle.block_on(self.inner.as_mut().fill_buf())?;

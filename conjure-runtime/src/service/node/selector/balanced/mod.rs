@@ -11,12 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::Service;
-use crate::rng::ConjureRng;
 use crate::service::node::selector::balanced::reservoir::CoarseExponentialDecayReservoir;
 use crate::service::node::{AcquiredNode, LimitedNode};
-use crate::service::Layer;
-use crate::{builder, Builder};
+use crate::service::{Layer, Service};
 use conjure_error::Error;
 use http::{Request, Response};
 use rand::seq::SliceRandom;
@@ -94,11 +91,11 @@ pub trait Entropy {
     fn shuffle<T>(&self, slice: &mut [T]);
 }
 
-pub struct RandEntropy(ConjureRng);
+pub struct RandEntropy;
 
 impl Entropy for RandEntropy {
     fn shuffle<T>(&self, slice: &mut [T]) {
-        self.0.with(|rng| slice.shuffle(rng));
+        slice.shuffle(&mut rand::rng());
     }
 }
 
@@ -112,8 +109,8 @@ pub struct BalancedNodeSelectorLayer<T = RandEntropy> {
 }
 
 impl BalancedNodeSelectorLayer {
-    pub fn new<T>(nodes: Vec<LimitedNode>, builder: &Builder<builder::Complete<T>>) -> Self {
-        Self::with_entropy(nodes, RandEntropy(ConjureRng::new(builder)))
+    pub fn new(nodes: Vec<LimitedNode>) -> Self {
+        Self::with_entropy(nodes, RandEntropy)
     }
 }
 

@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::{BuildRawClient, RawBody, Service};
 use crate::service::proxy::connector::ProxyConnectorLayer;
 use crate::service::proxy::{ProxyConfig, ProxyConnectorService};
+pub use crate::service::raw::body::*;
 use crate::service::timeout::{TimeoutLayer, TimeoutService};
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
+use crate::service::Service;
 use crate::{builder, Builder};
 use bytes::Bytes;
 use conjure_error::Error;
@@ -24,15 +25,13 @@ use http_body::{Body, Frame, SizeHint};
 use hyper::body::Incoming;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::{self, Client};
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use pin_project::pin_project;
 use rustls::crypto::ring;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pemfile::Item;
-use std::error;
-use std::fmt;
 use std::fs::File;
 use std::io::BufReader;
 use std::marker::PhantomPinned;
@@ -44,6 +43,8 @@ use std::time::Duration;
 use tower_layer::Layer;
 use webpki_roots::TLS_SERVER_ROOTS;
 
+mod body;
+
 // This is pretty arbitrary - I just grabbed it from some Cloudflare blog post.
 const TCP_KEEPALIVE: Duration = Duration::from_secs(3 * 60);
 // Most servers time out idle connections after 60 seconds, so we'll set the client timeout a bit below that.
@@ -52,17 +53,10 @@ const HTTP_KEEPALIVE: Duration = Duration::from_secs(55);
 type ConjureConnector =
     TlsMetricsService<HttpsConnector<ProxyConnectorService<TimeoutService<HttpConnector>>>>;
 
-/// The default raw client builder used by `conjure_runtime`.
-#[derive(Copy, Clone)]
-pub struct DefaultRawClientBuilder;
+pub struct RawClient(Client<ConjureConnector, RawRequestBody>);
 
-impl BuildRawClient for DefaultRawClientBuilder {
-    type RawClient = DefaultRawClient;
-
-    fn build_raw_client(
-        &self,
-        builder: &Builder<builder::Complete<Self>>,
-    ) -> Result<Self::RawClient, Error> {
+impl RawClient {
+    pub fn new(builder: &Builder<builder::Complete>) -> Result<Self, Error> {
         let mut connector = HttpConnector::new();
         connector.enforce_http(false);
         connector.set_nodelay(true);
@@ -120,7 +114,21 @@ impl BuildRawClient for DefaultRawClientBuilder {
             .timer(TokioTimer::new())
             .build(connector);
 
-        Ok(DefaultRawClient(client))
+        Ok(RawClient(client))
+    }
+}
+
+impl Service<Request<RawRequestBody>> for RawClient {
+    type Response = Response<RawResponseBody>;
+    type Error = legacy::Error;
+
+    async fn call(&self, req: Request<RawRequestBody>) -> Result<Self::Response, Self::Error> {
+        self.0.request(req).await.map(|r| {
+            r.map(|inner| RawResponseBody {
+                inner,
+                _p: PhantomPinned,
+            })
+        })
     }
 }
 
@@ -156,50 +164,23 @@ fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, Error> {
     }
 }
 
-/// The default raw client implementation used by `conjure_runtime`.
-///
-/// This is currently implemented with `hyper` and `rustls`, but that is subject to change at any time.
-pub struct DefaultRawClient(Client<ConjureConnector, RawBody>);
-
-impl Service<Request<RawBody>> for DefaultRawClient {
-    type Response = Response<DefaultRawBody>;
-    type Error = DefaultRawError;
-
-    async fn call(&self, req: Request<RawBody>) -> Result<Self::Response, Self::Error> {
-        self.0
-            .request(req)
-            .await
-            .map(|r| {
-                r.map(|inner| DefaultRawBody {
-                    inner,
-                    _p: PhantomPinned,
-                })
-            })
-            .map_err(DefaultRawError::new)
-    }
-}
-
-/// The body type used by `DefaultRawClient`.
 #[pin_project]
-pub struct DefaultRawBody {
+pub struct RawResponseBody {
     #[pin]
     inner: Incoming,
     #[pin]
     _p: PhantomPinned,
 }
 
-impl Body for DefaultRawBody {
+impl Body for RawResponseBody {
     type Data = Bytes;
-    type Error = DefaultRawError;
+    type Error = hyper::Error;
 
     fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        self.project()
-            .inner
-            .poll_frame(cx)
-            .map(|o| o.map(|r| r.map_err(DefaultRawError::new)))
+        self.project().inner.poll_frame(cx)
     }
 
     fn is_end_stream(&self) -> bool {
@@ -208,30 +189,5 @@ impl Body for DefaultRawBody {
 
     fn size_hint(&self) -> SizeHint {
         self.inner.size_hint()
-    }
-}
-
-/// The error type used by `DefaultRawClient`.
-#[derive(Debug)]
-pub struct DefaultRawError(Box<dyn error::Error + Sync + Send>);
-
-impl DefaultRawError {
-    fn new<T>(e: T) -> Self
-    where
-        T: Into<Box<dyn error::Error + Sync + Send>>,
-    {
-        DefaultRawError(e.into())
-    }
-}
-
-impl fmt::Display for DefaultRawError {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, fmt)
-    }
-}
-
-impl error::Error for DefaultRawError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        error::Error::source(&*self.0)
     }
 }

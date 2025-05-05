@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::{BodyPart, DefaultRawBody};
+use crate::service::raw::RequestBodyPart;
 use crate::BaseBody;
 use bytes::{Buf, Bytes, BytesMut};
 use conjure_error::Error;
@@ -22,7 +22,7 @@ use pin_project::pin_project;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::{error, io, mem};
+use std::{io, mem};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 
 /// The asynchronous writer passed to
@@ -30,14 +30,14 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 #[pin_project]
 pub struct BodyWriter {
     #[pin]
-    sender: mpsc::Sender<BodyPart>,
+    sender: mpsc::Sender<RequestBodyPart>,
     buf: BytesMut,
     #[pin]
     _p: PhantomPinned,
 }
 
 impl BodyWriter {
-    pub(crate) fn new(sender: mpsc::Sender<BodyPart>) -> BodyWriter {
+    pub(crate) fn new(sender: mpsc::Sender<RequestBodyPart>) -> BodyWriter {
         BodyWriter {
             sender,
             buf: BytesMut::new(),
@@ -49,7 +49,7 @@ impl BodyWriter {
         self.flush().await?;
         self.project()
             .sender
-            .send(BodyPart::Done)
+            .send(RequestBodyPart::Done)
             .await
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         Ok(())
@@ -63,7 +63,7 @@ impl BodyWriter {
         self.flush().await?;
         self.project()
             .sender
-            .send(BodyPart::Frame(Frame::data(bytes)))
+            .send(RequestBodyPart::Frame(Frame::data(bytes)))
             .await
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         Ok(())
@@ -94,7 +94,7 @@ impl AsyncWrite for BodyWriter {
         ready!(this.sender.poll_ready(cx)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         let chunk = this.buf.split().freeze();
         this.sender
-            .start_send(BodyPart::Frame(Frame::data(chunk)))
+            .start_send(RequestBodyPart::Frame(Frame::data(chunk)))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
         Poll::Ready(Ok(()))
@@ -107,17 +107,17 @@ impl AsyncWrite for BodyWriter {
 
 /// An asynchronous streaming response body.
 #[pin_project]
-pub struct ResponseBody<B = DefaultRawBody> {
+pub struct ResponseBody {
     #[pin]
-    body: FuseBody<BaseBody<B>>,
+    body: FuseBody<BaseBody>,
     cur: Bytes,
     // Make sure we can make our internal BaseBody !Unpin in the future if we want
     #[pin]
     _p: PhantomPinned,
 }
 
-impl<B> ResponseBody<B> {
-    pub(crate) fn new(body: BaseBody<B>) -> Self {
+impl ResponseBody {
+    pub(crate) fn new(body: BaseBody) -> Self {
         ResponseBody {
             body: FuseBody::new(body),
             cur: Bytes::new(),
@@ -130,11 +130,7 @@ impl<B> ResponseBody<B> {
     }
 }
 
-impl<B> Stream for ResponseBody<B>
-where
-    B: Body<Data = Bytes>,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
+impl Stream for ResponseBody {
     type Item = Result<Bytes, Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -160,11 +156,7 @@ where
     }
 }
 
-impl<B> AsyncRead for ResponseBody<B>
-where
-    B: Body<Data = Bytes>,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
+impl AsyncRead for ResponseBody {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -179,11 +171,7 @@ where
     }
 }
 
-impl<B> AsyncBufRead for ResponseBody<B>
-where
-    B: Body<Data = Bytes>,
-    B::Error: Into<Box<dyn error::Error + Sync + Send>>,
-{
+impl AsyncBufRead for ResponseBody {
     fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
         while !self.cur.has_remaining() {
             match ready!(self.as_mut().project().body.poll_frame(cx))

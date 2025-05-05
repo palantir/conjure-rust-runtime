@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::Service;
 use crate::service::node::selector::balanced::{
     BalancedNodeSelectorLayer, BalancedNodeSelectorService,
 };
@@ -21,7 +20,7 @@ use crate::service::node::selector::pin_until_error::{
 };
 use crate::service::node::selector::single::{SingleNodeSelectorLayer, SingleNodeSelectorService};
 use crate::service::node::LimitedNode;
-use crate::service::Layer;
+use crate::service::{Layer, Service};
 use crate::{builder, Builder, NodeSelectionStrategy};
 use conjure_error::Error;
 use http::{Request, Response};
@@ -44,7 +43,7 @@ pub enum NodeSelectorLayer {
 }
 
 impl NodeSelectorLayer {
-    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> Result<NodeSelectorLayer, Error> {
+    pub fn new(builder: &Builder<builder::Complete>) -> Result<NodeSelectorLayer, Error> {
         let mut nodes = builder
             .postprocessed_uris()?
             .iter()
@@ -66,15 +65,15 @@ impl NodeSelectorLayer {
         } else {
             match builder.get_node_selection_strategy() {
                 NodeSelectionStrategy::PinUntilError => NodeSelectorLayer::PinUntilError(
-                    PinUntilErrorNodeSelectorLayer::new(ReshufflingNodes::new(nodes, builder)),
+                    PinUntilErrorNodeSelectorLayer::new(ReshufflingNodes::new(nodes)),
                 ),
                 NodeSelectionStrategy::PinUntilErrorWithoutReshuffle => {
                     NodeSelectorLayer::PinUntilErrorWithoutReshuffle(
-                        PinUntilErrorNodeSelectorLayer::new(FixedNodes::new(nodes, builder)),
+                        PinUntilErrorNodeSelectorLayer::new(FixedNodes::new(nodes)),
                     )
                 }
                 NodeSelectionStrategy::Balanced => {
-                    NodeSelectorLayer::Balanced(BalancedNodeSelectorLayer::new(nodes, builder))
+                    NodeSelectorLayer::Balanced(BalancedNodeSelectorLayer::new(nodes))
                 }
             }
         };

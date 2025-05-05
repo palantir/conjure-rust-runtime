@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{RemoteError, ThrottledError, UnavailableError};
-use crate::raw::Service;
-use crate::raw::{BodyError, RawBody};
-use crate::rng::ConjureRng;
 use crate::service::map_error::RawClientError;
-use crate::service::Layer;
+use crate::service::raw::{RawRequestBody, RequestBodyError};
+use crate::service::{Layer, Service};
 use crate::util::spans::{self, HttpSpanFuture};
 use crate::{builder, BodyWriter, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
@@ -46,11 +44,10 @@ pub struct RetryLayer {
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
-    rng: ConjureRng,
 }
 
 impl RetryLayer {
-    pub fn new<T>(builder: &Builder<builder::Complete<T>>) -> RetryLayer {
+    pub fn new(builder: &Builder<builder::Complete>) -> RetryLayer {
         RetryLayer {
             idempotency: builder.get_idempotency(),
             max_num_retries: if builder.mesh_mode() {
@@ -59,7 +56,6 @@ impl RetryLayer {
                 builder.get_max_num_retries()
             },
             backoff_slot_size: builder.get_backoff_slot_size(),
-            rng: ConjureRng::new(builder),
         }
     }
 }
@@ -73,7 +69,6 @@ impl<S> Layer<S> for RetryLayer {
             idempotency: self.idempotency,
             max_num_retries: self.max_num_retries,
             backoff_slot_size: self.backoff_slot_size,
-            rng: self.rng,
         }
     }
 }
@@ -83,12 +78,11 @@ pub struct RetryService<S> {
     idempotency: Idempotency,
     max_num_retries: u32,
     backoff_slot_size: Duration,
-    rng: ConjureRng,
 }
 
 impl<'a, S, B> Service<Request<AsyncRequestBody<'a, BodyWriter>>> for RetryService<S>
 where
-    S: Service<Request<RawBody>, Response = Response<B>, Error = Error> + 'a + Sync + Send,
+    S: Service<Request<RawRequestBody>, Response = Response<B>, Error = Error> + 'a + Sync + Send,
     S::Response: Send,
     B: 'static,
 {
@@ -123,7 +117,7 @@ struct State<'a, S> {
 
 impl<S, B> State<'_, S>
 where
-    S: Service<Request<RawBody>, Response = Response<B>, Error = Error>,
+    S: Service<Request<RawRequestBody>, Response = Response<B>, Error = Error>,
 {
     async fn call(
         mut self,
@@ -232,7 +226,7 @@ where
         req: Request<AsyncRequestBody<'_, BodyWriter>>,
     ) -> Result<S::Response, Error> {
         let (parts, body) = req.into_parts();
-        let (body, writer) = RawBody::new(body);
+        let (body, writer) = RawRequestBody::new(body);
         let req = Request::from_parts(parts, body);
 
         let (body_result, response_result) =
@@ -257,7 +251,7 @@ where
     fn deconflict_errors(&self, body_error: Error, hyper_error: Error) -> Error {
         let mut cause: &(dyn error::Error + 'static) = hyper_error.cause();
         loop {
-            if cause.is::<BodyError>() {
+            if cause.is::<RequestBodyError>() {
                 return body_error;
             }
             cause = match cause.source() {
@@ -296,9 +290,7 @@ where
                 if max == Duration::from_secs(0) {
                     Duration::from_secs(0)
                 } else {
-                    self.service
-                        .rng
-                        .with(|rng| rng.random_range(Duration::from_secs(0)..max))
+                    rand::rng().random_range(Duration::from_secs(0)..max)
                 }
             }
         };
@@ -361,8 +353,8 @@ enum AttemptOutcome<R> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::raw::RawBodyInner;
     use crate::service;
+    use crate::service::raw::RawRequestBodyInner;
     use crate::BodyWriter;
     use bytes::Bytes;
     use http::Method;
@@ -378,9 +370,9 @@ mod test {
     #[tokio::test]
     async fn no_body() {
         let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
-            |req: Request<RawBody>| async move {
+            |req: Request<RawRequestBody>| async move {
                 match req.body().inner {
-                    RawBodyInner::Empty => {}
+                    RawRequestBodyInner::Empty => {}
                     _ => panic!("expected empty body"),
                 }
 
@@ -400,9 +392,11 @@ mod test {
         let body = "hello world";
 
         let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
-            |req: Request<RawBody>| async move {
+            |req: Request<RawRequestBody>| async move {
                 match &req.body().inner {
-                    RawBodyInner::Single(chunk) => assert_eq!(chunk.data_ref().unwrap(), body),
+                    RawRequestBodyInner::Single(chunk) => {
+                        assert_eq!(chunk.data_ref().unwrap(), body)
+                    }
                     _ => panic!("expected single chunk body"),
                 }
 
@@ -438,9 +432,9 @@ mod test {
     #[tokio::test]
     async fn streamed_body() {
         let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
-            |req: Request<RawBody>| async move {
+            |req: Request<RawRequestBody>| async move {
                 match req.body().inner {
-                    RawBodyInner::Stream { .. } => {}
+                    RawRequestBodyInner::Stream { .. } => {}
                     _ => panic!("expected streaming body"),
                 }
                 let body = req.into_body().collect().await.unwrap();
@@ -480,7 +474,7 @@ mod test {
     #[tokio::test]
     async fn streamed_body_hangup() {
         let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
-            |req: Request<RawBody>| async move {
+            |req: Request<RawRequestBody>| async move {
                 let mut body = pin!(req.into_body());
                 body.frame().await.unwrap().unwrap();
 
@@ -519,7 +513,7 @@ mod test {
     #[tokio::test]
     async fn streamed_body_error() {
         let service = RetryLayer::new(&Builder::for_test()).layer(service::service_fn(
-            |req: Request<RawBody>| async move {
+            |req: Request<RawRequestBody>| async move {
                 req.into_body()
                     .collect()
                     .await
@@ -588,7 +582,7 @@ mod test {
         )
         .layer(service::service_fn({
             let attempt = AtomicUsize::new(0);
-            move |req: Request<RawBody>| {
+            move |req: Request<RawRequestBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
                     let body = req.into_body().collect().await.unwrap();
@@ -621,7 +615,7 @@ mod test {
         )
         .layer(service::service_fn({
             let attempt = AtomicUsize::new(0);
-            move |req: Request<RawBody>| {
+            move |req: Request<RawRequestBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
                     let body = req.into_body().collect().await.unwrap();
@@ -654,7 +648,7 @@ mod test {
         )
         .layer(service::service_fn({
             let attempt = AtomicUsize::new(0);
-            move |req: Request<RawBody>| {
+            move |req: Request<RawRequestBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
                     let body = req.into_body().collect().await.unwrap();
@@ -687,7 +681,7 @@ mod test {
         )
         .layer(service::service_fn({
             let attempt = AtomicUsize::new(0);
-            move |req: Request<RawBody>| {
+            move |req: Request<RawRequestBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
                     let body = req.into_body().collect().await.unwrap();
@@ -720,7 +714,7 @@ mod test {
         )
         .layer(service::service_fn({
             let attempt = AtomicUsize::new(0);
-            move |req: Request<RawBody>| {
+            move |req: Request<RawRequestBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
                     let body = req.into_body().collect().await.unwrap();
@@ -812,7 +806,7 @@ mod test {
         )
         .layer(service::service_fn({
             let attempt = AtomicUsize::new(0);
-            move |req: Request<RawBody>| {
+            move |req: Request<RawRequestBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
                     match attempt {
@@ -847,7 +841,7 @@ mod test {
         )
         .layer(service::service_fn({
             let attempt = AtomicUsize::new(0);
-            move |req: Request<RawBody>| {
+            move |req: Request<RawRequestBody>| {
                 let attempt = attempt.fetch_add(1, Ordering::SeqCst);
                 async move {
                     let body = req.into_body().collect().await.unwrap();

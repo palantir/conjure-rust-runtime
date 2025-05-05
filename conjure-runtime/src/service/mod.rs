@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::raw::Service;
 use std::future::Future;
 
 pub mod gzip;
@@ -20,6 +19,7 @@ pub mod map_error;
 pub mod metrics;
 pub mod node;
 pub mod proxy;
+pub mod raw;
 pub mod response_body;
 pub mod retry;
 pub mod root_span;
@@ -28,6 +28,21 @@ pub mod tls_metrics;
 pub mod trace_propagation;
 pub mod user_agent;
 pub mod wait_for_spans;
+
+/// An asynchronous function from request to response.
+///
+/// This trait is based on the `tower::Service` trait, but differs in two ways. It does not have a `poll_ready` method
+/// as our client-side backpressure depends on the request, and the `call` method takes `&self` rather than `&mut self`
+/// as our client is designed to be used through a shared reference.
+pub trait Service<R> {
+    /// The response type returned by the service.
+    type Response;
+    /// The error type returned by the service.
+    type Error;
+
+    /// Asynchronously perform the request.
+    fn call(&self, req: R) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send;
+}
 
 /// A function from one service type to another.
 ///

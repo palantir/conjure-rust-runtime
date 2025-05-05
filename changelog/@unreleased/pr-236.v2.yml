@@ -1,0 +1,6 @@
+type: break
+break:
+  description: Removed the ability to customize the raw HTTP client and set the RNG
+    seed.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/236

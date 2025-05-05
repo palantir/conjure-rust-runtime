@@ -121,18 +121,18 @@
 //! * `conjure-runtime: request`
 //!     * `conjure-runtime: attempt`
 //!         * `conjure-runtime: acquire-permit` - If client QoS is enabled and the node selection strategy is not
-//!             [`Balanced`], this span covers the time spent acquiring a concurrency limiter permit.
+//!           [`Balanced`], this span covers the time spent acquiring a concurrency limiter permit.
 //!         * `conjure-runtime: balanced-node-selection` - If the node selection strategy is [`Balanced`], this span
-//!             covers the time spent selecting a node and (if client QoS is enabled) acquiring a concurrency limiter
-//!             permit.
+//!           covers the time spent selecting a node and (if client QoS is enabled) acquiring a concurrency limiter
+//!           permit.
 //!         * `conjure-runtime: wait-for-headers` - This span is sent to the server, and lasts until the server sends
-//!             the headers of the response.
+//!           the headers of the response.
 //!         * `conjure-runtime: wait-for-body` - This span is tracked along with the response body, and lasts until the
-//!             [`ResponseBody`] object is dropped. It is "detached" from the zipkin tracer so new spans created outside
-//!             of `conjure-runtime` will not be parented to it, and can outlive the parent `conjure-runtime` spans. It
-//!             will not be created if an IO error occurs before headers are received.
+//!           [`ResponseBody`] object is dropped. It is "detached" from the zipkin tracer so new spans created outside
+//!           of `conjure-runtime` will not be parented to it, and can outlive the parent `conjure-runtime` spans. It
+//!           will not be created if an IO error occurs before headers are received.
 //!     * `conjure-runtime: backoff-with-jitter` - If the request is retried, this span tracks the time spent waiting
-//!         between attempts.
+//!       between attempts.
 //!     * `conjure-runtime: attempt`
 //!         * ...
 //!
@@ -163,17 +163,17 @@
 //! ### Standard Metrics
 //!
 //! * `client.response (channel-name: <channel_name>, service-name: <service_name>, endpoint: <endpoint>, status:
-//!     <status>)` - A `Timer` recording request durations per endpoint. Note that the requests timed by this metric
-//!     are the user-percieved request, including any backoffs/retries/etc. It only records the time until response
-//!     headers are received, not until the entire response body is read. The `status` tag will be `success` if the
-//!     response status was 2xx and will be `failure` otherwise (QoS failure, internal server error, IO error, etc).
+//!   <status>)` - A `Timer` recording request durations per endpoint. Note that the requests timed by this metric
+//!   are the user-percieved request, including any backoffs/retries/etc. It only records the time until response
+//!   headers are received, not until the entire response body is read. The `status` tag will be `success` if the
+//!   response status was 2xx and will be `failure` otherwise (QoS failure, internal server error, IO error, etc).
 //! * `tls.handshake (context: <service_name>, protocol: <protocol_version>, cipher: <cipher_name>)` - A `Meter`
-//!     tracking the rate of TLS handshakes, tagged by the service, TLS protocol version (e.g. `TLSv1.3`), and cipher
-//!     name (e.g. `TLS_CHACHA20_POLY1305_SHA256`).
+//!   tracking the rate of TLS handshakes, tagged by the service, TLS protocol version (e.g. `TLSv1.3`), and cipher
+//!   name (e.g. `TLS_CHACHA20_POLY1305_SHA256`).
 //! * `conjure-runtime.concurrencylimiter.max (service: <service_name>, hostIndex: <host_index>)` - A `Gauge` reporting
-//!     the maximum number of concurrent requests which are currently permitted to be made to a specific host.
+//!   the maximum number of concurrent requests which are currently permitted to be made to a specific host.
 //! * `conjure-runtime.concurrencylimiter.in-flight (service: <service_name>, hostIndex: <host_index>)` - A `Gauge`
-//!     reporting the current number of requests being made to a specific host.
+//!   reporting the current number of requests being made to a specific host.
 //!
 //! ### Host Metrics
 //!
@@ -210,8 +210,6 @@ pub mod client_factory;
 pub mod errors;
 mod host_metrics;
 pub mod per_host_clients;
-pub mod raw;
-mod rng;
 mod service;
 #[cfg(test)]
 mod test;
