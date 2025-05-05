@@ -41,7 +41,7 @@ pub trait Service<R> {
     type Error;
 
     /// Asynchronously perform the request.
-    fn call(&self, req: R) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send;
+    async fn call(&self, req: R) -> Result<Self::Response, Self::Error>;
 }
 
 /// A function from one service type to another.
@@ -133,7 +133,7 @@ pub struct ServiceFn<T>(T);
 impl<T, R, F, S, E> Service<R> for ServiceFn<T>
 where
     T: Fn(R) -> F,
-    F: Future<Output = Result<S, E>> + Send,
+    F: Future<Output = Result<S, E>>,
 {
     type Response = S;
     type Error = E;

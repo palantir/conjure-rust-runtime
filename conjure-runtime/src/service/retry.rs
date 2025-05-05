@@ -82,8 +82,7 @@ pub struct RetryService<S> {
 
 impl<'a, S, B> Service<Request<AsyncRequestBody<'a, BodyWriter>>> for RetryService<S>
 where
-    S: Service<Request<RawRequestBody>, Response = Response<B>, Error = Error> + 'a + Sync + Send,
-    S::Response: Send,
+    S: Service<Request<RawRequestBody>, Response = Response<B>, Error = Error> + 'a,
     B: 'static,
 {
     type Response = S::Response;

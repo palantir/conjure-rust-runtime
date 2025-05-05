@@ -233,9 +233,8 @@ where
 
 impl<S, T, B1, B2> Service<Request<B1>> for BalancedNodeSelectorService<S, T>
 where
-    T: Entropy + Sync + Send,
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error> + Sync + Send,
-    B1: Sync + Send,
+    T: Entropy,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
     type Response = S::Response;
     type Error = S::Error;

@@ -48,8 +48,7 @@ pub struct EmptyNodeSelectorService<S> {
 
 impl<S, B> Service<Request<B>> for EmptyNodeSelectorService<S>
 where
-    S: Service<Request<B>, Error = Error> + Sync,
-    B: Send,
+    S: Service<Request<B>, Error = Error>,
 {
     type Response = S::Response;
     type Error = Error;

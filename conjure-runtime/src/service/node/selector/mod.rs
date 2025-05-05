@@ -110,8 +110,7 @@ pub enum NodeSelectorService<S> {
 
 impl<S, B1, B2> Service<Request<B1>> for NodeSelectorService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error> + Sync + Send,
-    B1: Sync + Send,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
     type Response = S::Response;
     type Error = S::Error;

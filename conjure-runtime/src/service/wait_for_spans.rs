@@ -37,8 +37,7 @@ pub struct WaitForSpansService<S> {
 
 impl<S, R, B> Service<R> for WaitForSpansService<S>
 where
-    S: Service<R, Response = Response<B>> + Sync + Send,
-    R: Send,
+    S: Service<R, Response = Response<B>>,
 {
     type Response = Response<WaitForSpansBody<B>>;
     type Error = S::Error;

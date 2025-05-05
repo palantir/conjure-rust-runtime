@@ -62,8 +62,7 @@ pub struct MetricsService<S> {
 
 impl<S, B1, B2> Service<Request<B1>> for MetricsService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error> + Sync + Send,
-    B1: Send,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
 {
     type Response = S::Response;
     type Error = S::Error;

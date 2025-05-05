@@ -71,10 +71,8 @@ pub struct HttpErrorService<S> {
 
 impl<S, B1, B2> Service<Request<B1>> for HttpErrorService<S>
 where
-    S: Service<Request<B1>, Response = Response<B2>, Error = Error> + Sync + Send,
-    B1: Sync + Send,
-    B2: Body + Send,
-    B2::Data: Send,
+    S: Service<Request<B1>, Response = Response<B2>, Error = Error>,
+    B2: Body,
     B2::Error: Into<Box<dyn error::Error + Sync + Send>>,
 {
     type Response = Response<B2>;
