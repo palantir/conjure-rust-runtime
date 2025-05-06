@@ -49,9 +49,8 @@ pub struct MapErrorService<S> {
 
 impl<S, R> Service<R> for MapErrorService<S>
 where
-    S: Service<R> + Sync + Send,
+    S: Service<R>,
     S::Error: Into<Box<dyn error::Error + Sync + Send>>,
-    R: Sync + Send,
 {
     type Response = S::Response;
     type Error = Error;

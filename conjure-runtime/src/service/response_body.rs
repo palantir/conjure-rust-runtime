@@ -32,8 +32,7 @@ pub struct ResponseBodyService<S> {
 
 impl<S, R> Service<R> for ResponseBodyService<S>
 where
-    S: Service<R, Response = Response<BaseBody>> + Sync + Send,
-    R: Send,
+    S: Service<R, Response = Response<BaseBody>>,
 {
     type Response = Response<ResponseBody>;
     type Error = S::Error;
