@@ -17,7 +17,7 @@ use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
 use crate::service::metrics::MetricsLayer;
 use crate::service::node::{NodeMetricsLayer, NodeSelectorLayer, NodeUriLayer};
-use crate::service::proxy::{ProxyConfig, ProxyLayer};
+use crate::service::proxy::ProxyLayer;
 use crate::service::raw::{RawClient, RawResponseBody};
 use crate::service::response_body::ResponseBodyLayer;
 use crate::service::retry::RetryLayer;
@@ -31,7 +31,13 @@ use crate::weak_cache::Cached;
 use crate::{builder, BodyWriter, Builder, ResponseBody};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
-use conjure_http::client::{AsyncClient, AsyncRequestBody, AsyncService};
+use conjure_http::client::AsyncService;
+#[cfg(not(target_arch = "wasm32"))]
+use conjure_http::client::{AsyncClient, AsyncRequestBody};
+#[cfg(target_arch = "wasm32")]
+use conjure_http::client::{
+    LocalAsyncClient as AsyncClient, LocalAsyncRequestBody as AsyncRequestBody,
+};
 use conjure_runtime_config::ServiceConfig;
 use http::{Request, Response};
 use refreshable::Subscription;
@@ -71,8 +77,6 @@ impl ClientState {
     pub(crate) fn new(builder: &Builder<builder::Complete>) -> Result<ClientState, Error> {
         let client = RawClient::new(builder)?;
 
-        let proxy = ProxyConfig::from_config(builder.get_proxy())?;
-
         let service = ServiceBuilder::new()
             .layer(ResponseBodyLayer)
             .layer(MetricsLayer::new(builder))
@@ -83,7 +87,7 @@ impl ClientState {
             .layer(NodeSelectorLayer::new(builder)?)
             .layer(NodeUriLayer)
             .layer(NodeMetricsLayer)
-            .layer(ProxyLayer::new(&proxy))
+            .layer(ProxyLayer::new(builder)?)
             .layer(TracePropagationLayer)
             .layer(UserAgentLayer::new(builder))
             .layer(GzipLayer)

@@ -5,7 +5,7 @@ version = "6.1.0"
 resolver = "2"
 members = [
     "conjure-runtime",
-    "conjure-runtime-config",
+    "conjure-runtime-config", "conjure-runtime-wasm-test",
     "conjure-verification",
     "conjure-verification-api",
 ]

@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::builder;
+use crate::rt::time::Instant;
 use crate::service::{Layer, Service};
 use crate::Builder;
 use conjure_error::Error;
 use conjure_http::client::Endpoint;
 use http::{Request, Response};
 use std::sync::Arc;
-use tokio::time::Instant;
 use witchcraft_metrics::{MetricId, MetricRegistry};
 
 struct Metrics {

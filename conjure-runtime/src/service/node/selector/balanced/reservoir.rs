@@ -11,9 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::rt::time::Instant;
 use crate::util::atomic_f64::AtomicF64;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::time::{Duration, Instant};
+use std::time::Duration;
 
 const DECAYS_PER_HALF_LIFE: u64 = 10;
 

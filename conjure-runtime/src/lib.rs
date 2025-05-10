@@ -202,6 +202,7 @@ pub use crate::host_metrics::*;
 pub use crate::per_host_clients::{Host, PerHostClients};
 pub use crate::user_agent::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod blocking;
 mod body;
 pub mod builder;
@@ -210,6 +211,7 @@ pub mod client_factory;
 pub mod errors;
 mod host_metrics;
 pub mod per_host_clients;
+mod rt;
 mod service;
 #[cfg(test)]
 mod test;

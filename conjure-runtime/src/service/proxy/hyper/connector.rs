@@ -11,8 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::service::proxy::{HttpProxyConfig, ProxyConfig};
+use crate::service::proxy::hyper::{HttpProxyConfig, ProxyConfig};
+use crate::{builder, Builder};
 use bytes::Bytes;
+use conjure_error::Error;
 use futures::future::{self, BoxFuture};
 use http::header::{HOST, PROXY_AUTHORIZATION};
 use http::uri::Scheme;
@@ -41,13 +43,15 @@ pub struct ProxyConnectorLayer {
 }
 
 impl ProxyConnectorLayer {
-    pub fn new(config: &ProxyConfig) -> ProxyConnectorLayer {
+    pub fn new(builder: &Builder<builder::Complete>) -> Result<ProxyConnectorLayer, Error> {
+        let config = ProxyConfig::from_config(builder.get_proxy())?;
+
         let config = match config {
             ProxyConfig::Http(config) => Some(config.clone()),
             _ => None,
         };
 
-        ProxyConnectorLayer { config }
+        Ok(ProxyConnectorLayer { config })
     }
 }
 
@@ -226,7 +230,6 @@ impl error::Error for ProxyTunnelError {}
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::config::{self, BasicCredentials, HostAndPort};
     use hyper_util::rt::TokioIo;
     use tower_util::ServiceExt;
 
@@ -268,7 +271,7 @@ mod test {
 
     #[tokio::test]
     async fn unproxied() {
-        let service = ProxyConnectorLayer::new(&ProxyConfig::Direct).layer(tower_util::service_fn(
+        let service = ProxyConnectorLayer { config: None }.layer(tower_util::service_fn(
             |uri: Uri| async move {
                 assert_eq!(uri, "http://foobar.com");
                 Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
@@ -287,20 +290,18 @@ mod test {
 
     #[tokio::test]
     async fn http_proxied_http() {
-        let config = ProxyConfig::from_config(&config::ProxyConfig::Http(
-            config::HttpProxyConfig::builder()
-                .host_and_port(HostAndPort::new("127.0.0.1", 1234))
-                .build(),
-        ))
-        .unwrap();
-        let service = ProxyConnectorLayer::new(&config).layer(tower_util::service_fn(
-            |uri: Uri| async move {
-                assert_eq!(uri, "http://127.0.0.1:1234");
-                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
-                    tokio_test::io::Builder::new().build(),
-                )))
-            },
-        ));
+        let service = ProxyConnectorLayer {
+            config: Some(HttpProxyConfig {
+                uri: "http://127.0.0.1:1234".parse().unwrap(),
+                credentials: None,
+            }),
+        }
+        .layer(tower_util::service_fn(|uri: Uri| async move {
+            assert_eq!(uri, "http://127.0.0.1:1234");
+            Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
+                tokio_test::io::Builder::new().build(),
+            )))
+        }));
 
         let conn = service
             .oneshot("http://foobar.com".parse().unwrap())
@@ -312,28 +313,25 @@ mod test {
 
     #[tokio::test]
     async fn http_proxied_https() {
-        let config = ProxyConfig::from_config(&config::ProxyConfig::Http(
-            config::HttpProxyConfig::builder()
-                .host_and_port(HostAndPort::new("127.0.0.1", 1234))
-                .credentials(Some(BasicCredentials::new("admin", "hunter2")))
-                .build(),
-        ))
-        .unwrap();
-        let service = ProxyConnectorLayer::new(&config).layer(tower_util::service_fn(
-            |uri: Uri| async move {
-                assert_eq!(uri, "http://127.0.0.1:1234");
-                let mut builder = tokio_test::io::Builder::new();
-                builder.write(
-                    b"CONNECT foobar.com:443 HTTP/1.1\r\n\
+        let service = ProxyConnectorLayer {
+            config: Some(HttpProxyConfig {
+                uri: "http://127.0.0.1:1234".parse().unwrap(),
+                credentials: Some("Basic YWRtaW46aHVudGVyMg==".parse().unwrap()),
+            }),
+        }
+        .layer(tower_util::service_fn(|uri: Uri| async move {
+            assert_eq!(uri, "http://127.0.0.1:1234");
+            let mut builder = tokio_test::io::Builder::new();
+            builder.write(
+                b"CONNECT foobar.com:443 HTTP/1.1\r\n\
                     host: foobar.com:443\r\n\
                     proxy-authorization: Basic YWRtaW46aHVudGVyMg==\r\n\r\n",
-                );
-                builder.read(b"HTTP/1.1 200 OK\r\n\r\n");
-                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
-                    builder.build(),
-                )))
-            },
-        ));
+            );
+            builder.read(b"HTTP/1.1 200 OK\r\n\r\n");
+            Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
+                builder.build(),
+            )))
+        }));
 
         let conn = service
             .oneshot("https://admin:hunter2@foobar.com/fizzbuzz".parse().unwrap())
@@ -345,26 +343,24 @@ mod test {
 
     #[tokio::test]
     async fn http_proxied_https_error() {
-        let config = ProxyConfig::from_config(&config::ProxyConfig::Http(
-            config::HttpProxyConfig::builder()
-                .host_and_port(HostAndPort::new("127.0.0.1", 1234))
-                .build(),
-        ))
-        .unwrap();
-        let service = ProxyConnectorLayer::new(&config).layer(tower_util::service_fn(
-            |uri: Uri| async move {
-                assert_eq!(uri, "http://127.0.0.1:1234");
-                let mut builder = tokio_test::io::Builder::new();
-                builder.write(
-                    b"CONNECT foobar.com:443 HTTP/1.1\r\n\
+        let service = ProxyConnectorLayer {
+            config: Some(HttpProxyConfig {
+                uri: "http://127.0.0.1:1234".parse().unwrap(),
+                credentials: None,
+            }),
+        }
+        .layer(tower_util::service_fn(|uri: Uri| async move {
+            assert_eq!(uri, "http://127.0.0.1:1234");
+            let mut builder = tokio_test::io::Builder::new();
+            builder.write(
+                b"CONNECT foobar.com:443 HTTP/1.1\r\n\
                     host: foobar.com:443\r\n\r\n",
-                );
-                builder.read(b"HTTP/1.1 401 Unauthorized\r\n\r\n");
-                Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
-                    builder.build(),
-                )))
-            },
-        ));
+            );
+            builder.read(b"HTTP/1.1 401 Unauthorized\r\n\r\n");
+            Ok::<_, Box<dyn error::Error + Sync + Send>>(MockConnection(TokioIo::new(
+                builder.build(),
+            )))
+        }));
 
         let err = service
             .oneshot("https://admin:hunter2@foobar.com/fizzbuzz".parse().unwrap())

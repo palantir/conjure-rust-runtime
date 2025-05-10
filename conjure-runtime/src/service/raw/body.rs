@@ -14,7 +14,13 @@
 use crate::BodyWriter;
 use bytes::Bytes;
 use conjure_error::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody};
+#[cfg(target_arch = "wasm32")]
+use conjure_http::client::{
+    BoxLocalAsyncWriteBody as BoxAsyncWriteBody, LocalAsyncRequestBody as AsyncRequestBody,
+    LocalAsyncWriteBody as AsyncWriteBody,
+};
 use futures::channel::{mpsc, oneshot};
 use futures::{pin_mut, Stream};
 use http_body::{Frame, SizeHint};

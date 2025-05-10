@@ -23,7 +23,9 @@ pub mod raw;
 pub mod response_body;
 pub mod retry;
 pub mod root_span;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod timeout;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tls_metrics;
 pub mod trace_propagation;
 pub mod user_agent;

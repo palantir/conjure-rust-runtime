@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::rt::time::Instant;
 use crate::service::node::LimitedNode;
 use crate::service::{Layer, Service};
 use arc_swap::ArcSwap;
@@ -21,7 +22,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use tokio::time::{Duration, Instant};
+use std::time::Duration;
 
 // we reshuffle nodes every 10 minutes on average, with 30 seconds of jitter to either side
 const RESHUFFLE_EVERY: Duration = Duration::from_secs(10 * 60 - 30);

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //! The client builder.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::blocking;
 use crate::client::ClientState;
 use crate::config::{ProxyConfig, SecurityConfig, ServiceConfig};
@@ -22,6 +23,7 @@ use conjure_error::Error;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Handle;
 use url::Url;
 use witchcraft_metrics::MetricRegistry;
@@ -63,6 +65,7 @@ pub(crate) struct CachedConfig {
 pub(crate) struct UncachedConfig {
     pub(crate) metrics: Option<Arc<MetricRegistry>>,
     pub(crate) host_metrics: Option<Arc<HostMetricsRegistry>>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) blocking_handle: Option<Handle>,
 }
 
@@ -123,6 +126,7 @@ impl Builder<UserAgentStage> {
             uncached: UncachedConfig {
                 metrics: None,
                 host_metrics: None,
+                #[cfg(not(target_arch = "wasm32"))]
                 blocking_handle: None,
             },
         })
@@ -445,6 +449,7 @@ impl Builder<Complete> {
     ///
     /// Defaults to a `conjure-runtime` internal `Runtime`.
     #[inline]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
         self.0.uncached.blocking_handle = Some(blocking_handle);
         self
@@ -452,6 +457,7 @@ impl Builder<Complete> {
 
     /// Returns the builder's configured blocking handle.
     #[inline]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_blocking_handle(&self) -> Option<&Handle> {
         self.0.uncached.blocking_handle.as_ref()
     }
@@ -509,6 +515,7 @@ impl Builder<Complete> {
     }
 
     /// Creates a new `blocking::Client`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn build_blocking(&self) -> Result<blocking::Client, Error> {
         self.build().map(|client| blocking::Client {
             client,

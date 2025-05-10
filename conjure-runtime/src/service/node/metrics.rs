@@ -11,11 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::rt::time::Instant;
 use crate::service::node::Node;
 use crate::service::{Layer, Service};
 use http::{Request, Response};
 use std::sync::Arc;
-use tokio::time::Instant;
 
 /// A layer which updates the host metrics for the node stored in the request's extensions map.
 pub struct NodeMetricsLayer;
