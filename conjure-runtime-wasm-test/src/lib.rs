@@ -35,7 +35,6 @@ async fn google() {
 
     let req = Request::builder()
         .uri("/")
-        .header("Accept-Encoding", "identity")
         .extension(Endpoint::new("google", None, "get", "/"))
         .body(LocalAsyncRequestBody::Empty)
         .unwrap();
