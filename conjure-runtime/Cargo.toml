@@ -10,7 +10,6 @@ readme = "../README.md"
 
 [dependencies]
 arc-swap = "1.0"
-base64 = "0.22"
 bytes = "1.0"
 conjure-error = "4"
 conjure-http = "4.10"
@@ -28,22 +27,19 @@ parking_lot = "0.12"
 percent-encoding = "2.1"
 pin-project = "1.0"
 rand = "0.9"
-rand_pcg = "0.9"
 refreshable = "2.0"
 regex = "1.0"
 serde-value = "0.7"
 serde = "1.0"
-tokio-io-timeout = "1.0"
 tokio-util = { version = "0.7", features = ["codec"] }
 tokio = { version = "1.0", features = ["io-util", "sync"] }
-tower-layer = "0.3"
-tower-service = "0.3"
 url = "2.0"
 witchcraft-log = "4"
 witchcraft-metrics = "1"
 zipkin = "1.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+base64 = "0.22"
 flate2 = "1.0"
 hyper = { version = "1", features = ["http1", "http2", "client"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [
@@ -66,7 +62,10 @@ rustls = { version = "0.23", default-features = false, features = [
     "std",
     "tls12",
 ] }
+tokio-io-timeout = "1.0"
 tokio = { version = "1.0", features = ["rt-multi-thread", "time"] }
+tower-layer = "0.3"
+tower-service = "0.3"
 webpki-roots = "1.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
