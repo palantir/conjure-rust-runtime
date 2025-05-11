@@ -22,17 +22,12 @@ version: 2
 jobs:
   circle-all:
     docker:
-      - image: rust:1.85.0
+      - image: cimg/rust:1.86.0-node
     environment:
       CARGO_BUILD_RUSTFLAGS: -D warnings
     steps:
       - checkout
       - run: apt-get update && apt-get install -y cmake 
-      - run: |
-          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-          echo 'export NVM_DIR="$HOME/.nvm"' >> "$BASH_ENV"
-          echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" --no-use' >> "$BASH_ENV"
-      - run: nvm install 22 && node --version
       - run: rustup component add rustfmt clippy
       - run: rustup target add wasm32-unknown-unknown
       - *RESTORE_REGISTRY
