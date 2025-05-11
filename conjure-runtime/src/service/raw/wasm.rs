@@ -26,6 +26,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{ready, Context, Poll};
+use std::{error, fmt};
 use wasm_bindgen::prelude::{wasm_bindgen, Closure, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
@@ -51,7 +52,7 @@ impl RawClient {
 
 impl Service<Request<RawRequestBody>> for RawClient {
     type Response = Response<RawResponseBody>;
-    type Error = String;
+    type Error = Box<dyn error::Error + Sync + Send>;
 
     async fn call(&self, req: Request<RawRequestBody>) -> Result<Self::Response, Self::Error> {
         let (parts, body) = req.into_parts();
@@ -59,7 +60,7 @@ impl Service<Request<RawRequestBody>> for RawClient {
         let init = RequestInit::new();
         init.set_method(parts.method.as_str());
 
-        let headers = Headers::new().map_err(|e| format!("{e:?}"))?;
+        let headers = Headers::new().map_err(JsError::new)?;
         for (mut name, value) in &parts.headers {
             if name == header::USER_AGENT {
                 name = &FETCH_USER_AGENT;
@@ -67,7 +68,7 @@ impl Service<Request<RawRequestBody>> for RawClient {
 
             headers
                 .append(name.as_str(), value.to_str().map_err(|e| e.to_string())?)
-                .map_err(|e| format!("{e:?}"))?;
+                .map_err(JsError::new)?;
         }
 
         init.set_headers(headers.as_ref());
@@ -109,21 +110,21 @@ impl Service<Request<RawRequestBody>> for RawClient {
             underlying_source.set_pull(&pull.as_ref().unchecked_ref());
 
             let stream = ReadableStream::new_with_underlying_source(underlying_source.as_ref())
-                .map_err(|e| format!("{e:?}"))?;
+                .map_err(JsError::new)?;
             init.set_body(stream.as_ref());
         }
 
-        let abort_controller = AbortController::new().map_err(|e| format!("{e:?}"))?;
+        let abort_controller = AbortController::new().map_err(JsError::new)?;
         init.set_signal(Some(&abort_controller.signal()));
 
         let guard = AbortGuard { abort_controller };
 
         let request = web_sys::Request::new_with_str_and_init(&parts.uri.to_string(), &init)
-            .map_err(|e| format!("{e:?}"))?;
+            .map_err(JsError::new)?;
 
         let response = JsFuture::from(fetch_with_request(&request))
             .await
-            .map_err(|e| format!("{e:?}"))?;
+            .map_err(JsError::new)?;
         let response = response.unchecked_into::<web_sys::Response>();
 
         let body = RawResponseBody {
@@ -137,16 +138,16 @@ impl Service<Request<RawRequestBody>> for RawClient {
         };
         let mut resp = Response::new(body);
 
-        *resp.status_mut() = StatusCode::from_u16(response.status()).map_err(|e| e.to_string())?;
+        *resp.status_mut() = StatusCode::from_u16(response.status())?;
 
         for pair in response.headers().entries() {
-            let pair = pair.map_err(|e| format!("{e:?}"))?;
+            let pair = pair.map_err(JsError::new)?;
             let pair = pair.unchecked_into::<Array>();
 
             let name = ToString::to_string(&pair.at(0).unchecked_into::<JsString>());
-            let name = HeaderName::try_from(name).map_err(|e| e.to_string())?;
+            let name = HeaderName::try_from(name)?;
             let value = ToString::to_string(&pair.at(1).unchecked_into::<JsString>());
-            let value = HeaderValue::try_from(value).map_err(|e| e.to_string())?;
+            let value = HeaderValue::try_from(value)?;
 
             resp.headers_mut().append(name, value);
         }
@@ -174,7 +175,7 @@ pub struct RawResponseBody {
 
 impl Body for RawResponseBody {
     type Data = Bytes;
-    type Error = String;
+    type Error = JsError;
 
     fn poll_frame(
         mut self: Pin<&mut Self>,
@@ -190,7 +191,7 @@ impl Body for RawResponseBody {
             },
         };
 
-        let chunk = ready!(Pin::new(pending).poll(cx)).map_err(|e| format!("{e:?}"))?;
+        let chunk = ready!(Pin::new(pending).poll(cx)).map_err(JsError::new)?;
         this.pending = None;
 
         let chunk = ReadableStreamReadResult::from(chunk);
@@ -204,3 +205,20 @@ impl Body for RawResponseBody {
         Poll::Ready(Some(Ok(Frame::data(Bytes::from(chunk.to_vec())))))
     }
 }
+
+#[derive(Debug)]
+pub struct JsError(String);
+
+impl JsError {
+    fn new(raw: JsValue) -> Self {
+        JsError(format!("{raw:?}"))
+    }
+}
+
+impl fmt::Display for JsError {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, fmt)
+    }
+}
+
+impl error::Error for JsError {}
