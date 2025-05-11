@@ -15,7 +15,6 @@ use crate::service::Layer;
 
 pub type DecodedBody<T> = T;
 
-/// The fetch API handles content encoding so this is a no-op on wasm.
 pub struct GzipLayer;
 
 impl<S> Layer<S> for GzipLayer {

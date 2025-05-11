@@ -13,10 +13,10 @@
 // limitations under the License.
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::hyper::*;
-#[cfg(target_arch = "wasm32")]
-pub use self::wasm::*;
+#[cfg(all(target_arch = "wasm32", feature = "js"))]
+pub use self::js::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod hyper;
-#[cfg(target_arch = "wasm32")]
-mod wasm;
+#[cfg(all(target_arch = "wasm32", feature = "js"))]
+mod js;
