@@ -54,6 +54,8 @@ impl Service<Request<RawRequestBody>> for RawClient {
     type Response = Response<RawResponseBody>;
     type Error = Box<dyn error::Error + Sync + Send>;
 
+    // The fetch API promises to call these futures sequentially
+    #[allow(clippy::await_holding_refcell_ref)]
     async fn call(&self, req: Request<RawRequestBody>) -> Result<Self::Response, Self::Error> {
         let (parts, body) = req.into_parts();
 
@@ -89,7 +91,7 @@ impl Service<Request<RawRequestBody>> for RawClient {
                                 Some(Ok(frame)) => match frame.data_ref() {
                                     Some(data) => {
                                         let chunk = Uint8Array::new_with_length(data.len() as u32);
-                                        chunk.copy_from(&data);
+                                        chunk.copy_from(data);
                                         controller.enqueue_with_chunk(&chunk.into())?;
                                         Ok(JsValue::UNDEFINED)
                                     }
@@ -107,7 +109,7 @@ impl Service<Request<RawRequestBody>> for RawClient {
                     })
                 },
             ));
-            underlying_source.set_pull(&pull.as_ref().unchecked_ref());
+            underlying_source.set_pull(pull.as_ref().unchecked_ref());
 
             let stream = ReadableStream::new_with_underlying_source(underlying_source.as_ref())
                 .map_err(JsError::new)?;
