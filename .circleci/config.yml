@@ -24,7 +24,7 @@ jobs:
     docker:
       - image: rust:1.85.0
     environment:
-      RUSTFLAGS: -D warnings
+      CARGO_BUILD_RUSTFLAGS: -D warnings
     steps:
       - checkout
       - run: apt-get update && apt-get install -y cmake
