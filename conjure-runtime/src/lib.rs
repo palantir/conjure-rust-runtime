@@ -103,6 +103,13 @@
 //! communicate between services in a distributed system. It is broadly designed to align with the [`dialogue`] Java
 //! library, though it does differ in various ways.
 //!
+//! ## WASM
+//!
+//! The client supports WASM targets running in a JavaScript environment using the `fetch` API as the underlying HTTP
+//! client instead of `hyper`. The `js` Cargo feature must be enabled to opt-in. Many low-level connection configuration
+//! options (HTTP proxies, socket IO timeouts, etc) are not supported. Since JavaScript APIs are not thread-safe, the
+//! client only implements the [`LocalAsyncClient`] trait. The blocking client implementation is not available.
+//!
 //! ## Error Propagation
 //!
 //! Servers should use the standard Conjure error format to propagate application-specific errors to callers. Non-QoS
@@ -187,6 +194,7 @@
 //! [`zipkin`]: https://docs.rs/zipkin
 //! [`Balanced`]: NodeSelectionStrategy::Balanced
 //! [`MetricRegistry`]: witchcraft_metrics::MetricRegistry
+//! [`LocalAsyncClient`]: conjure_http::client::LocalAsyncClient
 #![warn(missing_docs, clippy::all)]
 
 pub use crate::body::*;
