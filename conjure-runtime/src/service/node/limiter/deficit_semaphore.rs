@@ -14,7 +14,6 @@
 use parking_lot::Mutex;
 use pin_list::{Node, NodeData, PinList};
 use pin_project::{pin_project, pinned_drop};
-use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -73,10 +72,11 @@ impl DeficitSemaphore {
 type PinListTypes = dyn pin_list::Types<
     Id = pin_list::id::Checked,
     Protected = Option<Waker>,
-    // We never enter the removed state (Infallible is an empty enum)
-    Removed = Infallible,
+    Removed = Void,
     Unprotected = (),
 >;
+
+enum Void {}
 
 struct State {
     total_permits: usize,
