@@ -14,6 +14,7 @@
 use parking_lot::Mutex;
 use pin_list::{Node, NodeData, PinList};
 use pin_project::{pin_project, pinned_drop};
+use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -72,7 +73,8 @@ impl DeficitSemaphore {
 type PinListTypes = dyn pin_list::Types<
     Id = pin_list::id::Checked,
     Protected = Option<Waker>,
-    Removed = (),
+    // We never enter the removed state (Infallible is an empty enum)
+    Removed = Infallible,
     Unprotected = (),
 >;
 
@@ -120,10 +122,9 @@ impl PinnedDrop for Acquire {
         let mut state = this.semaphore.0.lock();
 
         // if we were up next but dropped before taking our permit, wake the next waiter
-        if let (NodeData::Linked(waker), ()) = node.reset(&mut state.waiters) {
-            if waker.is_none() {
-                state.maybe_wake();
-            }
+        let (NodeData::Linked(waker), ()) = node.reset(&mut state.waiters);
+        if waker.is_none() {
+            state.maybe_wake();
         }
     }
 }
