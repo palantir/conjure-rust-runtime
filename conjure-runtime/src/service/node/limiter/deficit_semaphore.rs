@@ -145,6 +145,7 @@ impl Future for Acquire {
         }
 
         match this.node.as_mut().initialized_mut() {
+            // we're already in the queue
             Some(node) => {
                 match node.protected_mut(&mut state.waiters) {
                     // we're still waiting
@@ -169,10 +170,11 @@ impl Future for Acquire {
 
                         Poll::Ready(permit)
                     }
-                    // We haven't queued yet
-                    None => panic!("future polled after completion"),
+                    // shouldn't be possible - we never transition nodes into the removed state
+                    None => unreachable!(),
                 }
             }
+            // we haven't added ourselves to the queue yet
             None => {
                 state
                     .waiters
