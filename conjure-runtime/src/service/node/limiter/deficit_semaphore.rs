@@ -122,8 +122,7 @@ impl PinnedDrop for Acquire {
         let mut state = this.semaphore.0.lock();
 
         // if we were up next but dropped before taking our permit, wake the next waiter
-        let (NodeData::Linked(waker), ()) = node.reset(&mut state.waiters);
-        if waker.is_none() {
+        if let (NodeData::Linked(None), ()) = node.reset(&mut state.waiters) {
             state.maybe_wake();
         }
     }
