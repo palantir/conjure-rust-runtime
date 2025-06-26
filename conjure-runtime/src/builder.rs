@@ -443,25 +443,6 @@ impl Builder<Complete> {
         self.0.uncached.host_metrics.as_ref()
     }
 
-    /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
-    ///
-    /// This has no effect on async clients.
-    ///
-    /// Defaults to a `conjure-runtime` internal `Runtime`.
-    #[inline]
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
-        self.0.uncached.blocking_handle = Some(blocking_handle);
-        self
-    }
-
-    /// Returns the builder's configured blocking handle.
-    #[inline]
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn get_blocking_handle(&self) -> Option<&Handle> {
-        self.0.uncached.blocking_handle.as_ref()
-    }
-
     /// Overrides the `hostIndex` field included in metrics.
     #[inline]
     pub fn override_host_index(mut self, override_host_index: usize) -> Self {
@@ -502,9 +483,7 @@ impl Builder<Complete> {
             Ok(Cow::Borrowed(&self.0.cached.uris))
         }
     }
-}
 
-impl Builder<Complete> {
     /// Creates a new `Client`.
     pub fn build(&self) -> Result<Client, Error> {
         let state = ClientState::new(self)?;
@@ -513,9 +492,28 @@ impl Builder<Complete> {
             None,
         ))
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Builder<Complete> {
+    /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
+    ///
+    /// This has no effect on async clients.
+    ///
+    /// Defaults to a `conjure-runtime` internal `Runtime`.
+    #[inline]
+    pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
+        self.0.uncached.blocking_handle = Some(blocking_handle);
+        self
+    }
+
+    /// Returns the builder's configured blocking handle.
+    #[inline]
+    pub fn get_blocking_handle(&self) -> Option<&Handle> {
+        self.0.uncached.blocking_handle.as_ref()
+    }
 
     /// Creates a new `blocking::Client`.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn build_blocking(&self) -> Result<blocking::Client, Error> {
         self.build().map(|client| blocking::Client {
             client,

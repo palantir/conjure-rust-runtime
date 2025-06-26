@@ -16,10 +16,3 @@ debug = 1
 
 [profile.bench]
 debug = 1
-
-[patch.crates-io]
-conjure-error = { git = "https://github.com/palantir/conjure-rust", branch = "conjure-object-js" }
-conjure-http = { git = "https://github.com/palantir/conjure-rust", branch = "conjure-object-js" }
-conjure-macros = { git = "https://github.com/palantir/conjure-rust", branch = "conjure-object-js" }
-conjure-object = { git = "https://github.com/palantir/conjure-rust", branch = "conjure-object-js" }
-conjure-serde = { git = "https://github.com/palantir/conjure-rust", branch = "conjure-object-js" }

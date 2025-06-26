@@ -16,7 +16,7 @@ arc-swap = "1.0"
 bytes = "1.0"
 conjure-error = "4"
 conjure-http = "4.10"
-conjure-object = "4"
+conjure-object = "4.13"
 conjure-runtime-config = { version = "6.1.0", path = "../conjure-runtime-config" }
 conjure-serde = "4"
 futures = "0.3"
