@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #[cfg(not(target_arch = "wasm32"))]
-pub use crate::service::proxy::hyper::*;
+pub use self::hyper::*;
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
-pub use crate::service::proxy::js::*;
+pub use self::js::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod hyper;

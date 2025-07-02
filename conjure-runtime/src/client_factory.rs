@@ -12,22 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //! The client factory.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::blocking;
 use crate::builder::{CachedConfig, UncachedConfig};
 use crate::config::{ServiceConfig, ServicesConfig};
 use crate::weak_cache::{Cached, WeakCache};
-use crate::{blocking, Builder, ClientState, Host, PerHostClients};
+use crate::{Builder, ClientState, Host, PerHostClients};
 use crate::{
     Client, ClientQos, HostMetricsRegistry, Idempotency, NodeSelectionStrategy, ServerQos,
     ServiceError, UserAgent,
 };
 use arc_swap::ArcSwap;
 use conjure_error::Error;
-use conjure_http::client::{AsyncService, Service};
+use conjure_http::client::AsyncService;
+#[cfg(not(target_arch = "wasm32"))]
+use conjure_http::client::Service;
 use conjure_runtime_config::service_config;
 use refreshable::{RefreshHandle, Refreshable};
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Handle;
 use witchcraft_log::warn;
 use witchcraft_metrics::MetricRegistry;
@@ -118,6 +123,7 @@ impl ClientFactory<UserAgentStage> {
                 uncached_inner: UncachedConfig {
                     metrics: None,
                     host_metrics: None,
+                    #[cfg(not(target_arch = "wasm32"))]
                     blocking_handle: None,
                 },
                 cache: WeakCache::new(STATE_CACHE_CAPACITY),
@@ -250,23 +256,6 @@ impl ClientFactory {
         self.0.cache_manager.uncached().host_metrics.as_ref()
     }
 
-    /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
-    ///
-    /// This has no effect on async clients.
-    ///
-    /// Defaults to a `conjure-runtime` internal `Runtime`.
-    #[inline]
-    pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
-        self.0.cache_manager.uncached_mut().blocking_handle = Some(blocking_handle);
-        self
-    }
-
-    /// Returns the configured blocking handle.
-    #[inline]
-    pub fn get_blocking_handle(&self) -> Option<&Handle> {
-        self.0.cache_manager.uncached().blocking_handle.as_ref()
-    }
-
     fn state_builder(&self, service: &str) -> StateBuilder {
         StateBuilder {
             service: service.to_string(),
@@ -330,29 +319,6 @@ impl ClientFactory {
         Ok(Client::new(state, Some(subscription)))
     }
 
-    /// Creates a new blocking client for the specified service.
-    ///
-    /// The client's configuration will automatically refresh to track changes in the factory's [`ServicesConfig`].
-    ///
-    /// If no configuration is present for the specified service in the [`ServicesConfig`], the client will
-    /// immediately return an error for all requests.
-    ///
-    /// The method can return any type implementing the `conjure-http` [`Service`] trait. This notably includes all
-    /// Conjure-generated client types as well as the `conjure-runtime` [`blocking::Client`] itself.
-    pub fn blocking_client<T>(&self, service: &str) -> Result<T, Error>
-    where
-        T: Service<blocking::Client>,
-    {
-        self.blocking_client_inner(service).map(T::new)
-    }
-
-    fn blocking_client_inner(&self, service: &str) -> Result<blocking::Client, Error> {
-        self.client_inner(service).map(|client| blocking::Client {
-            client,
-            handle: self.0.cache_manager.uncached().blocking_handle.clone(),
-        })
-    }
-
     /// Creates a refreshable collection of clients, each corresponding to a separate replica of the
     /// service.
     ///
@@ -368,31 +334,6 @@ impl ClientFactory {
         T: AsyncService<Client> + 'static + Sync + Send,
     {
         self.per_host_clients_inner(service, T::new)
-    }
-
-    /// Creates a refreshable collection of blocking clients, each corresponding to a separate
-    /// replica of the service.
-    ///
-    /// # Note
-    ///
-    /// The client type `T` is assumed to be stateless - each instance will be recreated on every
-    /// refresh.
-    pub fn blocking_per_host_clients<T>(
-        &self,
-        service: &str,
-    ) -> Result<Refreshable<PerHostClients<T>, Error>, Error>
-    where
-        T: Service<blocking::Client> + 'static + Sync + Send,
-    {
-        self.per_host_clients_inner(service, {
-            let handle = self.0.cache_manager.uncached().blocking_handle.clone();
-            move |client| {
-                T::new(blocking::Client {
-                    client,
-                    handle: handle.clone(),
-                })
-            }
-        })
     }
 
     fn per_host_clients_inner<T>(
@@ -464,6 +405,74 @@ impl ClientFactory {
                     }
                 }
             })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ClientFactory {
+    /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
+    ///
+    /// This has no effect on async clients.
+    ///
+    /// Defaults to a `conjure-runtime` internal `Runtime`.
+    #[inline]
+    pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
+        self.0.cache_manager.uncached_mut().blocking_handle = Some(blocking_handle);
+        self
+    }
+
+    /// Returns the configured blocking handle.
+    #[inline]
+    pub fn get_blocking_handle(&self) -> Option<&Handle> {
+        self.0.cache_manager.uncached().blocking_handle.as_ref()
+    }
+
+    /// Creates a new blocking client for the specified service.
+    ///
+    /// The client's configuration will automatically refresh to track changes in the factory's [`ServicesConfig`].
+    ///
+    /// If no configuration is present for the specified service in the [`ServicesConfig`], the client will
+    /// immediately return an error for all requests.
+    ///
+    /// The method can return any type implementing the `conjure-http` [`Service`] trait. This notably includes all
+    /// Conjure-generated client types as well as the `conjure-runtime` [`blocking::Client`] itself.
+    pub fn blocking_client<T>(&self, service: &str) -> Result<T, Error>
+    where
+        T: Service<blocking::Client>,
+    {
+        self.blocking_client_inner(service).map(T::new)
+    }
+
+    fn blocking_client_inner(&self, service: &str) -> Result<blocking::Client, Error> {
+        self.client_inner(service).map(|client| blocking::Client {
+            client,
+            handle: self.0.cache_manager.uncached().blocking_handle.clone(),
+        })
+    }
+
+    /// Creates a refreshable collection of blocking clients, each corresponding to a separate
+    /// replica of the service.
+    ///
+    /// # Note
+    ///
+    /// The client type `T` is assumed to be stateless - each instance will be recreated on every
+    /// refresh.
+    pub fn blocking_per_host_clients<T>(
+        &self,
+        service: &str,
+    ) -> Result<Refreshable<PerHostClients<T>, Error>, Error>
+    where
+        T: Service<blocking::Client> + 'static + Sync + Send,
+    {
+        self.per_host_clients_inner(service, {
+            let handle = self.0.cache_manager.uncached().blocking_handle.clone();
+            move |client| {
+                T::new(blocking::Client {
+                    client,
+                    handle: handle.clone(),
+                })
+            }
+        })
     }
 }
 

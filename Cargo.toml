@@ -6,6 +6,7 @@ resolver = "2"
 members = [
     "conjure-runtime",
     "conjure-runtime-config",
+    "conjure-runtime-wasm-test",
     "conjure-verification",
     "conjure-verification-api",
 ]

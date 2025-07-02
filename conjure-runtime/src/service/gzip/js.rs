@@ -11,12 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#[cfg(not(target_arch = "wasm32"))]
-pub use crate::service::proxy::hyper::*;
-#[cfg(all(target_arch = "wasm32", feature = "js"))]
-pub use crate::service::proxy::js::*;
+use crate::service::Layer;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod hyper;
-#[cfg(all(target_arch = "wasm32", feature = "js"))]
-mod js;
+pub type DecodedBody<T> = T;
+
+pub struct GzipLayer;
+
+impl<S> Layer<S> for GzipLayer {
+    type Service = S;
+
+    fn layer(self, inner: S) -> S {
+        inner
+    }
+}

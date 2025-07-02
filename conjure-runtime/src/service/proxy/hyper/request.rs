@@ -11,8 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::service::proxy::ProxyConfig;
+use crate::service::proxy::hyper::ProxyConfig;
 use crate::service::{Layer, Service};
+use crate::{builder, Builder};
+use conjure_error::Error;
 use http::header::PROXY_AUTHORIZATION;
 use http::uri::Scheme;
 use http::Request;
@@ -29,10 +31,12 @@ pub struct ProxyLayer {
 }
 
 impl ProxyLayer {
-    pub fn new(config: &ProxyConfig) -> ProxyLayer {
-        ProxyLayer {
+    pub fn new(builder: &Builder<builder::Complete>) -> Result<ProxyLayer, Error> {
+        let config = ProxyConfig::from_config(builder.get_proxy())?;
+
+        Ok(ProxyLayer {
             config: config.clone(),
-        }
+        })
     }
 }
 
@@ -94,7 +98,7 @@ mod test {
         .unwrap();
 
         let service =
-            ProxyLayer::new(&config).layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
+            ProxyLayer { config }.layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
         let req = Request::builder()
             .uri("http://foobar.com/fizz/buzz")
@@ -123,7 +127,7 @@ mod test {
         .unwrap();
 
         let service =
-            ProxyLayer::new(&config).layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
+            ProxyLayer { config }.layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
         let req = Request::builder()
             .uri("https://foobar.com/fizz/buzz")
@@ -142,7 +146,7 @@ mod test {
         let config = ProxyConfig::from_config(&config::ProxyConfig::Direct).unwrap();
 
         let service =
-            ProxyLayer::new(&config).layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
+            ProxyLayer { config }.layer(service::service_fn(|req| async { Ok::<_, ()>(req) }));
 
         let req = Request::builder()
             .uri("https://foobar.com/fizz/buzz")

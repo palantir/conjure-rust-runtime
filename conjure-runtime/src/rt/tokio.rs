@@ -11,12 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#[cfg(not(target_arch = "wasm32"))]
-pub use crate::service::proxy::hyper::*;
-#[cfg(all(target_arch = "wasm32", feature = "js"))]
-pub use crate::service::proxy::js::*;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod hyper;
-#[cfg(all(target_arch = "wasm32", feature = "js"))]
-mod js;
+pub mod time {
+    pub use tokio::time::{sleep, Instant};
+}

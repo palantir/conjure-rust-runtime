@@ -12,13 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::errors::{RemoteError, ThrottledError, UnavailableError};
+use crate::rt::time;
 use crate::service::map_error::RawClientError;
 use crate::service::raw::{RawRequestBody, RequestBodyError};
 use crate::service::{Layer, Service};
 use crate::util::spans::{self, HttpSpanFuture};
 use crate::{builder, BodyWriter, Builder, Idempotency};
 use conjure_error::{Error, ErrorKind};
-use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody, Endpoint};
+use conjure_http::client::Endpoint;
+#[cfg(not(target_arch = "wasm32"))]
+use conjure_http::client::{AsyncRequestBody, AsyncWriteBody, BoxAsyncWriteBody};
+#[cfg(target_arch = "wasm32")]
+use conjure_http::client::{
+    BoxLocalAsyncWriteBody as BoxAsyncWriteBody, LocalAsyncRequestBody as AsyncRequestBody,
+    LocalAsyncWriteBody as AsyncWriteBody,
+};
 use futures::future;
 use http::request::Parts;
 use http::{Request, Response, StatusCode};
@@ -26,7 +34,7 @@ use rand::Rng;
 use std::error;
 use std::future::Future;
 use std::pin::Pin;
-use tokio::time::{self, Duration};
+use std::time::Duration;
 use witchcraft_log::info;
 
 /// A layer which retries failed requests in certain cases.

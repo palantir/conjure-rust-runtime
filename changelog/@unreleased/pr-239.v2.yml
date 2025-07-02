@@ -1,0 +1,5 @@
+type: feature
+feature:
+  description: Added support for WASM environments running in JavaScript.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/239

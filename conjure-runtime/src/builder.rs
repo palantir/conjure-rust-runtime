@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //! The client builder.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::blocking;
 use crate::client::ClientState;
 use crate::config::{ProxyConfig, SecurityConfig, ServiceConfig};
@@ -22,6 +23,7 @@ use conjure_error::Error;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Handle;
 use url::Url;
 use witchcraft_metrics::MetricRegistry;
@@ -63,6 +65,7 @@ pub(crate) struct CachedConfig {
 pub(crate) struct UncachedConfig {
     pub(crate) metrics: Option<Arc<MetricRegistry>>,
     pub(crate) host_metrics: Option<Arc<HostMetricsRegistry>>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) blocking_handle: Option<Handle>,
 }
 
@@ -123,6 +126,7 @@ impl Builder<UserAgentStage> {
             uncached: UncachedConfig {
                 metrics: None,
                 host_metrics: None,
+                #[cfg(not(target_arch = "wasm32"))]
                 blocking_handle: None,
             },
         })
@@ -439,23 +443,6 @@ impl Builder<Complete> {
         self.0.uncached.host_metrics.as_ref()
     }
 
-    /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
-    ///
-    /// This has no effect on async clients.
-    ///
-    /// Defaults to a `conjure-runtime` internal `Runtime`.
-    #[inline]
-    pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
-        self.0.uncached.blocking_handle = Some(blocking_handle);
-        self
-    }
-
-    /// Returns the builder's configured blocking handle.
-    #[inline]
-    pub fn get_blocking_handle(&self) -> Option<&Handle> {
-        self.0.uncached.blocking_handle.as_ref()
-    }
-
     /// Overrides the `hostIndex` field included in metrics.
     #[inline]
     pub fn override_host_index(mut self, override_host_index: usize) -> Self {
@@ -496,9 +483,7 @@ impl Builder<Complete> {
             Ok(Cow::Borrowed(&self.0.cached.uris))
         }
     }
-}
 
-impl Builder<Complete> {
     /// Creates a new `Client`.
     pub fn build(&self) -> Result<Client, Error> {
         let state = ClientState::new(self)?;
@@ -506,6 +491,26 @@ impl Builder<Complete> {
             Arc::new(ArcSwap::new(Arc::new(Cached::uncached(state)))),
             None,
         ))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Builder<Complete> {
+    /// Returns the `Handle` to the tokio `Runtime` to be used by blocking clients.
+    ///
+    /// This has no effect on async clients.
+    ///
+    /// Defaults to a `conjure-runtime` internal `Runtime`.
+    #[inline]
+    pub fn blocking_handle(mut self, blocking_handle: Handle) -> Self {
+        self.0.uncached.blocking_handle = Some(blocking_handle);
+        self
+    }
+
+    /// Returns the builder's configured blocking handle.
+    #[inline]
+    pub fn get_blocking_handle(&self) -> Option<&Handle> {
+        self.0.uncached.blocking_handle.as_ref()
     }
 
     /// Creates a new `blocking::Client`.
