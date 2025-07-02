@@ -1,0 +1,5 @@
+type: improvement
+improvement:
+  description: The error instance ID of remote errors is now propagated.
+  links:
+  - https://github.com/palantir/conjure-rust-runtime/pull/235

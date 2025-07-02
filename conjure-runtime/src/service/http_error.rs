@@ -15,7 +15,7 @@ use crate::errors::{RemoteError, ThrottledError, UnavailableError};
 use crate::service::{Layer, Service};
 use crate::{builder, Builder, ServerQos, ServiceError};
 use bytes::{BufMut, BytesMut};
-use conjure_error::Error;
+use conjure_error::{Error, ErrorType, Internal};
 use conjure_serde::json;
 use futures::StreamExt;
 use http::header::RETRY_AFTER;
@@ -146,9 +146,11 @@ where
                         let e = e.clone();
                         Error::propagated_service_safe(error, e)
                     }
-                    (Some(_), ServiceError::WrapInNewError) | (None, _) => {
-                        Error::internal_safe(error)
+                    (Some(e), ServiceError::WrapInNewError) => {
+                        let instance_id = e.error_instance_id();
+                        Error::service_safe(error, Internal::new().with_instance_id(instance_id))
                     }
+                    (None, _) => Error::internal_safe(error),
                 };
 
                 if log_body {
@@ -297,7 +299,7 @@ mod test {
             _ => panic!("expected a service error"),
         };
         assert_eq!(*service.error_code(), ErrorCode::Internal);
-        assert_ne!(
+        assert_eq!(
             service.error_instance_id(),
             service_error.error_instance_id()
         );
