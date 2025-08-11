@@ -4,8 +4,8 @@ version = "6.1.0"
 [workspace]
 resolver = "2"
 members = [
-    "conjure-runtime",
     "conjure-runtime-config",
+    "conjure-runtime",
     "conjure-runtime-wasm-test",
     "conjure-verification",
     "conjure-verification-api",
