@@ -1,49 +1,70 @@
-restore_registry: &RESTORE_REGISTRY
-  restore_cache:
-    key: registry
-save_registry: &SAVE_REGISTRY
-  save_cache:
-    key: registry-2-{{ .BuildNum }}
-    paths:
-      - /home/circleci/.cargo/registry/index
-deps_key: &DEPS_KEY
-  key: deps-2-{{ checksum "~/rust-version" }}-{{ checksum "Cargo.lock" }}
-restore_deps: &RESTORE_DEPS
-  restore_cache:
-    <<: *DEPS_KEY
-save_deps: &SAVE_DEPS
-  save_cache:
-    <<: *DEPS_KEY
-    paths:
-      - target
-      - /home/circleci/.cargo/registry/cache
-
-version: 2
+version: 2.1
 jobs:
-  circle-all:
-    docker:
-      - image: cimg/rust:1.86.0-node
+  build:
+    docker: [{ image: cimg/rust:1.86.0-node }]
     environment:
-      CARGO_BUILD_RUSTFLAGS: -D warnings
+      CARGO_BUILD_RUSTFLAGS: -Dwarnings
+      RUST_BACKTRACE: 1
     steps:
       - checkout
       - run: rustup target add wasm32-unknown-unknown
       - run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-      - *RESTORE_REGISTRY
+      - restore_cache:
+          key: registry
       - run: cargo generate-lockfile
-      - *SAVE_REGISTRY
+      - save_cache:
+          key: registry-{{ .BuildNum }}
+          paths:
+            - /home/circleci/.cargo/registry/index
       - run: rustc --version > ~/rust-version
-      - *RESTORE_DEPS
+      - restore_cache:
+          key: deps-{{ checksum "~/rust-version" }}-{{ checksum "Cargo.lock" }}
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all --all-targets
       - run: cargo clippy -p conjure-runtime --target wasm32-unknown-unknown --features js
       - run: cargo test --all
       - run: cd conjure-runtime-wasm-test && wasm-pack test --node
-      - *SAVE_DEPS
+      - save_cache:
+          key: deps-{{ checksum "~/rust-version" }}-{{ checksum "Cargo.lock" }}
+          paths:
+            - target
+            - /home/circleci/.cargo/registry/cache
+      - run: |
+          set -euo pipefail
+
+          if [[ -z ${CIRCLE_TAG+x} ]]; then
+            exit 0
+          fi
+
+          packages=$(cargo metadata --format-version=1 --no-deps | jq -cr '.packages[]')
+          while IFS= read -r package; do
+            name=$(echo "$package" | jq -r .name)
+
+            if [[ $(echo "$package" | jq .publish) != "null" ]]; then
+              echo Publishing disabled for $name, skipping
+              continue
+            fi
+
+            manifest=$(echo "$package" | jq -r .manifest_path)
+            cargo publish \
+              --manifest-path "$manifest" \
+              --no-verify
+          done \<<< "$packages"
+
+  circle-all:
+    docker: [{ image: 'busybox' }]
+    resource_class: small
+    steps:
+      - run: {command: echo "All required jobs finished successfully"}
 
 workflows:
   version: 2
-  main:
+  build:
     jobs:
+      - build:
+          filters: { tags: { only: /.*/ } }
+
+      # Catch-all for all required checks
       - circle-all:
+          requires: [ build ]
           filters: { tags: { only: /.*/ } }
