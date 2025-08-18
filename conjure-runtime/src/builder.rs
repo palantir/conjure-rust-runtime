@@ -20,6 +20,7 @@ use crate::weak_cache::Cached;
 use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
+use conjure_http::client::ConjureRuntime;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -67,6 +68,7 @@ pub(crate) struct UncachedConfig {
     pub(crate) host_metrics: Option<Arc<HostMetricsRegistry>>,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) blocking_handle: Option<Handle>,
+    pub(crate) conjure_runtime: Arc<ConjureRuntime>,
 }
 
 /// The complete builder stage.
@@ -128,6 +130,7 @@ impl Builder<UserAgentStage> {
                 host_metrics: None,
                 #[cfg(not(target_arch = "wasm32"))]
                 blocking_handle: None,
+                conjure_runtime: Arc::new(ConjureRuntime::new()),
             },
         })
     }

@@ -14,11 +14,11 @@ js = ["dep:getrandom", "getrandom/wasm_js", "conjure-object/js"]
 [dependencies]
 arc-swap = "1.0"
 bytes = "1.0"
-conjure-error = "4"
-conjure-http = "4.10"
-conjure-object = "4.13"
+conjure-error = "5.0.0-rc3"
+conjure-http = "5.0.0-rc3"
+conjure-object = "5.0.0-rc3"
 conjure-runtime-config = { version = "6.1.0", path = "../conjure-runtime-config" }
-conjure-serde = "4"
+conjure-serde = "5.0.0-rc3"
 futures = "0.3"
 http-body = "1"
 http-body-util = "0.1"
@@ -37,7 +37,7 @@ serde = "1.0"
 tokio-util = { version = "0.7", features = ["codec"] }
 tokio = { version = "1.0", features = ["io-util", "sync"] }
 url = "2.0"
-witchcraft-log = "4"
+witchcraft-log = "5.0.0-rc1"
 witchcraft-metrics = "1"
 zipkin = "1.0"
 
@@ -93,7 +93,7 @@ web-sys = { version = "0.3.77", features = [
 ] }
 
 [dev-dependencies]
-conjure-codegen = { version = "4", features = ["example-types"] }
+conjure-codegen = { version = "5.0.0-rc3", features = ["example-types"] }
 futures-test = "0.3"
 hyper = { version = "1", features = ["server"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [

@@ -15,7 +15,9 @@ use crate::blocking::{body, BodyWriter, BodyWriterShim, ResponseBody};
 use crate::{builder, Builder};
 use bytes::Bytes;
 use conjure_error::Error;
-use conjure_http::client::{self, AsyncClient, AsyncRequestBody, BoxAsyncWriteBody, RequestBody};
+use conjure_http::client::{
+    self, AsyncClient, AsyncRequestBody, BoxAsyncWriteBody, ConjureRuntime, RequestBody,
+};
 use futures::channel::oneshot;
 use futures::executor;
 use http::{Request, Response};
@@ -24,6 +26,7 @@ use pin_project::pin_project;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::runtime::{self, Handle, Runtime};
 use zipkin::TraceContext;
@@ -59,7 +62,7 @@ impl Client {
 }
 
 impl client::Service<Client> for Client {
-    fn new(client: Client) -> Self {
+    fn new(client: Client, _: &Arc<ConjureRuntime>) -> Self {
         client
     }
 }

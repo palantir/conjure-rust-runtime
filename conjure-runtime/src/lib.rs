@@ -67,12 +67,12 @@
 //! The client can then be used with Conjure-generated service interfaces:
 //!
 //! ```
-//! use conjure_codegen::example_types::another::TestServiceAsyncClient;
+//! use conjure_codegen::example_types::clients::another::{AsyncTestService, AsyncTestServiceClient};
 //! use conjure_http::client::AsyncService;
 //! use conjure_object::BearerToken;
 //!
-//! # async fn foo(client: conjure_runtime::Client) -> Result<(), conjure_error::Error> {
-//! let client = TestServiceAsyncClient::new(client);
+//! # async fn foo(client: conjure_runtime::Client, runtime: &std::sync::Arc<conjure_http::client::ConjureRuntime>) -> Result<(), conjure_error::Error> {
+//! let client = AsyncTestServiceClient::new(client, runtime);
 //!
 //! let auth = BearerToken::new("my_auth_token").unwrap();
 //! let file_systems = client.get_file_systems(&auth).await?;
@@ -82,12 +82,12 @@
 //! The [`blocking::Client`]'s API is identical, with the exception that you don't `.await` on methods:
 //!
 //! ```
-//! use conjure_codegen::example_types::another::TestServiceClient;
+//! use conjure_codegen::example_types::clients::another::{TestService, TestServiceClient};
 //! use conjure_http::client::Service;
 //! use conjure_object::BearerToken;
 //!
-//! # fn foo(client: conjure_runtime::blocking::Client) -> Result<(), conjure_error::Error> {
-//! let client = TestServiceClient::new(client);
+//! # fn foo(client: conjure_runtime::blocking::Client, runtime: &std::sync::Arc<conjure_http::client::ConjureRuntime>) -> Result<(), conjure_error::Error> {
+//! let client = TestServiceClient::new(client, runtime);
 //!
 //! let auth = BearerToken::new("my_auth_token").unwrap();
 //! let file_systems = client.get_file_systems(&auth)?;
