@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use conjure_serde::json;
-use conjure_verification_api::server::{
+use conjure_verification_api::objects::server::{
     EndpointName, IgnoredTestCases, PositiveAndNegativeTestCases, TestCases,
 };
 use heck::ToSnakeCase;
@@ -91,19 +91,15 @@ fn generate_tests(out_dir: &Path, test_cases: &Path) {
 
     let module = quote! {
         use crate::{BlockingTest, AsyncTest};
-        use conjure_http::client::{Service, AsyncService};
+        use conjure_http::client::{ConjureRuntime, Service, AsyncService};
         use conjure_runtime::blocking;
         use conjure_runtime::Client;
-        use conjure_verification_api::server::{
-            AutoDeserializeServiceAsyncClient, AutoDeserializeConfirmServiceAsyncClient, AutoDeserializeServiceClient,
-            AutoDeserializeConfirmServiceClient, SingleHeaderServiceAsyncClient, SingleHeaderServiceClient,
-            SinglePathParamServiceAsyncClient, SinglePathParamServiceClient, SingleQueryParamServiceAsyncClient,
-            SingleQueryParamServiceClient,
-        };
+        use conjure_verification_api::clients::server::*;
         use conjure_error::Error;
         use conjure_serde::json;
         use std::future::Future;
         use std::pin::Pin;
+        use std::sync::Arc;
 
         pub const BLOCKING_TESTS: &[BlockingTest] = &[#(#blocking_tests),*];
         pub const ASYNC_TESTS: &[AsyncTest] = &[#(#async_tests),*];
@@ -179,8 +175,8 @@ fn generate_auto_deserialize_tests(
         if has_test_case {
             functions.push(quote! {
                 fn #blocking_name(client: &blocking::Client, index: i32, _: &'static str) -> Result<(), Error> {
-                    let service = AutoDeserializeServiceClient::new(client.clone());
-                    let confirm_service = AutoDeserializeConfirmServiceClient::new(client.clone());
+                    let service = AutoDeserializeServiceClient::new(client.clone(), &Arc::new(ConjureRuntime::new()));
+                    let confirm_service = AutoDeserializeConfirmServiceClient::new(client.clone(), &Arc::new(ConjureRuntime::new()));
                     let value = service.#method(index)?;
                     confirm_service.#method(index, #ref_ value)?;
                     Ok(())
@@ -191,8 +187,8 @@ fn generate_auto_deserialize_tests(
                     index: i32,
                     _: &'static str,
                 ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
-                    let service = AutoDeserializeServiceAsyncClient::new(client.clone());
-                    let confirm_service = AutoDeserializeConfirmServiceAsyncClient::new(client.clone());
+                    let service = AsyncAutoDeserializeServiceClient::new(client.clone(), &Arc::new(ConjureRuntime::new()));
+                    let confirm_service = AsyncAutoDeserializeConfirmServiceClient::new(client.clone(), &Arc::new(ConjureRuntime::new()));
                     Box::pin(async move {
                         let value = service.#method(index).await?;
                         confirm_service.#method(index, #ref_ value).await?;
@@ -241,7 +237,7 @@ fn generate_auto_deserialize_tests(
         if has_test_case {
             functions.push(quote! {
                 fn #blocking_name(client: &blocking::Client, index: i32, _: &'static str) -> Result<(), Error> {
-                    let service = AutoDeserializeServiceClient::new(client.clone());
+                    let service = AutoDeserializeServiceClient::new(client.clone(), &Arc::new(ConjureRuntime::new()));
                     let r = service.#method(index);
                     crate::expect_serde_error(r)
                 }
@@ -251,7 +247,7 @@ fn generate_auto_deserialize_tests(
                     index: i32,
                     _: &'static str,
                 ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
-                    let service = AutoDeserializeServiceAsyncClient::new(client.clone());
+                    let service = AsyncAutoDeserializeServiceClient::new(client.clone(), &Arc::new(ConjureRuntime::new()));
                     Box::pin(async move {
                         let r = service.#method(index).await;
                         crate::expect_serde_error(r)
@@ -273,7 +269,7 @@ fn generate_single_tests(
     let empty_ignored = BTreeSet::new();
 
     let blocking_client = Ident::new(&format!("{}Client", service), Span::call_site());
-    let async_client = Ident::new(&format!("{}AsyncClient", service), Span::call_site());
+    let async_client = Ident::new(&format!("Async{}Client", service), Span::call_site());
 
     for (name, cases) in tests {
         let ignored_cases = ignored_tests.get(name).unwrap_or(&empty_ignored);
@@ -325,7 +321,7 @@ fn generate_single_tests(
         if has_test_case {
             functions.push(quote! {
                 fn #blocking_name(client: &blocking::Client, index: i32, value: &'static str) -> Result<(), Error> {
-                    let service = #blocking_client::new(client.clone());
+                    let service = #blocking_client::new(client.clone(), &Arc::new(ConjureRuntime::new()));
                     let value = json::server_from_str(value).map_err(Error::internal_safe)?;
                     service.#method(index, #ref_ value)
                 }
@@ -336,7 +332,7 @@ fn generate_single_tests(
                     value: &'static str,
                 ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>
                 {
-                    let service = #async_client::new(client.clone());
+                    let service = #async_client::new(client.clone(), &Arc::new(ConjureRuntime::new()));
                     Box::pin(async move {
                         let value = json::server_from_str(value).map_err(Error::internal_safe)?;
                         service.#method(index, #ref_ value).await

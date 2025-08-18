@@ -31,9 +31,9 @@ use crate::weak_cache::Cached;
 use crate::{builder, BodyWriter, Builder, ResponseBody};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
-use conjure_http::client::AsyncService;
 #[cfg(not(target_arch = "wasm32"))]
 use conjure_http::client::{AsyncClient, AsyncRequestBody};
+use conjure_http::client::{AsyncService, ConjureRuntime};
 #[cfg(target_arch = "wasm32")]
 use conjure_http::client::{
     LocalAsyncClient as AsyncClient, LocalAsyncRequestBody as AsyncRequestBody,
@@ -126,7 +126,7 @@ impl Client {
 }
 
 impl AsyncService<Client> for Client {
-    fn new(client: Client) -> Self {
+    fn new(client: Client, _: &Arc<ConjureRuntime>) -> Self {
         client
     }
 }

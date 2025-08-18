@@ -24,9 +24,9 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use conjure_error::Error;
-use conjure_http::client::AsyncService;
 #[cfg(not(target_arch = "wasm32"))]
 use conjure_http::client::Service;
+use conjure_http::client::{AsyncService, ConjureRuntime};
 use conjure_runtime_config::service_config;
 use refreshable::{RefreshHandle, Refreshable};
 use std::borrow::Borrow;
@@ -125,6 +125,7 @@ impl ClientFactory<UserAgentStage> {
                     host_metrics: None,
                     #[cfg(not(target_arch = "wasm32"))]
                     blocking_handle: None,
+                    conjure_runtime: Arc::new(ConjureRuntime::new()),
                 },
                 cache: WeakCache::new(STATE_CACHE_CAPACITY),
             },
@@ -282,7 +283,8 @@ impl ClientFactory {
     where
         T: AsyncService<Client>,
     {
-        self.client_inner(service).map(T::new)
+        self.client_inner(service)
+            .map(|c| T::new(c, &self.0.cache_manager.uncached().conjure_runtime))
     }
 
     fn client_inner(&self, service: &str) -> Result<Client, Error> {
@@ -339,7 +341,7 @@ impl ClientFactory {
     fn per_host_clients_inner<T>(
         &self,
         service: &str,
-        make_client: impl Fn(Client) -> T + 'static + Sync + Send,
+        make_client: impl Fn(Client, &Arc<ConjureRuntime>) -> T + 'static + Sync + Send,
     ) -> Result<Refreshable<PerHostClients<T>, Error>, Error>
     where
         T: 'static + Sync + Send,
@@ -389,7 +391,13 @@ impl ClientFactory {
                             }
                         };
 
-                        clients.insert(host.clone(), make_client(client_handle.client.clone()));
+                        clients.insert(
+                            host.clone(),
+                            make_client(
+                                client_handle.client.clone(),
+                                &state_builder.cache_manager.uncached().conjure_runtime,
+                            ),
+                        );
                         new_client_handles.insert(host, client_handle);
                     }
 
@@ -440,7 +448,8 @@ impl ClientFactory {
     where
         T: Service<blocking::Client>,
     {
-        self.blocking_client_inner(service).map(T::new)
+        self.blocking_client_inner(service)
+            .map(|c| T::new(c, &self.0.cache_manager.uncached().conjure_runtime))
     }
 
     fn blocking_client_inner(&self, service: &str) -> Result<blocking::Client, Error> {
@@ -466,11 +475,14 @@ impl ClientFactory {
     {
         self.per_host_clients_inner(service, {
             let handle = self.0.cache_manager.uncached().blocking_handle.clone();
-            move |client| {
-                T::new(blocking::Client {
-                    client,
-                    handle: handle.clone(),
-                })
+            move |client, runtime| {
+                T::new(
+                    blocking::Client {
+                        client,
+                        handle: handle.clone(),
+                    },
+                    runtime,
+                )
             }
         })
     }
