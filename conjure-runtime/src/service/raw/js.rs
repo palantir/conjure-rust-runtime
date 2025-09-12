@@ -61,6 +61,12 @@ impl Service<Request<RawRequestBody>> for RawClient {
 
         let init = RequestInit::new();
         init.set_method(parts.method.as_str());
+        js_sys::Reflect::set(
+            &init,
+            &JsValue::from_str("duplex"),
+            &JsValue::from_str("half"),
+        )
+        .map_err(JsError::new)?;
 
         let headers = Headers::new().map_err(JsError::new)?;
         for (mut name, value) in &parts.headers {
