@@ -182,7 +182,7 @@ async fn read_body(mut body: RawRequestBody, limit: usize) -> Result<Vec<u8>, Js
                 data.extend_from_slice(chunk);
             }
         }
-        None => return Ok(Vec::new()),
+        None => return Ok(data),
     }
 
     check_limit(&data, limit)?;
