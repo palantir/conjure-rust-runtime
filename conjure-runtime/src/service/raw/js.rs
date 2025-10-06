@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::service::raw::RawRequestBody;
+use crate::service::raw::{RawRequestBody, RequestBodyError};
 use crate::service::Service;
 use crate::{builder, Builder};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use conjure_error::Error;
+use futures::TryStreamExt;
 use http::{header, HeaderName, HeaderValue, Request, Response, StatusCode};
 use http_body::{Body, Frame};
 use http_body_util::BodyExt;
@@ -172,30 +173,32 @@ impl Body for RawResponseBody {
     }
 }
 
-async fn read_body(mut body: RawRequestBody, limit: usize) -> Result<Vec<u8>, JsError> {
-    let mut data = Vec::new();
+async fn read_body(body: RawRequestBody, limit: usize) -> Result<Bytes, JsError> {
+    let mut data_stream = body.into_data_stream();
 
-    match body.frame().await {
-        Some(result) => {
-            let frame = result.map_err(|e| JsError::new((&e.to_string()).into()))?;
-            if let Some(chunk) = frame.data_ref() {
-                data.extend_from_slice(chunk);
-            }
+    let first = match data_stream.try_next().await? {
+        Some(bytes) => bytes,
+        None => return Ok(Bytes::new()),
+    };
+    check_limit(&first, limit)?;
+
+    let mut buf = BytesMut::new();
+    match data_stream.try_next().await? {
+        Some(second) => {
+            buf.reserve(first.len() + second.len());
+            buf.extend_from_slice(&first);
+            buf.extend_from_slice(&second);
         }
-        None => return Ok(data),
+        None => return Ok(first),
+    }
+    check_limit(&first, limit)?;
+
+    while let Some(bytes) = data_stream.try_next().await? {
+        buf.extend_from_slice(&bytes);
+        check_limit(&buf, limit)?;
     }
 
-    check_limit(&data, limit)?;
-
-    while let Some(result) = body.frame().await {
-        let frame = result.map_err(|e| JsError::new((&e.to_string()).into()))?;
-        if let Some(chunk) = frame.data_ref() {
-            data.extend_from_slice(chunk);
-        }
-        check_limit(&data, limit)?;
-    }
-
-    Ok(data)
+    Ok(buf.freeze())
 }
 
 fn check_limit(buf: &[u8], limit: usize) -> Result<(), JsError> {
@@ -207,6 +210,12 @@ fn check_limit(buf: &[u8], limit: usize) -> Result<(), JsError> {
 
 #[derive(Debug)]
 pub struct JsError(String);
+
+impl From<RequestBodyError> for JsError {
+    fn from(value: RequestBodyError) -> Self {
+        JsError((value.to_string()).into())
+    }
+}
 
 impl JsError {
     fn new(raw: JsValue) -> Self {
