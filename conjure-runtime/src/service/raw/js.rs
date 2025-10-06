@@ -78,10 +78,10 @@ impl Service<Request<RawRequestBody>> for RawClient {
         // Firefox today. They are supported in Chrome (paired with 'duplex: half'). We'll just
         // buffer the body since it's compatible with every browser, and it's not simple to
         // determine at runtime which browser we're running in.
-        let data = read_body(body, MAX_BODY_SIZE).await?.to_vec();
-
-        let js_array = Uint8Array::from(&data[..]);
-        init.set_body(&js_array.into());
+        if let Some(data) = read_body(body, MAX_BODY_SIZE).await? {
+            let js_array = Uint8Array::from(&data[..]);
+            init.set_body(&js_array.into());
+        };
 
         let abort_controller = AbortController::new().map_err(JsError::new)?;
         init.set_signal(Some(&abort_controller.signal()));
@@ -173,12 +173,12 @@ impl Body for RawResponseBody {
     }
 }
 
-async fn read_body(body: RawRequestBody, limit: usize) -> Result<Bytes, JsError> {
+async fn read_body(body: RawRequestBody, limit: usize) -> Result<Option<Bytes>, JsError> {
     let mut data_stream = body.into_data_stream();
 
     let first = match data_stream.try_next().await? {
         Some(bytes) => bytes,
-        None => return Ok(Bytes::new()),
+        None => return Ok(None),
     };
     check_limit(&first, limit)?;
 
@@ -189,7 +189,7 @@ async fn read_body(body: RawRequestBody, limit: usize) -> Result<Bytes, JsError>
             buf.extend_from_slice(&first);
             buf.extend_from_slice(&second);
         }
-        None => return Ok(first),
+        None => return Ok(Some(first)),
     }
     check_limit(&first, limit)?;
 
@@ -198,7 +198,7 @@ async fn read_body(body: RawRequestBody, limit: usize) -> Result<Bytes, JsError>
         check_limit(&buf, limit)?;
     }
 
-    Ok(buf.freeze())
+    Ok(Some(buf.freeze()))
 }
 
 fn check_limit(buf: &[u8], limit: usize) -> Result<(), JsError> {
