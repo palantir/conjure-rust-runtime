@@ -28,8 +28,7 @@ use std::{error, fmt};
 use wasm_bindgen::prelude::{wasm_bindgen, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
-    AbortController, Headers, ReadableStreamDefaultReader,
-    ReadableStreamReadResult, RequestInit,
+    AbortController, Headers, ReadableStreamDefaultReader, ReadableStreamReadResult, RequestInit,
 };
 
 const MAX_BODY_SIZE: usize = 50 * 1024 * 1024;
