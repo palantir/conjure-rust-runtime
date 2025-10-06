@@ -89,7 +89,11 @@ impl Service<Request<RawRequestBody>> for RawClient {
         let mut pull: Option<Closure<dyn FnMut(ReadableStreamDefaultController) -> Promise>> = None;
 
         if !body.is_end_stream() {
-            let should_buffer = body.size_hint().upper().map(|u| u <= FIFTY_MB).unwrap_or_default();
+            let should_buffer = body
+                .size_hint()
+                .upper()
+                .map(|u| u <= FIFTY_MB)
+                .unwrap_or_default();
             if should_buffer {
                 let mut data = Vec::new();
 
@@ -114,13 +118,15 @@ impl Service<Request<RawRequestBody>> for RawClient {
                                 match body.borrow_mut().frame().await {
                                     Some(Ok(frame)) => match frame.data_ref() {
                                         Some(data) => {
-                                            let chunk = Uint8Array::new_with_length(data.len() as u32);
+                                            let chunk =
+                                                Uint8Array::new_with_length(data.len() as u32);
                                             chunk.copy_from(data);
                                             controller.enqueue_with_chunk(&chunk.into())?;
                                             Ok(JsValue::UNDEFINED)
                                         }
                                         None => {
-                                            Err(js_sys::Error::new("unsupported trailers frame").into())
+                                            Err(js_sys::Error::new("unsupported trailers frame")
+                                                .into())
                                         }
                                     },
                                     None => {
