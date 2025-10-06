@@ -25,14 +25,14 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{error, fmt};
-use wasm_bindgen::prelude::{wasm_bindgen, Closure, JsCast, JsValue};
+use wasm_bindgen::prelude::{wasm_bindgen, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
-    AbortController, Headers, ReadableStreamDefaultController, ReadableStreamDefaultReader,
+    AbortController, Headers, ReadableStreamDefaultReader,
     ReadableStreamReadResult, RequestInit,
 };
 
-const FIFTY_MB: usize = 50 * 1024 * 1024;
+const MAX_BODY_SIZE: usize = 50 * 1024 * 1024;
 static FETCH_USER_AGENT: HeaderName = HeaderName::from_static("fetch-user-agent");
 
 #[wasm_bindgen]
@@ -56,7 +56,7 @@ impl Service<Request<RawRequestBody>> for RawClient {
     // The fetch API promises to call these futures sequentially
     #[allow(clippy::await_holding_refcell_ref)]
     async fn call(&self, req: Request<RawRequestBody>) -> Result<Self::Response, Self::Error> {
-        let (parts, mut body) = req.into_parts();
+        let (parts, body) = req.into_parts();
 
         let init = RequestInit::new();
         init.set_method(parts.method.as_str());
@@ -74,20 +74,14 @@ impl Service<Request<RawRequestBody>> for RawClient {
 
         init.set_headers(headers.as_ref());
 
-        let mut data = Vec::new();
-        while let Some(result) = body.frame().await {
-            let frame = result.map_err(|e| JsError::new((&e.to_string()).into()))?;
-            if let Some(chunk) = frame.data_ref() {
-                data.extend_from_slice(chunk);
-            }
-            check_limit(&data, FIFTY_MB)?;
-        }
+        // We're buffering the entire body because ReadableStreams are not supported in Safari and
+        // Firefox today. They are supported in Chrome (paired with 'duplex: half'). We'll just
+        // buffer the body since it's compatible with every browser, and it's not simple to
+        // determine at runtime which browser we're running in.
+        let data = read_body(body, MAX_BODY_SIZE).await?;
 
         let js_array = Uint8Array::from(&data[..]);
         init.set_body(&js_array.into());
-
-        // We need to keep the closure alive until we finish processing the request
-        let pull: Option<Closure<dyn FnMut(ReadableStreamDefaultController) -> Promise>> = None;
 
         let abort_controller = AbortController::new().map_err(JsError::new)?;
         init.set_signal(Some(&abort_controller.signal()));
@@ -109,7 +103,6 @@ impl Service<Request<RawRequestBody>> for RawClient {
             }),
             pending: None,
             _guard: guard,
-            _pull: pull,
         };
         let mut resp = Response::new(body);
 
@@ -145,7 +138,6 @@ pub struct RawResponseBody {
     reader: Option<ReadableStreamDefaultReader>,
     pending: Option<JsFuture>,
     _guard: AbortGuard,
-    _pull: Option<Closure<dyn FnMut(ReadableStreamDefaultController) -> Promise>>,
 }
 
 impl Body for RawResponseBody {
@@ -179,6 +171,32 @@ impl Body for RawResponseBody {
 
         Poll::Ready(Some(Ok(Frame::data(Bytes::from(chunk.to_vec())))))
     }
+}
+
+async fn read_body(mut body: RawRequestBody, limit: usize) -> Result<Vec<u8>, JsError> {
+    let mut data = Vec::new();
+
+    match body.frame().await {
+        Some(result) => {
+            let frame = result.map_err(|e| JsError::new((&e.to_string()).into()))?;
+            if let Some(chunk) = frame.data_ref() {
+                data.extend_from_slice(chunk);
+            }
+        }
+        None => return Ok(Vec::new()),
+    }
+
+    check_limit(&data, limit)?;
+
+    while let Some(result) = body.frame().await {
+        let frame = result.map_err(|e| JsError::new((&e.to_string()).into()))?;
+        if let Some(chunk) = frame.data_ref() {
+            data.extend_from_slice(chunk);
+        }
+        check_limit(&data, limit)?;
+    }
+
+    Ok(data)
 }
 
 fn check_limit(buf: &[u8], limit: usize) -> Result<(), JsError> {
