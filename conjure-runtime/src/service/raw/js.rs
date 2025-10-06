@@ -34,6 +34,7 @@ use web_sys::{
     ReadableStreamDefaultReader, ReadableStreamReadResult, RequestInit, UnderlyingSource,
 };
 
+const FIFTY_MB: u64 = 50 * 1024 * 1024;
 static FETCH_USER_AGENT: HeaderName = HeaderName::from_static("fetch-user-agent");
 
 #[wasm_bindgen]
@@ -57,10 +58,13 @@ impl Service<Request<RawRequestBody>> for RawClient {
     // The fetch API promises to call these futures sequentially
     #[allow(clippy::await_holding_refcell_ref)]
     async fn call(&self, req: Request<RawRequestBody>) -> Result<Self::Response, Self::Error> {
-        let (parts, mut body) = req.into_parts();
+        let (parts, body) = req.into_parts();
 
         let init = RequestInit::new();
         init.set_method(parts.method.as_str());
+
+        // This isn't exposed on web_sys right now but it is required for ReadableStream bodies
+        // https://developer.mozilla.org/en-US/docs/Web/API/RequestInit#duplex
         js_sys::Reflect::set(
             &init,
             &JsValue::from_str("duplex"),
@@ -85,17 +89,56 @@ impl Service<Request<RawRequestBody>> for RawClient {
         let mut pull: Option<Closure<dyn FnMut(ReadableStreamDefaultController) -> Promise>> = None;
 
         if !body.is_end_stream() {
-            let mut data = Vec::new();
+            let should_buffer = body.size_hint().upper().map(|u| u <= FIFTY_MB).unwrap_or_default();
+            if should_buffer {
+                let mut data = Vec::new();
 
-            while let Some(result) = body.frame().await {
-                let frame = result.map_err(|e| JsError::new((&e.to_string()).into()))?;
-                if let Some(chunk) = frame.data_ref() {
-                    data.extend_from_slice(chunk);
+                while let Some(result) = body.frame().await {
+                    let frame = result.map_err(|e| JsError::new((&e.to_string()).into()))?;
+                    if let Some(chunk) = frame.data_ref() {
+                        data.extend_from_slice(chunk);
+                    }
                 }
-            }
 
-            let js_array = Uint8Array::from(&data[..]);
-            init.set_body(&js_array.into());
+                let js_array = Uint8Array::from(&data[..]);
+                init.set_body(&js_array.into());
+            } else {
+                let underlying_source = UnderlyingSource::new();
+
+                let body = Rc::new(RefCell::new(body));
+                let pull = pull.insert(Closure::new(
+                    move |controller: ReadableStreamDefaultController| {
+                        wasm_bindgen_futures::future_to_promise({
+                            let body = body.clone();
+                            async move {
+                                match body.borrow_mut().frame().await {
+                                    Some(Ok(frame)) => match frame.data_ref() {
+                                        Some(data) => {
+                                            let chunk = Uint8Array::new_with_length(data.len() as u32);
+                                            chunk.copy_from(data);
+                                            controller.enqueue_with_chunk(&chunk.into())?;
+                                            Ok(JsValue::UNDEFINED)
+                                        }
+                                        None => {
+                                            Err(js_sys::Error::new("unsupported trailers frame").into())
+                                        }
+                                    },
+                                    None => {
+                                        controller.close()?;
+                                        Ok(JsValue::UNDEFINED)
+                                    }
+                                    Some(Err(e)) => Err(js_sys::Error::new(&e.to_string()).into()),
+                                }
+                            }
+                        })
+                    },
+                ));
+                underlying_source.set_pull(pull.as_ref().unchecked_ref());
+
+                let stream = ReadableStream::new_with_underlying_source(underlying_source.as_ref())
+                    .map_err(JsError::new)?;
+                init.set_body(stream.as_ref());
+            }
         }
 
         let abort_controller = AbortController::new().map_err(JsError::new)?;
