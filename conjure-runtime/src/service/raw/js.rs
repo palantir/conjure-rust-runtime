@@ -78,7 +78,7 @@ impl Service<Request<RawRequestBody>> for RawClient {
         // Firefox today. They are supported in Chrome (paired with 'duplex: half'). We'll just
         // buffer the body since it's compatible with every browser, and it's not simple to
         // determine at runtime which browser we're running in.
-        let data = read_body(body, MAX_BODY_SIZE).await?;
+        let data = read_body(body, MAX_BODY_SIZE).await?.to_vec();
 
         let js_array = Uint8Array::from(&data[..]);
         init.set_body(&js_array.into());
