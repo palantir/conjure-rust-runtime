@@ -58,7 +58,7 @@ impl Service<Request<RawRequestBody>> for RawClient {
     // The fetch API promises to call these futures sequentially
     #[allow(clippy::await_holding_refcell_ref)]
     async fn call(&self, req: Request<RawRequestBody>) -> Result<Self::Response, Self::Error> {
-        let (parts, body) = req.into_parts();
+        let (parts, mut body) = req.into_parts();
 
         let init = RequestInit::new();
         init.set_method(parts.method.as_str());
