@@ -213,7 +213,7 @@ pub struct JsError(String);
 
 impl From<RequestBodyError> for JsError {
     fn from(value: RequestBodyError) -> Self {
-        JsError((value.to_string()).into())
+        JsError(value.to_string())
     }
 }
 
