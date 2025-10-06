@@ -20,21 +20,19 @@ use http::{header, HeaderName, HeaderValue, Request, Response, StatusCode};
 use http_body::{Body, Frame};
 use http_body_util::BodyExt;
 use js_sys::{Array, JsString, Promise, Uint8Array};
-use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
 use std::task::{ready, Context, Poll};
 use std::{error, fmt};
 use wasm_bindgen::prelude::{wasm_bindgen, Closure, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
-    AbortController, Headers, ReadableStream, ReadableStreamDefaultController,
-    ReadableStreamDefaultReader, ReadableStreamReadResult, RequestInit, UnderlyingSource,
+    AbortController, Headers, ReadableStreamDefaultController, ReadableStreamDefaultReader,
+    ReadableStreamReadResult, RequestInit,
 };
 
-const FIFTY_MB: u64 = 50 * 1024 * 1024;
+const FIFTY_MB: usize = 50 * 1024 * 1024;
 static FETCH_USER_AGENT: HeaderName = HeaderName::from_static("fetch-user-agent");
 
 #[wasm_bindgen]
@@ -63,15 +61,6 @@ impl Service<Request<RawRequestBody>> for RawClient {
         let init = RequestInit::new();
         init.set_method(parts.method.as_str());
 
-        // This isn't exposed on web_sys right now but it is required for ReadableStream bodies
-        // https://developer.mozilla.org/en-US/docs/Web/API/RequestInit#duplex
-        js_sys::Reflect::set(
-            &init,
-            &JsValue::from_str("duplex"),
-            &JsValue::from_str("half"),
-        )
-        .map_err(JsError::new)?;
-
         let headers = Headers::new().map_err(JsError::new)?;
         for (mut name, value) in &parts.headers {
             if name == header::USER_AGENT {
@@ -85,67 +74,20 @@ impl Service<Request<RawRequestBody>> for RawClient {
 
         init.set_headers(headers.as_ref());
 
-        // We need to keep the closure alive until we finish processing the request
-        let mut pull: Option<Closure<dyn FnMut(ReadableStreamDefaultController) -> Promise>> = None;
-
-        if !body.is_end_stream() {
-            let should_buffer = body
-                .size_hint()
-                .upper()
-                .map(|u| u <= FIFTY_MB)
-                .unwrap_or_default();
-            if should_buffer {
-                let mut data = Vec::new();
-
-                while let Some(result) = body.frame().await {
-                    let frame = result.map_err(|e| JsError::new((&e.to_string()).into()))?;
-                    if let Some(chunk) = frame.data_ref() {
-                        data.extend_from_slice(chunk);
-                    }
-                }
-
-                let js_array = Uint8Array::from(&data[..]);
-                init.set_body(&js_array.into());
-            } else {
-                let underlying_source = UnderlyingSource::new();
-
-                let body = Rc::new(RefCell::new(body));
-                let pull = pull.insert(Closure::new(
-                    move |controller: ReadableStreamDefaultController| {
-                        wasm_bindgen_futures::future_to_promise({
-                            let body = body.clone();
-                            async move {
-                                match body.borrow_mut().frame().await {
-                                    Some(Ok(frame)) => match frame.data_ref() {
-                                        Some(data) => {
-                                            let chunk =
-                                                Uint8Array::new_with_length(data.len() as u32);
-                                            chunk.copy_from(data);
-                                            controller.enqueue_with_chunk(&chunk.into())?;
-                                            Ok(JsValue::UNDEFINED)
-                                        }
-                                        None => {
-                                            Err(js_sys::Error::new("unsupported trailers frame")
-                                                .into())
-                                        }
-                                    },
-                                    None => {
-                                        controller.close()?;
-                                        Ok(JsValue::UNDEFINED)
-                                    }
-                                    Some(Err(e)) => Err(js_sys::Error::new(&e.to_string()).into()),
-                                }
-                            }
-                        })
-                    },
-                ));
-                underlying_source.set_pull(pull.as_ref().unchecked_ref());
-
-                let stream = ReadableStream::new_with_underlying_source(underlying_source.as_ref())
-                    .map_err(JsError::new)?;
-                init.set_body(stream.as_ref());
+        let mut data = Vec::new();
+        while let Some(result) = body.frame().await {
+            let frame = result.map_err(|e| JsError::new((&e.to_string()).into()))?;
+            if let Some(chunk) = frame.data_ref() {
+                data.extend_from_slice(chunk);
             }
+            check_limit(&data, FIFTY_MB)?;
         }
+
+        let js_array = Uint8Array::from(&data[..]);
+        init.set_body(&js_array.into());
+
+        // We need to keep the closure alive until we finish processing the request
+        let pull: Option<Closure<dyn FnMut(ReadableStreamDefaultController) -> Promise>> = None;
 
         let abort_controller = AbortController::new().map_err(JsError::new)?;
         init.set_signal(Some(&abort_controller.signal()));
@@ -237,6 +179,13 @@ impl Body for RawResponseBody {
 
         Poll::Ready(Some(Ok(Frame::data(Bytes::from(chunk.to_vec())))))
     }
+}
+
+fn check_limit(buf: &[u8], limit: usize) -> Result<(), JsError> {
+    if buf.len() > limit {
+        return Err(JsError::new(JsString::from("body too large").into()));
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
