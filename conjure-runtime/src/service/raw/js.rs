@@ -11,29 +11,28 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::service::raw::RawRequestBody;
+use crate::service::raw::{RawRequestBody, RequestBodyError};
 use crate::service::Service;
 use crate::{builder, Builder};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use conjure_error::Error;
+use futures::TryStreamExt;
 use http::{header, HeaderName, HeaderValue, Request, Response, StatusCode};
 use http_body::{Body, Frame};
 use http_body_util::BodyExt;
 use js_sys::{Array, JsString, Promise, Uint8Array};
-use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
 use std::task::{ready, Context, Poll};
 use std::{error, fmt};
-use wasm_bindgen::prelude::{wasm_bindgen, Closure, JsCast, JsValue};
+use wasm_bindgen::prelude::{wasm_bindgen, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
-    AbortController, Headers, ReadableStream, ReadableStreamDefaultController,
-    ReadableStreamDefaultReader, ReadableStreamReadResult, RequestInit, UnderlyingSource,
+    AbortController, Headers, ReadableStreamDefaultReader, ReadableStreamReadResult, RequestInit,
 };
 
+const MAX_BODY_SIZE: usize = 50 * 1024 * 1024;
 static FETCH_USER_AGENT: HeaderName = HeaderName::from_static("fetch-user-agent");
 
 #[wasm_bindgen]
@@ -75,46 +74,14 @@ impl Service<Request<RawRequestBody>> for RawClient {
 
         init.set_headers(headers.as_ref());
 
-        // We need to keep the closure alive until we finish processing the request
-        let mut pull: Option<Closure<dyn FnMut(ReadableStreamDefaultController) -> Promise>> = None;
-
-        if !body.is_end_stream() {
-            let underlying_source = UnderlyingSource::new();
-
-            let body = Rc::new(RefCell::new(body));
-            let pull = pull.insert(Closure::new(
-                move |controller: ReadableStreamDefaultController| {
-                    wasm_bindgen_futures::future_to_promise({
-                        let body = body.clone();
-                        async move {
-                            match body.borrow_mut().frame().await {
-                                Some(Ok(frame)) => match frame.data_ref() {
-                                    Some(data) => {
-                                        let chunk = Uint8Array::new_with_length(data.len() as u32);
-                                        chunk.copy_from(data);
-                                        controller.enqueue_with_chunk(&chunk.into())?;
-                                        Ok(JsValue::UNDEFINED)
-                                    }
-                                    None => {
-                                        Err(js_sys::Error::new("unsupported trailers frame").into())
-                                    }
-                                },
-                                None => {
-                                    controller.close()?;
-                                    Ok(JsValue::UNDEFINED)
-                                }
-                                Some(Err(e)) => Err(js_sys::Error::new(&e.to_string()).into()),
-                            }
-                        }
-                    })
-                },
-            ));
-            underlying_source.set_pull(pull.as_ref().unchecked_ref());
-
-            let stream = ReadableStream::new_with_underlying_source(underlying_source.as_ref())
-                .map_err(JsError::new)?;
-            init.set_body(stream.as_ref());
-        }
+        // We're buffering the entire body because ReadableStreams are not supported in Safari and
+        // Firefox today. They are supported in Chrome (paired with 'duplex: half'). We'll just
+        // buffer the body since it's compatible with every browser, and it's not simple to
+        // determine at runtime which browser we're running in.
+        if let Some(data) = read_body(body, MAX_BODY_SIZE).await? {
+            let js_array = Uint8Array::from(&data[..]);
+            init.set_body(&js_array.into());
+        };
 
         let abort_controller = AbortController::new().map_err(JsError::new)?;
         init.set_signal(Some(&abort_controller.signal()));
@@ -136,7 +103,6 @@ impl Service<Request<RawRequestBody>> for RawClient {
             }),
             pending: None,
             _guard: guard,
-            _pull: pull,
         };
         let mut resp = Response::new(body);
 
@@ -172,7 +138,6 @@ pub struct RawResponseBody {
     reader: Option<ReadableStreamDefaultReader>,
     pending: Option<JsFuture>,
     _guard: AbortGuard,
-    _pull: Option<Closure<dyn FnMut(ReadableStreamDefaultController) -> Promise>>,
 }
 
 impl Body for RawResponseBody {
@@ -208,8 +173,49 @@ impl Body for RawResponseBody {
     }
 }
 
+async fn read_body(body: RawRequestBody, limit: usize) -> Result<Option<Bytes>, JsError> {
+    let mut data_stream = body.into_data_stream();
+
+    let first = match data_stream.try_next().await? {
+        Some(bytes) => bytes,
+        None => return Ok(None),
+    };
+    check_limit(&first, limit)?;
+
+    let mut buf = BytesMut::new();
+    match data_stream.try_next().await? {
+        Some(second) => {
+            buf.reserve(first.len() + second.len());
+            buf.extend_from_slice(&first);
+            buf.extend_from_slice(&second);
+        }
+        None => return Ok(Some(first)),
+    }
+    check_limit(&buf, limit)?;
+
+    while let Some(bytes) = data_stream.try_next().await? {
+        buf.extend_from_slice(&bytes);
+        check_limit(&buf, limit)?;
+    }
+
+    Ok(Some(buf.freeze()))
+}
+
+fn check_limit(buf: &[u8], limit: usize) -> Result<(), JsError> {
+    if buf.len() > limit {
+        return Err(JsError::new(JsString::from("body too large").into()));
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct JsError(String);
+
+impl From<RequestBodyError> for JsError {
+    fn from(value: RequestBodyError) -> Self {
+        JsError(value.to_string())
+    }
+}
 
 impl JsError {
     fn new(raw: JsValue) -> Self {
