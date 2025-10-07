@@ -191,7 +191,7 @@ async fn read_body(body: RawRequestBody, limit: usize) -> Result<Option<Bytes>, 
         }
         None => return Ok(Some(first)),
     }
-    check_limit(&first, limit)?;
+    check_limit(&buf, limit)?;
 
     while let Some(bytes) = data_stream.try_next().await? {
         buf.extend_from_slice(&bytes);
