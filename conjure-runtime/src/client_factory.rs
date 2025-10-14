@@ -257,6 +257,20 @@ impl ClientFactory {
         self.0.cache_manager.uncached().host_metrics.as_ref()
     }
 
+    /// Sets the Conjure runtime used to configure request and response encodings.
+    ///
+    /// Defaults to `ConjureRuntime::default()`.
+    #[inline]
+    pub fn conjure_runtime(mut self, conjure_runtime: Arc<ConjureRuntime>) -> Self {
+        self.0.cache_manager.uncached_mut().conjure_runtime = conjure_runtime;
+        self
+    }
+
+    /// Returns the configured Conjure runtime.
+    pub fn get_conjure_runtime(&self) -> &Arc<ConjureRuntime> {
+        &self.0.cache_manager.uncached().conjure_runtime
+    }
+
     fn state_builder(&self, service: &str) -> StateBuilder {
         StateBuilder {
             service: service.to_string(),

@@ -446,6 +446,20 @@ impl Builder<Complete> {
         self.0.uncached.host_metrics.as_ref()
     }
 
+    /// Sets the Conjure runtime used to configure request and response encodings.
+    ///
+    /// Defaults to `ConjureRuntime::default()`.
+    #[inline]
+    pub fn conjure_runtime(mut self, conjure_runtime: Arc<ConjureRuntime>) -> Self {
+        self.0.uncached.conjure_runtime = conjure_runtime;
+        self
+    }
+
+    /// Returns the configured Conjure runtime.
+    pub fn get_conjure_runtime(&self) -> &Arc<ConjureRuntime> {
+        &self.0.uncached.conjure_runtime
+    }
+
     /// Overrides the `hostIndex` field included in metrics.
     #[inline]
     pub fn override_host_index(mut self, override_host_index: usize) -> Self {
