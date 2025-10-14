@@ -51,7 +51,7 @@ impl BodyWriter {
             .sender
             .send(RequestBodyPart::Done)
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         Ok(())
     }
 
@@ -65,7 +65,7 @@ impl BodyWriter {
             .sender
             .send(RequestBodyPart::Frame(Frame::data(bytes)))
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         Ok(())
     }
 }
@@ -91,11 +91,11 @@ impl AsyncWrite for BodyWriter {
             return Poll::Ready(Ok(()));
         }
 
-        ready!(this.sender.poll_ready(cx)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        ready!(this.sender.poll_ready(cx)).map_err(io::Error::other)?;
         let chunk = this.buf.split().freeze();
         this.sender
             .start_send(RequestBodyPart::Frame(Frame::data(chunk)))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
 
         Poll::Ready(Ok(()))
     }
@@ -177,7 +177,7 @@ impl AsyncBufRead for ResponseBody {
         while !self.cur.has_remaining() {
             match ready!(self.as_mut().project().body.poll_frame(cx))
                 .transpose()
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+                .map_err(io::Error::other)?
             {
                 Some(frame) => {
                     if let Ok(data) = frame.into_data() {
