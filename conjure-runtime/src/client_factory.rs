@@ -532,7 +532,8 @@ impl StateBuilder {
             .server_qos(self.server_qos)
             .service_error(self.service_error)
             .idempotency(self.idempotency)
-            .node_selection_strategy(self.node_selection_strategy);
+            .node_selection_strategy(self.node_selection_strategy)
+            .conjure_runtime(self.cache_manager.uncached().conjure_runtime.clone());
 
         if let Some(metrics) = self.cache_manager.uncached().metrics.clone() {
             builder = builder.metrics(metrics);
