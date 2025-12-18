@@ -38,7 +38,7 @@ fn main() {
     test_blocking(builder.build_blocking().unwrap(), &mut passed, &mut failed);
     test_async(builder.build().unwrap(), &mut passed, &mut failed);
 
-    println!("{} passed, {} failed", passed, failed);
+    println!("{passed} passed, {failed} failed");
 
     if failed != 0 {
         process::exit(1);

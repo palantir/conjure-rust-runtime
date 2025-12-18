@@ -29,11 +29,7 @@ fn main() {
 
 fn download(name: &str, classifier: &str, extension: &str) -> Vec<u8> {
     let url = format!(
-        "https://repo1.maven.org/maven2/com/palantir/conjure/verification/{name}/{version}/{name}-{version}{classifier}.{extension}",
-        name = name,
-        version = VERSION,
-        classifier = classifier,
-        extension = extension,
+        "https://repo1.maven.org/maven2/com/palantir/conjure/verification/{name}/{VERSION}/{name}-{VERSION}{classifier}.{extension}",
     );
 
     let resp = attohttpc::get(&url).send().unwrap();

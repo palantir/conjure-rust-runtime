@@ -129,8 +129,7 @@ impl BodyWriter {
     }
 
     fn send(&mut self, message: BodyPart) -> io::Result<()> {
-        executor::block_on(self.sender.send(message))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        executor::block_on(self.sender.send(message)).map_err(io::Error::other)
     }
 
     /// Writes a block of body bytes.

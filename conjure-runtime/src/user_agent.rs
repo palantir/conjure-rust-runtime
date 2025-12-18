@@ -36,11 +36,11 @@ impl fmt::Display for UserAgent {
         write!(fmt, "{}", self.primary)?;
 
         if let Some(ref node_id) = self.node_id {
-            write!(fmt, " (nodeId:{})", node_id)?;
+            write!(fmt, " (nodeId:{node_id})")?;
         }
 
         for agent in &self.informational {
-            write!(fmt, " {}", agent)?;
+            write!(fmt, " {agent}")?;
         }
 
         Ok(())

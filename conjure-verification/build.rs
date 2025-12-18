@@ -268,8 +268,8 @@ fn generate_single_tests(
 ) {
     let empty_ignored = BTreeSet::new();
 
-    let blocking_client = Ident::new(&format!("{}Client", service), Span::call_site());
-    let async_client = Ident::new(&format!("Async{}Client", service), Span::call_site());
+    let blocking_client = Ident::new(&format!("{service}Client"), Span::call_site());
+    let async_client = Ident::new(&format!("Async{service}Client"), Span::call_site());
 
     for (name, cases) in tests {
         let ignored_cases = ignored_tests.get(name).unwrap_or(&empty_ignored);
