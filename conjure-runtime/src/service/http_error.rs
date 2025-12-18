@@ -15,17 +15,19 @@ use crate::errors::{RemoteError, ThrottledError, UnavailableError};
 use crate::service::{Layer, Service};
 use crate::{builder, Builder, ServerQos, ServiceError};
 use bytes::{BufMut, BytesMut};
-use conjure_error::{Error, ErrorType, Internal};
-use conjure_serde::json;
+use conjure_error::{Error, ErrorType, Internal, SerializableError};
+use conjure_http::client::{ConjureRuntime, JsonEncoding};
 use futures::StreamExt;
 use http::header::RETRY_AFTER;
 use http::{Request, Response, StatusCode};
 use http_body::Body;
 use http_body_util::BodyExt;
+use serde::Deserialize;
 use std::error;
 use std::pin::pin;
+use std::sync::Arc;
 use std::time::Duration;
-use witchcraft_log::info;
+use witchcraft_log::{debug, info};
 
 /// A layer which maps raw HTTP responses into Conjure `Error`s.
 ///
@@ -40,6 +42,7 @@ use witchcraft_log::info;
 pub struct HttpErrorLayer {
     server_qos: ServerQos,
     service_error: ServiceError,
+    conjure_runtime: Arc<ConjureRuntime>,
 }
 
 impl HttpErrorLayer {
@@ -47,6 +50,7 @@ impl HttpErrorLayer {
         HttpErrorLayer {
             server_qos: builder.get_server_qos(),
             service_error: builder.get_service_error(),
+            conjure_runtime: builder.get_conjure_runtime().clone(),
         }
     }
 }
@@ -59,6 +63,7 @@ impl<S> Layer<S> for HttpErrorLayer {
             inner,
             server_qos: self.server_qos,
             service_error: self.service_error,
+            conjure_runtime: self.conjure_runtime,
         }
     }
 }
@@ -67,6 +72,7 @@ pub struct HttpErrorService<S> {
     inner: S,
     server_qos: ServerQos,
     service_error: ServiceError,
+    conjure_runtime: Arc<ConjureRuntime>,
 }
 
 impl<S, B1, B2> Service<Request<B1>> for HttpErrorService<S>
@@ -135,9 +141,29 @@ where
                     }
                 }
 
+                let error_encoding = self
+                    .conjure_runtime
+                    .response_body_encoding(&parts.headers)
+                    .unwrap_or_else(|e| {
+                        // Conjure servers always use JSON for errors, so we can run into this case if e.g. someone
+                        // configures a Smile-only runtime.
+                        debug!("falling back to json deserializer for error body", error: e);
+                        &JsonEncoding
+                    });
+
+                let error = match SerializableError::deserialize(
+                    error_encoding.deserializer(&body).deserializer(),
+                ) {
+                    Ok(error) => Some(error),
+                    Err(e) => {
+                        debug!("failed to deserialize response body as a Conjure error", error: Error::internal(e));
+                        None
+                    }
+                };
+
                 let error = RemoteError {
                     status: parts.status,
-                    error: json::client_from_slice(&body).ok(),
+                    error,
                 };
                 let log_body = error.error.is_none();
 
@@ -170,6 +196,7 @@ mod test {
     use bytes::Bytes;
     use conjure_error::{ErrorCode, ErrorKind, SerializableError};
     use conjure_object::Uuid;
+    use conjure_serde::{json, smile};
     use http::header::CONTENT_TYPE;
     use http_body_util::{Empty, Full};
 
@@ -340,6 +367,44 @@ mod test {
             _ => panic!("expected a service error"),
         };
         assert_eq!(service_error, *service);
+
+        let remote_error = error.cause().downcast_ref::<RemoteError>().unwrap();
+        assert_eq!(remote_error.error(), Some(&service_error));
+    }
+
+    #[tokio::test]
+    async fn smile_service_handling() {
+        let service_error = SerializableError::builder()
+            .error_code(ErrorCode::Conflict)
+            .error_name("Default:Conflict")
+            .error_instance_id(Uuid::nil())
+            .build();
+
+        let service = HttpErrorLayer::new(&Builder::for_test()).layer({
+            let service_error = service_error.clone();
+            service::service_fn(move |_| {
+                let smile = smile::to_vec(&service_error).unwrap();
+                async move {
+                    Ok(Response::builder()
+                        .status(StatusCode::CONFLICT)
+                        .header(CONTENT_TYPE, "application/x-jackson-smile")
+                        .body(Full::new(Bytes::from(smile)))
+                        .unwrap())
+                }
+            })
+        });
+
+        let request = Request::new(());
+        let error = service.call(request).await.err().unwrap();
+        let service = match error.kind() {
+            ErrorKind::Service(service) => service,
+            _ => panic!("expected a service error"),
+        };
+        assert_eq!(*service.error_code(), ErrorCode::Internal);
+        assert_eq!(
+            service.error_instance_id(),
+            service_error.error_instance_id()
+        );
 
         let remote_error = error.cause().downcast_ref::<RemoteError>().unwrap();
         assert_eq!(remote_error.error(), Some(&service_error));
