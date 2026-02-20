@@ -30,7 +30,7 @@ use conjure_http::client::{
 use futures::future;
 use http::request::Parts;
 use http::{Request, Response, StatusCode};
-use rand::Rng;
+use rand::RngExt;
 use std::error;
 use std::future::Future;
 use std::pin::Pin;
