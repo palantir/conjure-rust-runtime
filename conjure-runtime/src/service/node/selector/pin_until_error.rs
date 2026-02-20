@@ -19,7 +19,7 @@ use conjure_error::Error;
 use http::{Request, Response};
 use rand::distr::uniform::SampleUniform;
 use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::RngExt;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
