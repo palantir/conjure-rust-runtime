@@ -220,6 +220,9 @@ pub struct SecurityConfig {
     key_file: Option<PathBuf>,
     #[builder(default, into)]
     cert_file: Option<PathBuf>,
+    #[serde(default)]
+    #[builder(list(item(type = String, into)))]
+    pinned_certs: Vec<String>,
 }
 
 impl SecurityConfig {
@@ -243,6 +246,22 @@ impl SecurityConfig {
     /// the remainder of the certificate chain to a trusted root.
     pub fn cert_file(&self) -> Option<&Path> {
         self.cert_file.as_deref()
+    }
+
+    /// PEM-formatted leaf certificates to pin against, one PEM document per entry.
+    ///
+    /// When non-empty, the client will only consider a TLS connection valid if the server's end-entity certificate
+    /// matches one of the certificates in this list. The certificate chain itself is *not* validated against any
+    /// trust anchor; pinning the leaf is sufficient to identify the server. This is intended as an escape hatch for
+    /// environments whose CA hierarchy uses X.509 features (e.g. `directoryName` name constraints, see
+    /// [RFC 5280 §4.2.1.10](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.10)) that the underlying
+    /// TLS library does not support.
+    ///
+    /// Because the chain is skipped, the configured certificates must be rotated in lockstep with the server's leaf
+    /// certificate. Operators that enable this option should ensure they have a process to keep the pins up to date,
+    /// or service traffic will fail when the server's certificate is renewed.
+    pub fn pinned_certs(&self) -> &[String] {
+        &self.pinned_certs
     }
 }
 

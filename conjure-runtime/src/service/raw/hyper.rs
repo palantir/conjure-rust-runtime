@@ -28,9 +28,10 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::{self, Client};
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use pin_project::pin_project;
-use rustls::crypto::ring;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::{ClientConfig, RootCertStore};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::{self, ring, CryptoProvider};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
+use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use rustls_pemfile::Item;
 use std::fs::File;
 use std::io::BufReader;
@@ -64,17 +65,42 @@ impl RawClient {
         let connector = TimeoutLayer::new(builder).layer(connector);
         let connector = ProxyConnectorLayer::new(builder)?.layer(connector);
 
-        let mut roots = RootCertStore::empty();
-        roots.extend(TLS_SERVER_ROOTS.iter().cloned());
+        let provider = Arc::new(ring::default_provider());
 
-        if let Some(ca_file) = builder.get_security().ca_file() {
-            let certs = load_certs_file(ca_file)?;
-            roots.add_parsable_certificates(certs);
-        }
-        let client_config = ClientConfig::builder_with_provider(Arc::new(ring::default_provider()))
+        let builder_stage = ClientConfig::builder_with_provider(provider.clone())
             .with_safe_default_protocol_versions()
-            .map_err(Error::internal_safe)?
-            .with_root_certificates(roots);
+            .map_err(Error::internal_safe)?;
+
+        let unauthed_config = if builder.get_security().pinned_certs().is_empty() {
+            let mut roots = RootCertStore::empty();
+            roots.extend(TLS_SERVER_ROOTS.iter().cloned());
+
+            if let Some(ca_file) = builder.get_security().ca_file() {
+                let certs = load_certs_file(ca_file)?;
+                roots.add_parsable_certificates(certs);
+            }
+            builder_stage.with_root_certificates(roots)
+        } else {
+            let mut pinned = Vec::with_capacity(builder.get_security().pinned_certs().len());
+            for (idx, pem) in builder.get_security().pinned_certs().iter().enumerate() {
+                let mut reader = BufReader::new(pem.as_bytes());
+                let mut certs = rustls_pemfile::certs(&mut reader)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(Error::internal_safe)?;
+                if certs.len() != 1 {
+                    return Err(Error::internal_safe(
+                        "pinned-certs entry must contain exactly one PEM-encoded certificate",
+                    )
+                    .with_safe_param("index", idx)
+                    .with_safe_param("count", certs.len()));
+                }
+                pinned.push(certs.pop().unwrap());
+            }
+            let verifier = Arc::new(PinnedLeafVerifier::new(pinned, provider.clone()));
+            builder_stage
+                .dangerous()
+                .with_custom_certificate_verifier(verifier)
+        };
 
         let client_config = match (
             builder.get_security().cert_file(),
@@ -84,11 +110,11 @@ impl RawClient {
                 let cert_chain = load_certs_file(cert_file)?;
                 let private_key = load_private_key(key_file)?;
 
-                client_config
+                unauthed_config
                     .with_client_auth_cert(cert_chain, private_key)
                     .map_err(Error::internal_safe)?
             }
-            (None, None) => client_config.with_no_client_auth(),
+            (None, None) => unauthed_config.with_no_client_auth(),
             _ => {
                 return Err(Error::internal_safe(
                     "neither or both of key-file and cert-file must be set in the client \
@@ -157,6 +183,85 @@ fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, Error> {
         _ => Err(Error::internal_safe(
             "expected a PKCS#1, PKCS#8, or Sec1 private key",
         )),
+    }
+}
+
+/// A `ServerCertVerifier` that accepts a connection iff the server's end-entity certificate exactly
+/// matches one of a configured set of pinned leaf certificates.
+///
+/// The certificate chain is *not* validated. Pinning the leaf is sufficient to identify the server,
+/// since rustls separately verifies the handshake signature against the leaf's public key (see
+/// `verify_tls12_signature` / `verify_tls13_signature`), which proves the server holds the matching
+/// private key.
+///
+/// This is intended as an escape hatch for environments whose CA hierarchy uses X.509 features
+/// the underlying TLS library does not support (e.g. `directoryName` name constraints).
+#[derive(Debug)]
+struct PinnedLeafVerifier {
+    pinned: Vec<CertificateDer<'static>>,
+    provider: Arc<CryptoProvider>,
+}
+
+impl PinnedLeafVerifier {
+    fn new(pinned: Vec<CertificateDer<'static>>, provider: Arc<CryptoProvider>) -> Self {
+        PinnedLeafVerifier { pinned, provider }
+    }
+}
+
+impl ServerCertVerifier for PinnedLeafVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        if self
+            .pinned
+            .iter()
+            .any(|pin| pin.as_ref() == end_entity.as_ref())
+        {
+            Ok(ServerCertVerified::assertion())
+        } else {
+            Err(rustls::Error::InvalidCertificate(
+                rustls::CertificateError::UnknownIssuer,
+            ))
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
 
