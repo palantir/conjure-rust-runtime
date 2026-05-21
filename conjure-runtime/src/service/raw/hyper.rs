@@ -41,6 +41,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
+use subtle::{Choice, ConstantTimeEq};
 use tower_layer::Layer;
 use webpki_roots::TLS_SERVER_ROOTS;
 
@@ -217,11 +218,11 @@ impl ServerCertVerifier for PinnedLeafVerifier {
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
-        if self
-            .pinned
-            .iter()
-            .any(|pin| pin.as_ref() == end_entity.as_ref())
-        {
+        let mut matched = Choice::from(0);
+        for pin in &self.pinned {
+            matched |= pin.as_ref().ct_eq(end_entity.as_ref());
+        }
+        if bool::from(matched) {
             Ok(ServerCertVerified::assertion())
         } else {
             Err(rustls::Error::InvalidCertificate(

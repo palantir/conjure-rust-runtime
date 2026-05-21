@@ -65,6 +65,7 @@ rustls = { version = "0.23", default-features = false, features = [
     "std",
     "tls12",
 ] }
+subtle = "2"
 tokio-io-timeout = "1.0"
 tokio = { version = "1.0", features = ["rt-multi-thread", "time"] }
 tower-layer = "0.3"
