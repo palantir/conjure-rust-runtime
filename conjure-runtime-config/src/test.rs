@@ -88,6 +88,38 @@ fn root_defaults() {
 }
 
 #[test]
+fn pinned_certs() {
+    let config = r#"
+        {
+            "services": {
+                "foo": {
+                    "uris": [
+                        "https://foo1.com"
+                    ],
+                    "security": {
+                        "pinned-certs": [
+                            "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n",
+                            "-----BEGIN CERTIFICATE-----\nBBBB\n-----END CERTIFICATE-----\n"
+                        ]
+                    }
+                }
+            }
+        }
+    "#;
+    let config = serde_json::from_str::<ServicesConfig>(config).unwrap();
+    let expected = ServiceConfig::builder()
+        .uris(vec!["https://foo1.com".parse().unwrap()])
+        .security(
+            SecurityConfig::builder()
+                .push_pinned_certs("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n")
+                .push_pinned_certs("-----BEGIN CERTIFICATE-----\nBBBB\n-----END CERTIFICATE-----\n")
+                .build(),
+        )
+        .build();
+    assert_eq!(config.merged_service("foo"), Some(expected));
+}
+
+#[test]
 fn service_overrides() {
     let config = r#"
         {

@@ -806,3 +806,187 @@ async fn fixed_body_has_content_length() {
     )
     .await
 }
+
+fn cert_file_pem() -> String {
+    std::fs::read_to_string(cert_file()).unwrap()
+}
+
+fn alt_self_signed_cert_pem() -> String {
+    use openssl::asn1::Asn1Time;
+    use openssl::hash::MessageDigest;
+    use openssl::pkey::PKey;
+    use openssl::rsa::Rsa;
+    use openssl::x509::{X509Builder, X509NameBuilder};
+
+    let rsa = Rsa::generate(2048).unwrap();
+    let pkey = PKey::from_rsa(rsa).unwrap();
+
+    let mut name = X509NameBuilder::new().unwrap();
+    name.append_entry_by_text("CN", "wrong.example.com")
+        .unwrap();
+    let name = name.build();
+
+    let mut builder = X509Builder::new().unwrap();
+    builder.set_version(2).unwrap();
+    builder.set_subject_name(&name).unwrap();
+    builder.set_issuer_name(&name).unwrap();
+    builder.set_pubkey(&pkey).unwrap();
+    builder
+        .set_not_before(&Asn1Time::days_from_now(0).unwrap())
+        .unwrap();
+    builder
+        .set_not_after(&Asn1Time::days_from_now(365).unwrap())
+        .unwrap();
+    builder.sign(&pkey, MessageDigest::sha256()).unwrap();
+    let cert = builder.build();
+    String::from_utf8(cert.to_pem().unwrap()).unwrap()
+}
+
+fn pinned_config_for(port: u16, pem: &str) -> ServiceConfig {
+    ServiceConfig::builder()
+        .uris(vec![format!("https://localhost:{port}").parse().unwrap()])
+        .security(
+            conjure_runtime_config::SecurityConfig::builder()
+                .push_pinned_certs(pem)
+                .build(),
+        )
+        .max_num_retries(0)
+        .build()
+}
+
+async fn pinned_client<F>(port: u16, pem: &str, check: impl FnOnce(Builder) -> F)
+where
+    F: Future<Output = ()>,
+{
+    let builder = Client::builder()
+        .service("service")
+        .user_agent(UserAgent::new(Agent::new("test", "1.0")))
+        .from_config(&pinned_config_for(port, pem));
+    check(builder).await
+}
+
+#[tokio::test]
+async fn pinned_certs_accepts_matching_leaf() {
+    // Notably, this config does *not* set `ca-file`, so the server's self-signed certificate is
+    // not in the trust store. The pin alone is what permits the connection.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let pem = cert_file_pem();
+
+    let server = server(listener, 1, |_| async move {
+        Ok(Response::new(Empty::new().boxed()))
+    });
+
+    let client = pinned_client(port, &pem, |builder| async move {
+        let response = builder
+            .build()
+            .unwrap()
+            .send(req().body(AsyncRequestBody::Empty).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    });
+
+    join!(server, client);
+}
+
+#[tokio::test]
+async fn pinned_certs_rejects_wrong_leaf() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let wrong_pem = alt_self_signed_cert_pem();
+
+    let server = async move {
+        // We expect the client to fail the TLS handshake. We still want a listener up so the
+        // failure is the cert pin mismatch and not a connection-refused.
+        let _ = listener.accept().await;
+    };
+
+    let client = pinned_client(port, &wrong_pem, |builder| async move {
+        let err = builder
+            .build()
+            .unwrap()
+            .send(req().body(AsyncRequestBody::Empty).unwrap())
+            .await
+            .err()
+            .expect("expected pinned-leaf mismatch to fail the request");
+        // The error should be a transport-layer error, not a remote (status code) error.
+        assert!(err.cause().downcast_ref::<RemoteError>().is_none());
+    });
+
+    join!(server, client);
+}
+
+#[tokio::test]
+async fn pinned_certs_rejects_correct_cert_with_wrong_key() {
+    // Defense-in-depth: pinning the leaf is only safe if the server actually proves it holds the
+    // matching private key. This test verifies that a server presenting the pinned cert but
+    // signing the TLS handshake with an unrelated key is rejected, even though the pin check
+    // (byte-comparison of the leaf) passes.
+    use openssl::pkey::PKey;
+    use openssl::rsa::Rsa;
+    use rustls::crypto::ring::sign::any_supported_type;
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    use rustls::server::{ClientHello, ResolvesServerCert, ServerConfig};
+    use rustls::sign::CertifiedKey;
+    use std::fmt;
+    use std::sync::Arc;
+    use tokio_rustls::TlsAcceptor;
+
+    let pem = cert_file_pem();
+    let cert_der = CertificateDer::from_pem_slice(pem.as_bytes()).unwrap();
+
+    // Fresh, unrelated keypair.
+    let rsa = Rsa::generate(2048).unwrap();
+    let pkey = PKey::from_rsa(rsa).unwrap();
+    let wrong_key_pem = pkey.private_key_to_pem_pkcs8().unwrap();
+    let wrong_key_der = PrivatePkcs8KeyDer::from_pem_slice(&wrong_key_pem).unwrap();
+    let signing_key = any_supported_type(&PrivateKeyDer::Pkcs8(wrong_key_der)).unwrap();
+
+    let certified = Arc::new(CertifiedKey::new(vec![cert_der], signing_key));
+
+    struct LyingResolver(Arc<CertifiedKey>);
+    impl fmt::Debug for LyingResolver {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("LyingResolver").finish()
+        }
+    }
+    impl ResolvesServerCert for LyingResolver {
+        fn resolve(&self, _: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+            Some(self.0.clone())
+        }
+    }
+
+    let server_config =
+        ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_cert_resolver(Arc::new(LyingResolver(certified)));
+    let acceptor: TlsAcceptor = Arc::new(server_config).into();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let server = async move {
+        if let Ok((tcp, _)) = listener.accept().await {
+            // The handshake is expected to fail when rustls verifies the signature against the
+            // (mismatched) public key in the presented leaf.
+            let _ = acceptor.accept(tcp).await;
+        }
+    };
+
+    let client = pinned_client(port, &pem, |builder| async move {
+        let err = builder
+            .build()
+            .unwrap()
+            .send(req().body(AsyncRequestBody::Empty).unwrap())
+            .await
+            .err()
+            .expect("expected handshake signature failure");
+        assert!(err.cause().downcast_ref::<RemoteError>().is_none());
+    });
+
+    join!(server, client);
+}
