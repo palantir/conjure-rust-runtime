@@ -42,7 +42,7 @@ witchcraft-metrics = "1"
 zipkin = "1.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-base64 = "0.22"
+base64 = "0.23"
 flate2 = "1.0"
 hyper = { version = "1", features = ["http1", "http2", "client"] }
 hyper-rustls = { version = "0.27", default-features = false, features = [
