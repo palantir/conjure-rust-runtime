@@ -43,9 +43,9 @@ pub enum NodeSelectorLayer {
 }
 
 impl NodeSelectorLayer {
-    pub fn new(builder: &Builder<builder::Complete>) -> Result<NodeSelectorLayer, Error> {
+    pub fn new(builder: &Builder<builder::Complete>) -> NodeSelectorLayer {
         let mut nodes = builder
-            .postprocessed_uris()?
+            .get_uris()
             .iter()
             .enumerate()
             .map(|(i, url)| {
@@ -58,7 +58,7 @@ impl NodeSelectorLayer {
             })
             .collect::<Vec<_>>();
 
-        let layer = if nodes.is_empty() {
+        if nodes.is_empty() {
             NodeSelectorLayer::Empty(EmptyNodeSelectorLayer::new(builder.get_service()))
         } else if nodes.len() == 1 {
             NodeSelectorLayer::Single(SingleNodeSelectorLayer::new(nodes.pop().unwrap()))
@@ -76,9 +76,7 @@ impl NodeSelectorLayer {
                     NodeSelectorLayer::Balanced(BalancedNodeSelectorLayer::new(nodes))
                 }
             }
-        };
-
-        Ok(layer)
+        }
     }
 }
 

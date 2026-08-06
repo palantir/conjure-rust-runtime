@@ -58,11 +58,7 @@ impl RetryLayer {
     pub fn new(builder: &Builder<builder::Complete>) -> RetryLayer {
         RetryLayer {
             idempotency: builder.get_idempotency(),
-            max_num_retries: if builder.mesh_mode() {
-                0
-            } else {
-                builder.get_max_num_retries()
-            },
+            max_num_retries: builder.get_max_num_retries(),
             backoff_slot_size: builder.get_backoff_slot_size(),
         }
     }

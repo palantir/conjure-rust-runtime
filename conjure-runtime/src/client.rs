@@ -84,7 +84,7 @@ impl ClientState {
             .layer(RetryLayer::new(builder))
             .layer(HttpErrorLayer::new(builder))
             .layer(WaitForSpansLayer)
-            .layer(NodeSelectorLayer::new(builder)?)
+            .layer(NodeSelectorLayer::new(builder))
             .layer(NodeUriLayer)
             .layer(NodeMetricsLayer)
             .layer(ProxyLayer::new(builder)?)
