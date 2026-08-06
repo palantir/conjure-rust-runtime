@@ -732,28 +732,6 @@ impl AsyncWriteBody<BodyWriter> for InfiniteBody {
 }
 
 #[tokio::test]
-async fn mesh_mode() {
-    test(
-        r#"
-uris: ["mesh-https://localhost:{{port}}"]
-security:
-  ca-file: "{{ca_file}}"
-        "#,
-        1,
-        |_| async move { Ok(Response::new(Empty::new().boxed())) },
-        |builder| async move {
-            builder
-                .build()
-                .unwrap()
-                .send(req().body(AsyncRequestBody::Empty).unwrap())
-                .await
-                .unwrap();
-        },
-    )
-    .await
-}
-
-#[tokio::test]
 async fn empty_body_has_no_transfer_encoding() {
     test(
         STOCK_CONFIG,

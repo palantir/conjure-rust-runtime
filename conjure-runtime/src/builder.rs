@@ -21,15 +21,12 @@ use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
 use conjure_http::client::ConjureRuntime;
-use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Handle;
 use url::Url;
 use witchcraft_metrics::MetricRegistry;
-
-const MESH_PREFIX: &str = "mesh-";
 
 /// A builder to construct [`Client`]s and [`blocking::Client`]s.
 pub struct Builder<T = Complete>(T);
@@ -471,34 +468,6 @@ impl Builder<Complete> {
     #[inline]
     pub fn get_override_host_index(&self) -> Option<usize> {
         self.0.cached.override_host_index
-    }
-
-    pub(crate) fn mesh_mode(&self) -> bool {
-        self.0
-            .cached
-            .uris
-            .iter()
-            .any(|uri| uri.scheme().starts_with(MESH_PREFIX))
-    }
-
-    pub(crate) fn postprocessed_uris(&self) -> Result<Cow<'_, [Url]>, Error> {
-        if self.mesh_mode() {
-            if self.0.cached.uris.len() != 1 {
-                return Err(Error::internal_safe("mesh mode expects exactly one URI")
-                    .with_safe_param("uris", &self.0.cached.uris));
-            }
-
-            let uri = self.0.cached.uris[0]
-                .as_str()
-                .strip_prefix(MESH_PREFIX)
-                .unwrap()
-                .parse()
-                .unwrap();
-
-            Ok(Cow::Owned(vec![uri]))
-        } else {
-            Ok(Cow::Borrowed(&self.0.cached.uris))
-        }
     }
 
     /// Creates a new `Client`.
