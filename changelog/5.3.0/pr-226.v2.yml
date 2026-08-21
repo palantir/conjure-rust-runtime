@@ -1,5 +1,0 @@
-type: feature
-feature:
-  description: 'Switch crypto backend from aws-lc-rs to ring #226'
-  links:
-  - https://github.com/palantir/conjure-rust-runtime/pull/226
