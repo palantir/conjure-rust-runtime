@@ -11,27 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::errors::TransportError;
 use crate::service::{Layer, Service};
 use conjure_error::Error;
 use std::error;
-use std::fmt;
 
-#[derive(Debug)]
-pub struct RawClientError(pub Box<dyn error::Error + Sync + Send>);
-
-impl fmt::Display for RawClientError {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.write_str("raw HTTP client error")
-    }
-}
-
-impl error::Error for RawClientError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        Some(&*self.0)
-    }
-}
-
-/// A layer which sits directly on top of the raw HTTP client service, wrapping its errors in `RawClientError` and then
+/// A layer which sits directly on top of the raw HTTP client service, wrapping its errors in `TransportError` and then
 /// converting them into an internal service `conjure_error::Error`.
 pub struct MapErrorLayer;
 
@@ -59,6 +44,28 @@ where
         self.inner
             .call(req)
             .await
-            .map_err(|e| Error::internal_safe(RawClientError(e.into())))
+            .map_err(|e| Error::internal_safe(TransportError::new(e)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::service;
+    use std::io;
+
+    #[tokio::test]
+    async fn wraps_transport_errors() {
+        let service = MapErrorLayer.layer(service::service_fn(|()| async {
+            Err::<(), _>(io::Error::other("connection refused"))
+        }));
+
+        let error = service.call(()).await.unwrap_err();
+
+        assert!(error.cause().is::<TransportError>());
+        assert!(error
+            .cause()
+            .source()
+            .is_some_and(|cause| cause.is::<io::Error>()));
     }
 }

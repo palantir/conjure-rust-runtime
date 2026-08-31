@@ -19,6 +19,32 @@ use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
+/// An error produced by the HTTP transport before a response was received.
+#[derive(Debug)]
+pub struct TransportError(Box<dyn Error + Sync + Send>);
+
+impl TransportError {
+    /// Creates a new transport error wrapping the underlying HTTP client error.
+    pub fn new<E>(cause: E) -> Self
+    where
+        E: Into<Box<dyn Error + Sync + Send>>,
+    {
+        TransportError(cause.into())
+    }
+}
+
+impl fmt::Display for TransportError {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.write_str("raw HTTP client error")
+    }
+}
+
+impl Error for TransportError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&*self.0)
+    }
+}
+
 /// An error received from a remote service.
 #[derive(Debug)]
 pub struct RemoteError {

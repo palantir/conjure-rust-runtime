@@ -11,9 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::errors::{RemoteError, ThrottledError, UnavailableError};
+use crate::errors::{RemoteError, ThrottledError, TransportError, UnavailableError};
 use crate::rt::time;
-use crate::service::map_error::RawClientError;
 use crate::service::raw::{RawRequestBody, RequestBodyError};
 use crate::service::{Layer, Service};
 use crate::util::spans::{self, HttpSpanFuture};
@@ -40,7 +39,7 @@ use witchcraft_log::info;
 /// A layer which retries failed requests in certain cases.
 ///
 /// All requests that fail with a cause of `ThrottledError` or `UnavailableError` will be retried. Requests failing with
-/// a cause of `RawClientError` or `RemoteError` and a status code of `INTERNAL_SERVER_ERROR` will be retried if the
+/// a cause of `TransportError` or `RemoteError` and a status code of `INTERNAL_SERVER_ERROR` will be retried if the
 /// request is considered idempotent. This is configured by the `Idempotency` enum.
 ///
 /// The layer retries up to a specified maximum number of times, applying exponential backoff with full jitter in
@@ -201,7 +200,7 @@ where
                         error,
                         retry_after: None,
                     })
-                } else if self.idempotent && error.cause().is::<RawClientError>() {
+                } else if self.idempotent && error.cause().is::<TransportError>() {
                     Ok(AttemptOutcome::Retry {
                         error,
                         retry_after: None,
@@ -577,7 +576,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn retry_after_raw_client_error() {
+    async fn retry_after_transport_error() {
         let service = RetryLayer::new(
             &Builder::for_test()
                 .max_num_retries(2)
@@ -592,7 +591,7 @@ mod test {
                     assert_eq!(body.to_bytes(), "hello world");
 
                     match attempt {
-                        0 => Err(Error::internal_safe(RawClientError("blammo".into()))),
+                        0 => Err(Error::internal_safe(TransportError::new("blammo"))),
                         1 => Ok(Response::new(())),
                         _ => panic!(),
                     }

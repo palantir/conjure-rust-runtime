@@ -28,7 +28,7 @@ struct Metrics {
 
 /// A layer which updates the `client.response` and `client.response.error` metrics.
 ///
-/// Only errors with a cause of `RawClientError` will be treated as IO errors.
+/// Only errors with a cause of `TransportError` will be treated as IO errors.
 pub struct MetricsLayer {
     metrics: Option<Metrics>,
 }

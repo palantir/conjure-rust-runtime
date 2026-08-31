@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::service::map_error::RawClientError;
+use crate::errors::TransportError;
 use crate::service::node::limiter::deficit_semaphore::{self, DeficitSemaphore};
 use crate::util::atomic_f64::AtomicF64;
 use conjure_error::Error;
@@ -119,7 +119,7 @@ impl Behavior for HostLevel {
     }
 
     fn on_failure(error: &Error) -> Mode {
-        if error.cause().is::<RawClientError>() {
+        if error.cause().is::<TransportError>() {
             Mode::Dropped
         } else {
             Mode::Ignore
