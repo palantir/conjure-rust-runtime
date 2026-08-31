@@ -1,5 +1,0 @@
-type: improvement
-improvement:
-  description: Update retry backoff scale to be consistent with conjure-java-runtime
-  links:
-  - https://github.com/palantir/conjure-rust-runtime/pull/162
