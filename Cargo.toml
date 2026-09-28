@@ -16,6 +16,3 @@ debug = 1
 
 [profile.bench]
 debug = 1
-
-[patch.crates-io]
-witchcraft-log = { git = "https://github.com/palantir/witchcraft-rust-logging", rev = "64a0adc9c7da4564fc9d1e2f941ac56e9268a8b8" }
