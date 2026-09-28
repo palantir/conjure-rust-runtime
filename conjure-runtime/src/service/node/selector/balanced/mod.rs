@@ -172,9 +172,9 @@ where
                 debug!(
                     "filtering out node with score above threshold",
                     safe: {
-                        score: snapshot.score.score,
-                        giveUpScore: give_up_threshold,
-                        hostIndex: snapshot.node.node.node.idx,
+                        score: conjure_object::log_safety::AssertLogSafe(snapshot.score.score),
+                        giveUpScore: conjure_object::log_safety::AssertLogSafe(give_up_threshold),
+                        hostIndex: conjure_object::log_safety::AssertLogSafe(snapshot.node.node.node.idx),
                     }
                 );
 

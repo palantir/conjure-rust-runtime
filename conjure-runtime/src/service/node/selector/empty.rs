@@ -54,7 +54,11 @@ where
     type Error = Error;
 
     async fn call(&self, _: Request<B>) -> Result<Self::Response, Self::Error> {
-        Err(Error::internal_safe("service configured with no URIs")
-            .with_safe_param("service", &*self.service))
+        Err(
+            Error::internal_safe("service configured with no URIs").with_safe_param(
+                "service",
+                conjure_object::log_safety::AssertLogSafe(&*self.service),
+            ),
+        )
     }
 }

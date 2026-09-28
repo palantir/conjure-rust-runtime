@@ -112,7 +112,7 @@ impl Agent {
             warn!(
                 "encountered invalid user agent version",
                 safe: {
-                    version: version,
+                    version: conjure_object::log_safety::AssertLogSafe(version),
                 }
             );
             version = DEFAULT_VERSION;

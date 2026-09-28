@@ -92,8 +92,11 @@ impl RawClient {
                     return Err(Error::internal_safe(
                         "pinned-certs entry must contain exactly one PEM-encoded certificate",
                     )
-                    .with_safe_param("index", idx)
-                    .with_safe_param("count", certs.len()));
+                    .with_safe_param("index", conjure_object::log_safety::AssertLogSafe(idx))
+                    .with_safe_param(
+                        "count",
+                        conjure_object::log_safety::AssertLogSafe(certs.len()),
+                    ));
                 }
                 pinned.push(certs.pop().unwrap());
             }
