@@ -15,6 +15,7 @@ use crate::service::node::selector::balanced::reservoir::CoarseExponentialDecayR
 use crate::service::node::{AcquiredNode, LimitedNode};
 use crate::service::{Layer, Service};
 use conjure_error::Error;
+use conjure_object::log_safety::AssertLogSafe;
 use http::{Request, Response};
 use rand::seq::SliceRandom;
 use std::future::Future;
@@ -172,9 +173,9 @@ where
                 debug!(
                     "filtering out node with score above threshold",
                     safe: {
-                        score: conjure_object::log_safety::AssertLogSafe(snapshot.score.score),
-                        giveUpScore: conjure_object::log_safety::AssertLogSafe(give_up_threshold),
-                        hostIndex: conjure_object::log_safety::AssertLogSafe(snapshot.node.node.node.idx),
+                        score: AssertLogSafe(snapshot.score.score),
+                        giveUpScore: AssertLogSafe(give_up_threshold),
+                        hostIndex: AssertLogSafe(snapshot.node.node.node.idx),
                     }
                 );
 
