@@ -22,7 +22,6 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all --all-targets --features witchcraft-log/log-safety
       - run: cargo clippy -p conjure-runtime --target wasm32-unknown-unknown --features js
-      - run: cargo test --all
       - run: cargo test --all --features witchcraft-log/log-safety
       - run: cd conjure-runtime-wasm-test && wasm-pack test --node
       - save_cache:
