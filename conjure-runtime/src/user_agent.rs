@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use conjure_object::log_safety::AssertLogSafe;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fmt;
@@ -112,7 +113,7 @@ impl Agent {
             warn!(
                 "encountered invalid user agent version",
                 safe: {
-                    version: version,
+                    version: AssertLogSafe(version),
                 }
             );
             version = DEFAULT_VERSION;

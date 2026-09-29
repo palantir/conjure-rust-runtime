@@ -13,6 +13,7 @@
 // limitations under the License.
 use crate::service::{Layer, Service};
 use conjure_error::Error;
+use conjure_object::log_safety::AssertLogSafe;
 use http::Request;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -55,6 +56,6 @@ where
 
     async fn call(&self, _: Request<B>) -> Result<Self::Response, Self::Error> {
         Err(Error::internal_safe("service configured with no URIs")
-            .with_safe_param("service", &*self.service))
+            .with_safe_param("service", AssertLogSafe(&*self.service)))
     }
 }
