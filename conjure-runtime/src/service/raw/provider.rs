@@ -46,6 +46,7 @@ static CIPHER_SUITES: &[SupportedCipherSuite] = &[
     TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
 ];
 
+// not listing x25519mlkem768 first to avoid running into tldr.fail issues
 static KX_GROUPS: &[&dyn SupportedKxGroup] = &[X25519, SECP256R1, SECP384R1, X25519MLKEM768];
 
 pub fn provider() -> CryptoProvider {
