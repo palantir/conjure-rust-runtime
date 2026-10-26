@@ -22,3 +22,5 @@ mod body;
 mod hyper;
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 mod js;
+#[cfg(not(target_arch = "wasm32"))]
+mod provider;
