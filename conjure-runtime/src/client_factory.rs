@@ -19,8 +19,8 @@ use crate::config::{ServiceConfig, ServicesConfig};
 use crate::weak_cache::{Cached, WeakCache};
 use crate::{Builder, ClientState, Host, PerHostClients};
 use crate::{
-    Client, ClientQos, HostMetricsRegistry, Idempotency, NodeSelectionStrategy, ServerQos,
-    ServiceError, UserAgent,
+    Client, ClientQos, ErrorParameterFormat, HostMetricsRegistry, Idempotency,
+    NodeSelectionStrategy, ServerQos, ServiceError, UserAgent,
 };
 use arc_swap::ArcSwap;
 use conjure_error::Error;
@@ -78,6 +78,7 @@ pub struct Complete {
     service_error: ServiceError,
     idempotency: Idempotency,
     node_selection_strategy: NodeSelectionStrategy,
+    error_parameter_format: ErrorParameterFormat,
     cache_manager: CacheManager,
 }
 
@@ -119,6 +120,7 @@ impl ClientFactory<UserAgentStage> {
             service_error: ServiceError::WrapInNewError,
             idempotency: Idempotency::ByMethod,
             node_selection_strategy: NodeSelectionStrategy::PinUntilError,
+            error_parameter_format: ErrorParameterFormat::Legacy,
             cache_manager: CacheManager {
                 uncached_inner: UncachedConfig {
                     metrics: None,
@@ -227,6 +229,21 @@ impl ClientFactory {
         self.0.node_selection_strategy
     }
 
+    /// Sets the format clients request that servers use when serializing Conjure error parameters.
+    ///
+    /// Defaults to `ErrorParameterFormat::Legacy`.
+    #[inline]
+    pub fn error_parameter_format(mut self, error_parameter_format: ErrorParameterFormat) -> Self {
+        self.0.error_parameter_format = error_parameter_format;
+        self
+    }
+
+    /// Returns the configured error parameter format.
+    #[inline]
+    pub fn get_error_parameter_format(&self) -> ErrorParameterFormat {
+        self.0.error_parameter_format
+    }
+
     /// Sets the metric registry used to register client metrics.
     ///
     /// Defaults to no registry.
@@ -280,6 +297,7 @@ impl ClientFactory {
             service_error: self.0.service_error,
             idempotency: self.0.idempotency,
             node_selection_strategy: self.0.node_selection_strategy,
+            error_parameter_format: self.0.error_parameter_format,
             cache_manager: self.0.cache_manager.clone(),
         }
     }
@@ -515,6 +533,7 @@ struct StateBuilder {
     service_error: ServiceError,
     idempotency: Idempotency,
     node_selection_strategy: NodeSelectionStrategy,
+    error_parameter_format: ErrorParameterFormat,
     cache_manager: CacheManager,
 }
 
@@ -533,6 +552,7 @@ impl StateBuilder {
             .service_error(self.service_error)
             .idempotency(self.idempotency)
             .node_selection_strategy(self.node_selection_strategy)
+            .error_parameter_format(self.error_parameter_format)
             .conjure_runtime(self.cache_manager.uncached().conjure_runtime.clone());
 
         if let Some(metrics) = self.cache_manager.uncached().metrics.clone() {

@@ -13,6 +13,7 @@
 // limitations under the License.
 use std::future::Future;
 
+pub mod error_parameter_format;
 pub mod gzip;
 pub mod http_error;
 pub mod map_error;
