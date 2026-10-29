@@ -601,7 +601,7 @@ pub enum ErrorParameterFormat {
 
 impl ErrorParameterFormat {
     #[inline]
-    pub fn header_value(&self) -> Option<&'static str> {
+    pub(crate) fn header_value(&self) -> Option<&'static str> {
         match self {
             ErrorParameterFormat::Legacy => None,
             ErrorParameterFormat::Json => Some("JSON"),
