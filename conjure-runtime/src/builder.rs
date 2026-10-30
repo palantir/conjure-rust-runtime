@@ -21,6 +21,7 @@ use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
 use conjure_http::client::ConjureRuntime;
+use http::HeaderValue;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
@@ -57,6 +58,7 @@ pub(crate) struct CachedConfig {
     idempotency: Idempotency,
     node_selection_strategy: NodeSelectionStrategy,
     override_host_index: Option<usize>,
+    error_parameter_format: ErrorParameterFormat,
 }
 
 #[derive(Clone)]
@@ -121,6 +123,7 @@ impl Builder<UserAgentStage> {
                 idempotency: Idempotency::ByMethod,
                 node_selection_strategy: NodeSelectionStrategy::PinUntilError,
                 override_host_index: None,
+                error_parameter_format: ErrorParameterFormat::Legacy,
             },
             uncached: UncachedConfig {
                 metrics: None,
@@ -413,6 +416,25 @@ impl Builder<Complete> {
         self.0.cached.node_selection_strategy
     }
 
+    /// Sets the format the client requests that servers use when serializing Conjure error parameters.
+    ///
+    /// The format is communicated via the `Accept-Conjure-Error-Parameter-Format` header. It is a best-effort hint:
+    /// servers that do not recognize it will continue to use the legacy format. A value of the header set directly
+    /// on a request takes precedence over this setting.
+    ///
+    /// Defaults to `ErrorParameterFormat::Legacy`.
+    #[inline]
+    pub fn error_parameter_format(mut self, error_parameter_format: ErrorParameterFormat) -> Self {
+        self.0.cached.error_parameter_format = error_parameter_format;
+        self
+    }
+
+    /// Returns the builder's configured error parameter format.
+    #[inline]
+    pub fn get_error_parameter_format(&self) -> ErrorParameterFormat {
+        self.0.cached.error_parameter_format
+    }
+
     /// Sets the metric registry used to register client metrics.
     ///
     /// Defaults to no registry.
@@ -561,6 +583,31 @@ pub enum ServiceError {
     /// This is designed for use when proxying a request to another node, commonly of the same service. By preserving
     /// the original error's instance ID, type, etc, the upstream service will be able to process the error properly.
     PropagateToCaller,
+}
+
+/// Specifies the format in which the client requests that servers serialize Conjure error parameters.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ErrorParameterFormat {
+    /// No format is requested, and servers will serialize error parameters in the legacy string form.
+    ///
+    /// This is the default behavior.
+    Legacy,
+
+    /// Servers are requested to serialize error parameters as native JSON values rather than the legacy string form.
+    ///
+    /// This sends an `Accept-Conjure-Error-Parameter-Format: JSON` header with each request.
+    Json,
+}
+
+impl ErrorParameterFormat {
+    #[inline]
+    pub(crate) fn header_value(&self) -> Option<HeaderValue> {
+        match self {
+            ErrorParameterFormat::Legacy => None,
+            ErrorParameterFormat::Json => Some(HeaderValue::from_static("JSON")),
+        }
+    }
 }
 
 /// Specifies the manner in which the client decides if a request is idempotent or not.

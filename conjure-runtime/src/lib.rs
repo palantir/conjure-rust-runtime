@@ -200,7 +200,8 @@
 pub use crate::body::*;
 #[doc(inline)]
 pub use crate::builder::{
-    Builder, ClientQos, Idempotency, NodeSelectionStrategy, ServerQos, ServiceError,
+    Builder, ClientQos, ErrorParameterFormat, Idempotency, NodeSelectionStrategy, ServerQos,
+    ServiceError,
 };
 pub use crate::client::*;
 #[doc(inline)]

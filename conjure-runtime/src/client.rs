@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use crate::builder::CachedConfig;
+use crate::service::error_parameter_format::ErrorParameterFormatLayer;
 use crate::service::gzip::{DecodedBody, GzipLayer};
 use crate::service::http_error::HttpErrorLayer;
 use crate::service::map_error::MapErrorLayer;
@@ -61,6 +62,7 @@ type BaseLayer = layers!(
     ProxyLayer,
     TracePropagationLayer,
     UserAgentLayer,
+    ErrorParameterFormatLayer,
     GzipLayer,
     MapErrorLayer,
 );
@@ -90,6 +92,7 @@ impl ClientState {
             .layer(ProxyLayer::new(builder)?)
             .layer(TracePropagationLayer)
             .layer(UserAgentLayer::new(builder))
+            .layer(ErrorParameterFormatLayer::new(builder))
             .layer(GzipLayer)
             .layer(MapErrorLayer)
             .service(client);
