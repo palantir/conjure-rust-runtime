@@ -21,6 +21,7 @@ use crate::{Client, HostMetricsRegistry, UserAgent};
 use arc_swap::ArcSwap;
 use conjure_error::Error;
 use conjure_http::client::ConjureRuntime;
+use http::HeaderValue;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
@@ -601,10 +602,10 @@ pub enum ErrorParameterFormat {
 
 impl ErrorParameterFormat {
     #[inline]
-    pub(crate) fn header_value(&self) -> Option<&'static str> {
+    pub(crate) fn header_value(&self) -> Option<HeaderValue> {
         match self {
             ErrorParameterFormat::Legacy => None,
-            ErrorParameterFormat::Json => Some("JSON"),
+            ErrorParameterFormat::Json => Some(HeaderValue::from_static("JSON")),
         }
     }
 }

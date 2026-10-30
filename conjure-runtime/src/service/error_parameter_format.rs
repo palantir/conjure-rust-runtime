@@ -18,7 +18,7 @@ use http::{HeaderName, HeaderValue, Request};
 use std::future::Future;
 
 /// The request header used to negotiate the serialization format of Conjure error parameters.
-pub static ACCEPT_CONJURE_ERROR_PARAMETER_FORMAT: HeaderName =
+pub const ACCEPT_CONJURE_ERROR_PARAMETER_FORMAT: HeaderName =
     HeaderName::from_static("accept-conjure-error-parameter-format");
 
 /// A layer which injects an `Accept-Conjure-Error-Parameter-Format` header into requests.
@@ -32,10 +32,7 @@ pub struct ErrorParameterFormatLayer {
 impl ErrorParameterFormatLayer {
     pub fn new(builder: &Builder<builder::Complete>) -> ErrorParameterFormatLayer {
         ErrorParameterFormatLayer {
-            value: builder
-                .get_error_parameter_format()
-                .header_value()
-                .map(HeaderValue::from_static),
+            value: builder.get_error_parameter_format().header_value(),
         }
     }
 }
@@ -70,7 +67,7 @@ where
         if let Some(value) = &self.value {
             if let Entry::Vacant(e) = req
                 .headers_mut()
-                .entry(ACCEPT_CONJURE_ERROR_PARAMETER_FORMAT.clone())
+                .entry(ACCEPT_CONJURE_ERROR_PARAMETER_FORMAT)
             {
                 e.insert(value.clone());
             }

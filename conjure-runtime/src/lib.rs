@@ -209,7 +209,6 @@ pub use crate::client_factory::ClientFactory;
 pub use crate::host_metrics::*;
 #[doc(inline)]
 pub use crate::per_host_clients::{Host, PerHostClients};
-pub use crate::service::error_parameter_format::ACCEPT_CONJURE_ERROR_PARAMETER_FORMAT;
 pub use crate::user_agent::*;
 
 #[cfg(not(target_arch = "wasm32"))]
