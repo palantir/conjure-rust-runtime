@@ -13,6 +13,7 @@
 // limitations under the License.
 use crate::service::proxy::connector::ProxyConnectorLayer;
 use crate::service::proxy::ProxyConnectorService;
+use crate::service::raw::provider;
 use crate::service::raw::RawRequestBody;
 use crate::service::timeout::{TimeoutLayer, TimeoutService};
 use crate::service::tls_metrics::{TlsMetricsLayer, TlsMetricsService};
@@ -30,7 +31,7 @@ use hyper_util::client::legacy::{self, Client};
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use pin_project::pin_project;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::crypto::{self, ring, CryptoProvider};
+use rustls::crypto::{self, CryptoProvider};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use rustls_pemfile::Item;
@@ -67,7 +68,7 @@ impl RawClient {
         let connector = TimeoutLayer::new(builder).layer(connector);
         let connector = ProxyConnectorLayer::new(builder)?.layer(connector);
 
-        let provider = Arc::new(ring::default_provider());
+        let provider = Arc::new(provider::provider());
 
         let builder_stage = ClientConfig::builder_with_provider(provider.clone())
             .with_safe_default_protocol_versions()

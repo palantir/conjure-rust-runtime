@@ -903,7 +903,7 @@ async fn pinned_certs_rejects_correct_cert_with_wrong_key() {
     // (byte-comparison of the leaf) passes.
     use openssl::pkey::PKey;
     use openssl::rsa::Rsa;
-    use rustls::crypto::ring::sign::any_supported_type;
+    use rustls::crypto::aws_lc_rs::sign::any_supported_type;
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
     use rustls::server::{ClientHello, ResolvesServerCert, ServerConfig};
@@ -936,12 +936,13 @@ async fn pinned_certs_rejects_correct_cert_with_wrong_key() {
         }
     }
 
-    let server_config =
-        ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-            .with_safe_default_protocol_versions()
-            .unwrap()
-            .with_no_client_auth()
-            .with_cert_resolver(Arc::new(LyingResolver(certified)));
+    let server_config = ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::aws_lc_rs::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_cert_resolver(Arc::new(LyingResolver(certified)));
     let acceptor: TlsAcceptor = Arc::new(server_config).into();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
